@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:44:55 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (N+1 방식 강제 스캔 - 변수 수정)
+수정일시: 2026-05-20 13:49:03 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (조기 종료 및 최적화 매칭)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:44:55 KST')
+comment('수정일시: 2026-05-20 13:49:03 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -67,104 +67,76 @@ showNotification("헬스 응답: {@healthText}", "iPhone Daily Backup", false)
 @pingExistsText = "{@pingExistsValue}"
 showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup", false)
 
-@previousDate = adjustDate(@selectedDate, "Subtract", qty(1, "days"))
-@prevDay: text
-@prevDay = formatDate(@previousDate, "Custom", "yyyyMMdd")
-
-@scanLimit = 500
-@matchedPhotoCount: number
-@matchedPhotoCount = 0
-@photoUploadSentCount: number
+@matchedCount: number
+@matchedCount = 0
+@uploadCount: number
 @photoUploadSentCount = 0
-@photoStop: bool
-@photoStop = false
+@isStopped: bool
+@isStopped = false
 
 @debugLog: text
-@debugLog = "Target: [{@targetDay}]\n"
+@debugLog = "Target: {@targetDay}\n"
 
-@latestItems = getLatestPhotos(@scanLimit, true)
+// 사진 처리
+@latestItems = getLatestPhotos(500, true)
 @totalCount = count(@latestItems)
 
 repeat i for @totalCount {
-    if !@photoStop {
-        @photoItem = getListItem(@latestItems, @i)
+    if !@isStopped {
+        @item = getListItem(@latestItems, @i)
 
-        @pTakenVal = getImageDetail(@photoItem, "Date Taken")
-        @pTakenDay: text
-        @pTakenDay = formatDate(@pTakenVal, "Custom", "yyyyMMdd")
+        @pTakenVal = getImageDetail(@item, "Date Taken")
+        @pDate: text
+        @pDate = formatDate(@pTakenVal, "Custom", "yyyyMMdd")
 
-        @pCreatedVal = getImageDetail(@photoItem, "Creation Date")
-        @pCreatedDay: text
-        @pCreatedDay = formatDate(@pCreatedVal, "Custom", "yyyyMMdd")
+        // 정렬 순서상 타겟보다 작아지면(과거로 가면) 즉시 중단
+        @dateNum = getNumbers(@pDate)
+        @targetNum = getNumbers(@targetDay)
+        
+        if @dateNum < @targetNum {
+            @isStopped = true
+        } else {
+            if @pDate == @targetDay {
+                @matchedCount = @matchedCount + 1
+                
+                @pNameVal = getImageDetail(@item, "Name")
+                @pName: text
+                @pName = "{@pNameVal}"
+                
+                @pISOVal = formatDate(@pTakenVal, "ISO 8601")
+                @pISO: text
+                @pISO = getText(@pISOVal)
+                
+                @pSizeVal = getImageDetail(@item, "File Size")
+                @pSize: text
+                @pSize = "{@pSizeVal}"
 
-        @pMatch: bool
-        @pMatch = false
-        if @pTakenDay == @targetDay {
-            @pMatch = true
-        }
-        if @pCreatedDay == @targetDay {
-            @pMatch = true
-        }
+                @pCheckRes = jsonRequest(@checkURL, "POST", {
+                    "original_name": "{@pName}",
+                    "created_at": "{@pISO}",
+                    "file_size": "{@pSize}"
+                })
+                @pCheckDict = getDictionary(@pCheckRes)
+                @pExists = getValue(@pCheckDict, "exists")
+                @pExistsText: text
+                @pExistsText = "{@pExists}"
 
-        if @i <= 10 {
-            @debugLog = "{@debugLog}#{@i}: T=[{@pTakenDay}] Match=[{@pMatch}]\n"
-        }
-
-        if @pMatch {
-            @matchedPhotoCount = @matchedPhotoCount + 1
-
-            @pNameVal = getImageDetail(@photoItem, "Name")
-            @pName: text
-            @pName = "{@pNameVal}"
-
-            @pTakenISOVal = formatDate(@pTakenVal, "ISO 8601")
-            @pMetadataISO: text
-            @pMetadataISO = getText(@pTakenISOVal)
-            if @pTakenDay != @targetDay {
-                @pCreatedISOVal = formatDate(@pCreatedVal, "ISO 8601")
-                @pMetadataISO = getText(@pCreatedISOVal)
-            }
-
-            @pSizeVal = getImageDetail(@photoItem, "File Size")
-            @pSize: text
-            @pSize = "{@pSizeVal}"
-
-            @pCheckRes = jsonRequest(@checkURL, "POST", {
-                "original_name": "{@pName}",
-                "created_at": "{@pMetadataISO}",
-                "file_size": "{@pSize}"
-            })
-            @pCheckDict = getDictionary(@pCheckRes)
-            @pExistsVal = getValue(@pCheckDict, "exists")
-            @pExistsText: text
-            @pExistsText = "{@pExistsVal}"
-
-            if @pExistsText == "false" {
-                @pUploadBody = {}
-                @pUploadBody = setValue(@pUploadBody, "file", @photoItem)
-                @pUploadBody = setValue(@pUploadBody, "original_name", @pName)
-                @pUploadBody = setValue(@pUploadBody, "created_at", @pMetadataISO)
-                @pUploadBody = setValue(@pUploadBody, "file_size", @pSize)
-                dynamicFormRequest(@uploadURL, "POST", @pUploadBody)
-                @photoUploadSentCount = @photoUploadSentCount + 1
-            }
-        }
-
-        @pPrevMatch: bool
-        @pPrevMatch = false
-        if @pTakenDay == @prevDay {
-            @pPrevMatch = true
-        }
-        if @pCreatedDay == @prevDay {
-            @pPrevMatch = true
-        }
-
-        if @matchedPhotoCount > 0 {
-            if @pPrevMatch {
-                @photoStop = true
+                if @pExistsText == "false" {
+                    @pUploadBody = {}
+                    @pUploadBody = setValue(@pUploadBody, "file", @item)
+                    @pUploadBody = setValue(@pUploadBody, "original_name", @pName)
+                    @pUploadBody = setValue(@pUploadBody, "created_at", @pISO)
+                    @pUploadBody = setValue(@pUploadBody, "file_size", @pSize)
+                    dynamicFormRequest(@uploadURL, "POST", @pUploadBody)
+                    @photoUploadSentCount = @photoUploadSentCount + 1
+                }
+                
+                if @matchedCount <= 5 {
+                    @debugLog = "{@debugLog}Match: {@pName} ({@pDate})\n"
+                }
             }
         }
     }
 }
 
-show("{@debugLog}\nFinal: Matched={@matchedPhotoCount}, Uploaded={@photoUploadSentCount}")
+show("{@debugLog}\nFinal: Matched={@matchedCount}, Uploaded={@photoUploadSentCount}\nStopped at older date.")
