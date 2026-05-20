@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:31:19 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (숫자 추출 기반 강제 매칭 - 수정)
+수정일시: 2026-05-20 13:32:58 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (단순화된 숫자 기반 매칭)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:31:19 KST')
+comment('수정일시: 2026-05-20 13:32:58 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -49,13 +49,10 @@ comment('수정일시: 2026-05-20 13:31:19 KST')
 
 @selectedDate = prompt("업로드할 날짜를 선택하세요", "Date")
 
-@targetISO = formatDate(@selectedDate, "ISO 8601")
+// 날짜 포맷팅 (yyyyMMdd)
+@targetDayRaw = formatDate(@selectedDate, "Custom", "yyyyMMdd")
 @targetDay: text
-@targetDay = replaceText("[^0-9]", "", @targetISO, true, true)
-@targetDayArray = splitText(@targetDay, "")
-@targetDay8 = getListItems(@targetDayArray, 1, 8)
-@targetFinal: text
-@targetFinal = joinText(@targetDay8, "")
+@targetDay = getText(@targetDayRaw)
 
 @healthResponse = downloadURL(@healthURL)
 @healthText: text
@@ -74,13 +71,9 @@ showNotification("헬스 응답: {@healthText}", "iPhone Daily Backup", false)
 showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup", false)
 
 @previousDate = adjustDate(@selectedDate, "Subtract", qty(1, "days"))
-@prevISO = formatDate(@previousDate, "ISO 8601")
+@prevDayRaw = formatDate(@previousDate, "Custom", "yyyyMMdd")
 @prevDay: text
-@prevDay = replaceText("[^0-9]", "", @prevISO, true, true)
-@prevDayArray = splitText(@prevDay, "")
-@prevDay8 = getListItems(@prevDayArray, 1, 8)
-@prevFinal: text
-@prevFinal = joinText(@prevDay8, "")
+@prevDay = getText(@prevDayRaw)
 
 @scanCount = 500
 
@@ -96,34 +89,28 @@ showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup
 @photoStop = false
 
 @debugLog: text
-@debugLog = "Target: [{@targetFinal}]\n"
+@debugLog = "Target: [{@targetDay}]\n"
 
 repeat i for @photoCount {
     if !@photoStop {
         @photoItem = getListItem(@latestPhotos, @i)
 
         @pTakenVal = getImageDetail(@photoItem, "Date Taken")
-        @pTakenISO = formatDate(@pTakenVal, "ISO 8601")
-        @pTakenNum = replaceText("[^0-9]", "", @pTakenISO, true, true)
-        @pTakenArray = splitText(@pTakenNum, "")
-        @pTaken8 = getListItems(@pTakenArray, 1, 8)
+        @pTakenDayRaw = formatDate(@pTakenVal, "Custom", "yyyyMMdd")
         @pTakenDay: text
-        @pTakenDay = joinText(@pTaken8, "")
+        @pTakenDay = getText(@pTakenDayRaw)
 
         @pCreatedVal = getImageDetail(@photoItem, "Creation Date")
-        @pCreatedISO = formatDate(@pCreatedVal, "ISO 8601")
-        @pCreatedNum = replaceText("[^0-9]", "", @pCreatedISO, true, true)
-        @pCreatedArray = splitText(@pCreatedNum, "")
-        @pCreated8 = getListItems(@pCreatedArray, 1, 8)
+        @pCreatedDayRaw = formatDate(@pCreatedVal, "Custom", "yyyyMMdd")
         @pCreatedDay: text
-        @pCreatedDay = joinText(@pCreated8, "")
+        @pCreatedDay = getText(@pCreatedDayRaw)
 
         @pMatch: bool
         @pMatch = false
-        if @pTakenDay == @targetFinal {
+        if @pTakenDay == @targetDay {
             @pMatch = true
         }
-        if @pCreatedDay == @targetFinal {
+        if @pCreatedDay == @targetDay {
             @pMatch = true
         }
 
@@ -142,11 +129,12 @@ repeat i for @photoCount {
             @pName: text
             @pName = "{@pNameVal}"
 
+            @pTakenISOVal = formatDate(@pTakenVal, "ISO 8601")
             @pMetadataISO: text
-            @pMetadataISO = getText(@pTakenISO)
-            if @pTakenDay != @targetFinal {
-                @pCreatedISOText = formatDate(@pCreatedVal, "ISO 8601")
-                @pMetadataISO = getText(@pCreatedISOText)
+            @pMetadataISO = getText(@pTakenISOVal)
+            if @pTakenDay != @targetDay {
+                @pCreatedISOVal = formatDate(@pCreatedVal, "ISO 8601")
+                @pMetadataISO = getText(@pCreatedISOVal)
             }
 
             @pSizeVal = getImageDetail(@photoItem, "File Size")
@@ -176,10 +164,10 @@ repeat i for @photoCount {
 
         @pPrevMatch: bool
         @pPrevMatch = false
-        if @pTakenDay == @prevFinal {
+        if @pTakenDay == @prevDay {
             @pPrevMatch = true
         }
-        if @pCreatedDay == @prevFinal {
+        if @pCreatedDay == @prevDay {
             @pPrevMatch = true
         }
 
@@ -207,27 +195,21 @@ repeat j for @videoCount {
         @vItem = getListItem(@latestVideos, @j)
 
         @vTakenVal = getImageDetail(@vItem, "Date Taken")
-        @vTakenISO = formatDate(@vTakenVal, "ISO 8601")
-        @vTakenNum = replaceText("[^0-9]", "", @vTakenISO, true, true)
-        @vTakenArray = splitText(@vTakenNum, "")
-        @vTaken8 = getListItems(@vTakenArray, 1, 8)
+        @vTakenDayRaw = formatDate(@vTakenVal, "Custom", "yyyyMMdd")
         @vTakenDay: text
-        @vTakenDay = joinText(@vTaken8, "")
+        @vTakenDay = getText(@vTakenDayRaw)
 
         @vCreatedVal = getImageDetail(@vItem, "Creation Date")
-        @vCreatedISO = formatDate(@vCreatedVal, "ISO 8601")
-        @vCreatedNum = replaceText("[^0-9]", "", @vCreatedISO, true, true)
-        @vCreatedArray = splitText(@vCreatedNum, "")
-        @vCreated8 = getListItems(@vCreatedArray, 1, 8)
+        @vCreatedDayRaw = formatDate(@vCreatedVal, "Custom", "yyyyMMdd")
         @vCreatedDay: text
-        @vCreatedDay = joinText(@vCreated8, "")
+        @vCreatedDay = getText(@vCreatedDayRaw)
 
         @vMatch: bool
         @vMatch = false
-        if @vTakenDay == @targetFinal {
+        if @vTakenDay == @targetDay {
             @vMatch = true
         }
-        if @vCreatedDay == @targetFinal {
+        if @vCreatedDay == @targetDay {
             @vMatch = true
         }
 
@@ -246,11 +228,12 @@ repeat j for @videoCount {
             @vName: text
             @vName = "{@vNameVal}"
 
+            @vTakenISOVal = formatDate(@vTakenVal, "ISO 8601")
             @vMetadataISO: text
-            @vMetadataISO = getText(@vTakenISO)
-            if @vTakenDay != @targetFinal {
-                @vCreatedISOText = formatDate(@vCreatedVal, "ISO 8601")
-                @vMetadataISO = getText(@vCreatedISOText)
+            @vMetadataISO = getText(@vTakenISOVal)
+            if @vTakenDay != @targetDay {
+                @vCreatedISOVal = formatDate(@vCreatedVal, "ISO 8601")
+                @vMetadataISO = getText(@vCreatedISOVal)
             }
 
             @vSizeVal = getImageDetail(@vItem, "File Size")
@@ -280,10 +263,10 @@ repeat j for @videoCount {
 
         @vPrevMatch: bool
         @vPrevMatch = false
-        if @vTakenDay == @prevFinal {
+        if @vTakenDay == @prevDay {
             @vPrevMatch = true
         }
-        if @vCreatedDay == @prevFinal {
+        if @vCreatedDay == @prevDay {
             @vPrevMatch = true
         }
 
@@ -295,4 +278,4 @@ repeat j for @videoCount {
     }
 }
 
-show("{@debugLog}\nResult:\nselected={@targetFinal}\nphotos_matched={@matchedPhotoCount}\nphotos_uploaded={@photoUploadSentCount}\nvideos_matched={@matchedVideoCount}\nvideos_uploaded={@videoUploadSentCount}")
+show("{@debugLog}\nResult:\nselected={@targetDay}\nphotos_matched={@matchedPhotoCount}\nphotos_uploaded={@photoUploadSentCount}\nvideos_matched={@matchedVideoCount}\nvideos_uploaded={@videoUploadSentCount}")
