@@ -7,5 +7,9 @@
 - `.cherri` 수정 시 소스 상단 주석과 단축어 내부 상단 `Comment` 액션의 수정일시를 현재 시각으로 갱신한다.
 - 수정 후 `--skip-sign`으로 컴파일 확인하고, 최종 산출물은 signed `.shortcut`으로 빌드한다.
 - 사용자에게 전달하는 파일은 unsigned가 아닌 signed `.shortcut`만 사용한다.
-- **커밋 컨벤션**: 커밋 메시지는 Commitizen (cz) 스타일의 영문을 사용한다. (예: `feat: add backup feature`, `fix: resolve crash in sync`)
-- **작업 완료 후**: 모든 작업이 완료되면 반드시 커밋을 수행한다.
+
+## Git & Workflow Rules
+
+- **Pre-commit Hook**: 모든 커밋 전 Go 빌드와 Cherri 컴파일 성공 여부를 자동으로 검증한다.
+- **Commit Convention**: 커밋 메시지는 Commitizen (cz) 스타일의 영문을 사용한다. (예: `feat: add backup feature`, `fix: resolve crash in sync`)
+- **Finalization**: 작업이 완료되면 반드시 커밋을 수행하여 상태를 보존한다.
