@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 14:03:27 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (멀티파트 규격 강화)
+수정일시: 2026-05-20 14:07:17 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (멀티파트 규격 준수 버전 - 최종)
 */
 
 #include 'actions/photos'
@@ -15,25 +15,16 @@
 #define color blue
 #define mac false
 
-action 'downloadurl' dynamicJSONRequest(
-    text url: 'WFURL',
-    HTTPMethod ?method: 'WFHTTPMethod',
-    variable body: 'WFJSONValues',
-    dictionary! ?headers: 'WFHTTPHeaders'
-) {
-    "WFHTTPBodyType": "JSON"
-}
-
+// Form 데이터 전송을 위한 전용 액션 정의
 action 'downloadurl' dynamicFormRequest(
     text url: 'WFURL',
     HTTPMethod ?method: 'WFHTTPMethod',
-    variable body: 'WFFormValues',
-    dictionary! ?headers: 'WFHTTPHeaders'
+    variable body: 'WFFormValues'
 ) {
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 14:03:27 KST')
+comment('수정일시: 2026-05-20 14:07:17 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -79,37 +70,37 @@ repeat i for @totalCount {
         @pSize: text
         @pSize = "{@pSizeVal}"
 
-        // 중복 체크
+        // 1. 중복 체크
         @pCheckRes = jsonRequest(@checkURL, "POST", {
             "original_name": "{@pName}",
             "created_at": "{@pISO}",
             "file_size": "{@pSize}"
         })
         @pCheckDict = getDictionary(@pCheckRes)
-        @pExVal = getValue(@pCheckDict, "exists")
+        @pExValue = getValue(@pCheckDict, "exists")
         @pExStr: text
-        @pExStr = "{@pExVal}"
+        @pExStr = "{@pExValue}"
 
-        @shouldUpload: bool
-        @shouldUpload = false
-        if @pExStr == "false" { @shouldUpload = true }
-        if @pExStr == "nein" { @shouldUpload = true }
-        if @pExStr == "No" { @shouldUpload = true }
+        @isExists: bool
+        @isExists = true
+        if @pExStr == "false" { @isExists = false }
+        if @pExStr == "nein" { @isExists = false }
+        if @pExStr == "No" { @isExists = false }
         
-        if @shouldUpload {
-            @pUploadBody = {}
-            @pUploadBody = setValue(@pUploadBody, "file", @item)
-            @pUploadBody = setValue(@pUploadBody, "original_name", @pName)
-            @pUploadBody = setValue(@pUploadBody, "created_at", @pISO)
-            @pUploadBody = setValue(@pUploadBody, "file_size", @pSize)
+        if !@isExists {
+            // 2. 업로드 (WFHTTPBodyType: Form 을 강제하는 dynamicFormRequest 사용)
+            @uBody = {}
+            @uBody = setValue(@uBody, "file", @item)
+            @uBody = setValue(@uBody, "original_name", @pName)
+            @uBody = setValue(@uBody, "created_at", @pISO)
+            @uBody = setValue(@uBody, "file_size", @pSize)
             
-            // 전송 시 헤더는 단축어가 자동 생성하게 둠
-            @uRes = dynamicFormRequest(@uploadURL, "POST", @pUploadBody)
+            @uRes = dynamicFormRequest(@uploadURL, "POST", @uBody)
+            
             @uDict = getDictionary(@uRes)
-            
-            @uOK = getValue(@uDict, "ok")
+            @uOKVal = getValue(@uDict, "ok")
             @uOKStr: text
-            @uOKStr = "{@uOK}"
+            @uOKStr = "{@uOKVal}"
             
             if @uOKStr == "true" {
                 @uploadedCount = @uploadedCount + 1
