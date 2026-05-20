@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:37:37 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (getLatestPhotos 기반 날짜 매칭 보정)
+수정일시: 2026-05-20 13:40:52 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (루프 실행 및 로그 가시성 강제 - 수정)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:37:37 KST')
+comment('수정일시: 2026-05-20 13:40:52 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -48,8 +48,6 @@ comment('수정일시: 2026-05-20 13:37:37 KST')
 @healthURL = "{@serverBase}/health"
 
 @selectedDate = prompt("업로드할 날짜를 선택하세요", "Date")
-
-// 비교용 날짜 포맷 (yyyyMMdd)
 @targetDay: text
 @targetDay = formatDate(@selectedDate, "Custom", "yyyyMMdd")
 
@@ -75,9 +73,13 @@ showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup
 
 @scanCount = 500
 
-// 최신 500장 가져오기
+// 사진 가져오기 및 카운트 즉시 확인
 @latestPhotos = getLatestPhotos(@scanCount, true)
 @photoCount = count(@latestPhotos)
+
+@debugLog: text
+@debugLog = "Target: [{@targetDay}]\nPhotos Scanned: {@photoCount}\n"
+
 @photoSeenSelectedDay: bool
 @photoSeenSelectedDay = false
 @matchedPhotoCount: number
@@ -86,9 +88,6 @@ showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup
 @photoUploadSentCount = 0
 @photoStop: bool
 @photoStop = false
-
-@debugLog: text
-@debugLog = "Target: [{@targetDay}]\n"
 
 repeat i for @photoCount {
     if !@photoStop {
@@ -111,8 +110,9 @@ repeat i for @photoCount {
             @pMatch = true
         }
 
-        if @i <= 3 {
-            @debugLog = "{@debugLog}P{@i}: T=[{@pTakenDay}] C=[{@pCreatedDay}] M={@pMatch}\n"
+        // 루프가 도는지 강제로 로그에 기록 (처음 5개)
+        if @i <= 5 {
+            @debugLog = "{@debugLog}P{@i}: T=[{@pTakenDay}] C=[{@pCreatedDay}] Match=[{@pMatch}]\n"
         }
 
         if @pMatch {
@@ -144,9 +144,9 @@ repeat i for @photoCount {
                 "file_size": "{@pSize}"
             })
             @pCheckDict = getDictionary(@pCheckRes)
-            @pExistsVal = getValue(@pCheckDict, "exists")
+            @pExistsValue = getValue(@pCheckDict, "exists")
             @pExistsText: text
-            @pExistsText = "{@pExistsVal}"
+            @pExistsText = "{@pExistsValue}"
 
             if @pExistsText == "false" {
                 @pUploadBody = {}
@@ -176,9 +176,11 @@ repeat i for @photoCount {
     }
 }
 
-// 비디오 스캔
+// 비디오 스캔 및 카운트
 @latestVideos = getLatestVideos(@scanCount)
 @videoCount = count(@latestVideos)
+@debugLog = "{@debugLog}Videos Scanned: {@videoCount}\n"
+
 @videoSeenSelectedDay: bool
 @videoSeenSelectedDay = false
 @matchedVideoCount: number
@@ -209,8 +211,8 @@ repeat j for @videoCount {
             @vMatch = true
         }
 
-        if @j <= 3 {
-            @debugLog = "{@debugLog}V{@j}: T=[{@vTakenDay}] C=[{@vCreatedDay}] M={@vMatch}\n"
+        if @j <= 5 {
+            @debugLog = "{@debugLog}V{@j}: T=[{@vTakenDay}] C=[{@vCreatedDay}] Match=[{@vMatch}]\n"
         }
 
         if @vMatch {
@@ -242,9 +244,9 @@ repeat j for @videoCount {
                 "file_size": "{@vSize}"
             })
             @vCheckDict = getDictionary(@vCheckRes)
-            @vExistsVal = getValue(@vCheckDict, "exists")
+            @vExistsValue = getValue(@vCheckDict, "exists")
             @vExistsText: text
-            @vExistsText = "{@vExistsVal}"
+            @vExistsText = "{@vExistsValue}"
 
             if @vExistsText == "false" {
                 @vUploadBody = {}
@@ -274,4 +276,5 @@ repeat j for @videoCount {
     }
 }
 
-show("{@debugLog}\nResult:\nselected={@targetDay}\nphotos_matched={@matchedPhotoCount}\nphotos_uploaded={@photoUploadSentCount}\nvideos_matched={@matchedVideoCount}\nvideos_uploaded={@videoUploadSentCount}")
+// 결과 강제 표시 (showResult -> show 로 수정)
+show("{@debugLog}\nFinal Result:\nSelected: {@targetDay}\nPhotos Matched: {@matchedPhotoCount}\nVideos Matched: {@matchedVideoCount}")
