@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:51:21 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (변수 참조 및 매칭 최종 수정)
+수정일시: 2026-05-20 13:54:33 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (업로드 실패 원인 분석 모드)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:51:21 KST')
+comment('수정일시: 2026-05-20 13:54:33 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -51,27 +51,14 @@ comment('수정일시: 2026-05-20 13:51:21 KST')
 @targetDay: text
 @targetDay = formatDate(@selectedDate, "Custom", "yyyy-MM-dd")
 
-@healthResponse = downloadURL(@healthURL)
-@healthText: text
-@healthText = getText(@healthResponse)
-showNotification("헬스 응답: {@healthText}", "iPhone Daily Backup", false)
-
-@pingResponse = jsonRequest(@checkURL, "POST", {
-    "original_name": "__ping__",
-    "created_at": "2000-01-01T00:00:00+09:00",
-    "file_size": 0
-})
-@pingDict = getDictionary(@pingResponse)
-@pingExistsValue = getValue(@pingDict, "exists")
-@pingExistsStr: text
-@pingExistsStr = "{@pingExistsValue}"
-showNotification("서버 응답 확인: {@pingExistsStr}", "iPhone Daily Backup", false)
-
 @scanCount = 100
 @matchedCount: number
 @matchedCount = 0
 @uploadedCount: number
 @uploadedCount = 0
+
+@debugInfo: text
+@debugInfo = ""
 
 @latestItems = getLatestPhotos(@scanCount, true)
 @totalCount = count(@latestItems)
@@ -98,6 +85,7 @@ repeat i for @totalCount {
         @pSize: text
         @pSize = "{@pSizeVal}"
 
+        // 중복 체크 API 호출 및 결과 기록
         @pCheckRes = jsonRequest(@checkURL, "POST", {
             "original_name": "{@pName}",
             "created_at": "{@pISO}",
@@ -108,16 +96,30 @@ repeat i for @totalCount {
         @pExStr: text
         @pExStr = "{@pExValue}"
 
+        if @matchedCount <= 2 {
+            @debugInfo = "{@debugInfo}Photo: {@pName}\nCheck Result: [{@pExStr}]\n"
+        }
+
         if @pExStr == "false" {
             @pUploadBody = {}
             @pUploadBody = setValue(@pUploadBody, "file", @item)
             @pUploadBody = setValue(@pUploadBody, "original_name", @pName)
             @pUploadBody = setValue(@pUploadBody, "created_at", @pISO)
             @pUploadBody = setValue(@pUploadBody, "file_size", @pSize)
-            dynamicFormRequest(@uploadURL, "POST", @pUploadBody)
-            @uploadedCount = @uploadedCount + 1
+            
+            @uRes = dynamicFormRequest(@uploadURL, "POST", @pUploadBody)
+            @uDict = getDictionary(@uRes)
+            @uOK = getValue(@uDict, "ok")
+            @uOKStr: text
+            @uOKStr = "{@uOK}"
+            
+            if @uOKStr == "true" {
+                @uploadedCount = @uploadedCount + 1
+            } else {
+                @debugInfo = "{@debugInfo}Upload Failed: {@pName}\n"
+            }
         }
     }
 }
 
-show("Result: Matched={@matchedCount}, Uploaded={@uploadedCount}")
+show("{@debugInfo}\nFinal Result: Matched={@matchedCount}, Uploaded={@uploadedCount}")
