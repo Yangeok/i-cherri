@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:50:06 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (강제 전수 조사 및 날짜 노출 모드)
+수정일시: 2026-05-20 13:51:21 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (변수 참조 및 매칭 최종 수정)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:50:06 KST')
+comment('수정일시: 2026-05-20 13:51:21 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -48,9 +48,8 @@ comment('수정일시: 2026-05-20 13:50:06 KST')
 @healthURL = "{@serverBase}/health"
 
 @selectedDate = prompt("업로드할 날짜를 선택하세요", "Date")
-@targetDayRaw = formatDate(@selectedDate, "Custom", "yyyy-MM-dd")
 @targetDay: text
-@targetDay = getText(@targetDayRaw)
+@targetDay = formatDate(@selectedDate, "Custom", "yyyy-MM-dd")
 
 @healthResponse = downloadURL(@healthURL)
 @healthText: text
@@ -64,46 +63,26 @@ showNotification("헬스 응답: {@healthText}", "iPhone Daily Backup", false)
 })
 @pingDict = getDictionary(@pingResponse)
 @pingExistsValue = getValue(@pingDict, "exists")
-@pingExistsText: text
-@pingExistsText = "{@pingExistsValue}"
-showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup", false)
+@pingExistsStr: text
+@pingExistsStr = "{@pingExistsValue}"
+showNotification("서버 응답 확인: {@pingExistsStr}", "iPhone Daily Backup", false)
 
-@scanCount = 100 // 전수 조사를 위해 숫자를 좀 줄임
+@scanCount = 100
 @matchedCount: number
 @matchedCount = 0
 @uploadedCount: number
 @uploadedCount = 0
 
-@debugLog: text
-@debugLog = "Selected: [{@targetDay}]\n"
-
 @latestItems = getLatestPhotos(@scanCount, true)
 @totalCount = count(@latestItems)
-@debugLog = "{@debugLog}Total Scanned: {@totalCount}\n"
 
 repeat i for @totalCount {
     @item = getListItem(@latestItems, @i)
 
-    // 날짜 추출 시도 1: Date Taken
     @pTakenVal = getImageDetail(@item, "Date Taken")
-    @pDateRaw = formatDate(@pTakenVal, "Custom", "yyyy-MM-dd")
     @pDate: text
-    @pDate = getText(@pDateRaw)
+    @pDate = formatDate(@pTakenVal, "Custom", "yyyy-MM-dd")
     
-    // 만약 Date Taken이 없으면 Creation Date 시도
-    if @pDate == "" {
-        @pCreatedVal = getImageDetail(@item, "Creation Date")
-        @pDateRaw2 = formatDate(@pCreatedVal, "Custom", "yyyy-MM-dd")
-        @pDate = getText(@pDateRaw2)
-    }
-
-    // 상위 5개는 무조건 로그에 찍기
-    if @i <= 5 {
-        @pNameVal = getImageDetail(@item, "Name")
-        @debugLog = "{@debugLog}#{@i}: [{@pDate}] Name:{@pNameVal}\n"
-    }
-
-    // 매칭 비교
     if @pDate == @targetDay {
         @matchedCount = @matchedCount + 1
         
@@ -114,11 +93,6 @@ repeat i for @totalCount {
         @pISOVal = formatDate(@pTakenVal, "ISO 8601")
         @pISO: text
         @pISO = getText(@pISOVal)
-        if @pISO == "" {
-             @pCreatedVal = getImageDetail(@item, "Creation Date")
-             @pISOVal2 = formatDate(@pCreatedVal, "ISO 8601")
-             @pISO = getText(@pISOVal2)
-        }
         
         @pSizeVal = getImageDetail(@item, "File Size")
         @pSize: text
@@ -130,11 +104,11 @@ repeat i for @totalCount {
             "file_size": "{@pSize}"
         })
         @pCheckDict = getDictionary(@pCheckRes)
-        @pExists = getValue(@pCheckDict, "exists")
-        @pExistsText: text
-        @pExistsText = "{@pExists}"
+        @pExValue = getValue(@pCheckDict, "exists")
+        @pExStr: text
+        @pExStr = "{@pExValue}"
 
-        if @pExistsText == "false" {
+        if @pExStr == "false" {
             @pUploadBody = {}
             @pUploadBody = setValue(@pUploadBody, "file", @item)
             @pUploadBody = setValue(@pUploadBody, "original_name", @pName)
@@ -146,4 +120,4 @@ repeat i for @totalCount {
     }
 }
 
-show("{@debugLog}\nResult: Matched={@matchedCount}, Uploaded={@uploadedCount}")
+show("Result: Matched={@matchedCount}, Uploaded={@uploadedCount}")
