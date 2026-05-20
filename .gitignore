@@ -1,0 +1,29 @@
+# Binary output
+/dist/
+/bin/
+/build/
+iphone-backup-server
+cherri-sync
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Cherri build artifacts
+*.shortcut
+
+# macOS
+.DS_Store
+
+# Go
+vendor/
+
+# Local database
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Temp files
+.tmp/
+com.local.cherri-sync.plist

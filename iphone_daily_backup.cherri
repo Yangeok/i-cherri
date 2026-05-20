@@ -1,0 +1,331 @@
+/*
+수정일시: 2026-05-20 12:54:19 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 단축어
+*/
+
+#include 'actions/photos'
+#include 'actions/images'
+#include 'actions/calendar'
+#include 'actions/web'
+#include 'actions/scripting'
+#include 'actions/text'
+
+#define name iPhone Daily Backup
+#define glyph folder
+#define color blue
+#define mac false
+
+action 'downloadurl' dynamicJSONRequest(
+    text url: 'WFURL',
+    HTTPMethod ?method: 'WFHTTPMethod',
+    variable body: 'WFJSONValues',
+    dictionary! ?headers: 'WFHTTPHeaders'
+) {
+    "WFHTTPBodyType": "JSON"
+}
+
+action 'downloadurl' dynamicFormRequest(
+    text url: 'WFURL',
+    HTTPMethod ?method: 'WFHTTPMethod',
+    variable body: 'WFFormValues',
+    dictionary! ?headers: 'WFHTTPHeaders'
+) {
+    "WFHTTPBodyType": "Form"
+}
+
+comment('수정일시: 2026-05-20 12:54:19 KST')
+
+@serverBase: text
+@serverBase = "http://192.168.0.101:8787"
+
+@checkURL: text
+@checkURL = "{@serverBase}/check"
+
+@uploadURL: text
+@uploadURL = "{@serverBase}/upload"
+
+@healthURL: text
+@healthURL = "{@serverBase}/health"
+
+@selectedDate = prompt("업로드할 날짜를 선택하세요", "Date")
+
+@selectedDay: text
+@selectedDay = formatDate(@selectedDate, "Custom", "yyyy-MM-dd")
+
+@healthResponse = downloadURL(@healthURL)
+@healthText: text
+@healthText = getText(@healthResponse)
+showNotification("헬스 응답: {@healthText}", "iPhone Daily Backup", false)
+
+@pingResponse = jsonRequest(@checkURL, "POST", {
+    "original_name": "__ping__",
+    "created_at": "2000-01-01T00:00:00+09:00",
+    "file_size": 0
+})
+@pingDict = getDictionary(@pingResponse)
+@pingExistsValue = getValue(@pingDict, "exists")
+@pingExistsText: text
+@pingExistsText = "{@pingExistsValue}"
+showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup", false)
+
+@selectedDateISO: text
+@selectedDateISO = formatDate(@selectedDate, "ISO 8601")
+
+@previousDate = adjustDate(@selectedDateISO, "Subtract", qty(1, "days"))
+@previousDateText: text
+@previousDateText = getText(@previousDate)
+
+@previousDay: text
+@previousDay = formatDate(@previousDateText, "Custom", "yyyy-MM-dd")
+
+@scanCount = 500
+
+@latestPhotos = getLatestPhotos(@scanCount, true)
+@photoCount = count(@latestPhotos)
+@photoSeenSelectedDay: bool
+@photoSeenSelectedDay = false
+@matchedPhotoCount: number
+@matchedPhotoCount = 0
+@photoCheckSentCount: number
+@photoCheckSentCount = 0
+@photoUploadSentCount: number
+@photoUploadSentCount = 0
+@firstPhotoTakenDay: text
+@firstPhotoTakenDay = ""
+@firstPhotoCreatedDay: text
+@firstPhotoCreatedDay = ""
+@photoUploadDebugShown: bool
+@photoUploadDebugShown = false
+@photoStop: bool
+@photoStop = false
+
+@firstPhotoItem = getFirstItem(@latestPhotos)
+@firstPhotoTakenValue = getImageDetail(@firstPhotoItem, "Date Taken")
+@firstPhotoTakenText = getText(@firstPhotoTakenValue)
+@firstPhotoTakenDay = formatDate(@firstPhotoTakenText, "Custom", "yyyy-MM-dd")
+@firstPhotoCreatedValue = getImageDetail(@firstPhotoItem, "Creation Date")
+@firstPhotoCreatedText = getText(@firstPhotoCreatedValue)
+@firstPhotoCreatedDay = formatDate(@firstPhotoCreatedText, "Custom", "yyyy-MM-dd")
+showNotification("선택: {@selectedDay} / 첫 사진 taken: {@firstPhotoTakenDay} / created: {@firstPhotoCreatedDay}", "사진 날짜 디버그", false)
+
+repeat i for @photoCount {
+    if !@photoStop {
+        @photoItem = getListItem(@latestPhotos, @i)
+
+        @photoTakenValue = getImageDetail(@photoItem, "Date Taken")
+        @photoTakenAtText: text
+        @photoTakenAtText = getText(@photoTakenValue)
+        @photoTakenDay: text
+        @photoTakenDay = formatDate(@photoTakenAtText, "Custom", "yyyy-MM-dd")
+
+        @photoCreatedValue = getImageDetail(@photoItem, "Creation Date")
+        @photoCreatedAtText: text
+        @photoCreatedAtText = getText(@photoCreatedValue)
+        @photoCreatedDay: text
+        @photoCreatedDay = formatDate(@photoCreatedAtText, "Custom", "yyyy-MM-dd")
+
+        @photoMatchesSelectedDay: bool
+        @photoMatchesSelectedDay = false
+        if @photoTakenDay == @selectedDay {
+            @photoMatchesSelectedDay = true
+        }
+        if @photoCreatedDay == @selectedDay {
+            @photoMatchesSelectedDay = true
+        }
+
+        if @photoMatchesSelectedDay {
+            if !@photoSeenSelectedDay {
+                showNotification("사진 날짜 매칭: taken={@photoTakenDay} / created={@photoCreatedDay}", "사진 매칭 디버그", false)
+            }
+            @photoSeenSelectedDay = true
+            @matchedPhotoCount = @matchedPhotoCount + 1
+
+            @photoNameValue = getImageDetail(@photoItem, "Name")
+            @photoName: text
+            @photoName = "{@photoNameValue}"
+
+            @photoTakenAtISO: text
+            @photoTakenAtISO = formatDate(@photoTakenAtText, "ISO 8601")
+
+            @photoCreatedAtISO: text
+            @photoCreatedAtISO = formatDate(@photoCreatedAtText, "ISO 8601")
+
+            @photoMetadataDateISO: text
+            @photoMetadataDateISO = @photoTakenAtISO
+            if @photoTakenDay != @selectedDay {
+                @photoMetadataDateISO = @photoCreatedAtISO
+            }
+
+            @photoFileSizeValue = getImageDetail(@photoItem, "File Size")
+            @photoFileSize: text
+            @photoFileSize = "{@photoFileSizeValue}"
+
+            @photoCheckResponse = jsonRequest(@checkURL, "POST", {
+                "original_name": "{@photoName}",
+                "created_at": "{@photoMetadataDateISO}",
+                "file_size": "{@photoFileSize}"
+            })
+            @photoCheckSentCount = @photoCheckSentCount + 1
+            @photoCheckDict = getDictionary(@photoCheckResponse)
+            @photoExistsValue = getValue(@photoCheckDict, "exists")
+
+            @photoExistsText: text
+            @photoExistsText = "{@photoExistsValue}"
+
+            if @photoExistsText == "false" {
+                if !@photoUploadDebugShown {
+                    showNotification("사진 업로드 직전: {@photoName}", "사진 업로드 디버그", false)
+                    @photoUploadDebugShown = true
+                }
+                @photoUploadBody = {}
+                @photoUploadBody = setValue(@photoUploadBody, "file", @photoItem)
+                @photoUploadBody = setValue(@photoUploadBody, "original_name", @photoName)
+                @photoUploadBody = setValue(@photoUploadBody, "created_at", @photoMetadataDateISO)
+                @photoUploadBody = setValue(@photoUploadBody, "file_size", @photoFileSize)
+                dynamicFormRequest(@uploadURL, "POST", @photoUploadBody)
+                @photoUploadSentCount = @photoUploadSentCount + 1
+            }
+        }
+
+        @photoMatchesPreviousDay: bool
+        @photoMatchesPreviousDay = false
+        if @photoTakenDay == @previousDay {
+            @photoMatchesPreviousDay = true
+        }
+        if @photoCreatedDay == @previousDay {
+            @photoMatchesPreviousDay = true
+        }
+
+        if @photoSeenSelectedDay {
+            if @photoMatchesPreviousDay {
+                @photoStop = true
+            }
+        }
+    }
+}
+
+@latestVideos = getLatestVideos(@scanCount)
+@videoCount = count(@latestVideos)
+@videoSeenSelectedDay: bool
+@videoSeenSelectedDay = false
+@matchedVideoCount: number
+@matchedVideoCount = 0
+@videoCheckSentCount: number
+@videoCheckSentCount = 0
+@videoUploadSentCount: number
+@videoUploadSentCount = 0
+@firstVideoTakenDay: text
+@firstVideoTakenDay = ""
+@firstVideoCreatedDay: text
+@firstVideoCreatedDay = ""
+@videoUploadDebugShown: bool
+@videoUploadDebugShown = false
+@videoStop: bool
+@videoStop = false
+
+@firstVideoItem = getFirstItem(@latestVideos)
+@firstVideoTakenValue = getImageDetail(@firstVideoItem, "Date Taken")
+@firstVideoTakenText = getText(@firstVideoTakenValue)
+@firstVideoTakenDay = formatDate(@firstVideoTakenText, "Custom", "yyyy-MM-dd")
+@firstVideoCreatedValue = getImageDetail(@firstVideoItem, "Creation Date")
+@firstVideoCreatedText = getText(@firstVideoCreatedValue)
+@firstVideoCreatedDay = formatDate(@firstVideoCreatedText, "Custom", "yyyy-MM-dd")
+showNotification("선택: {@selectedDay} / 첫 영상 taken: {@firstVideoTakenDay} / created: {@firstVideoCreatedDay}", "영상 날짜 디버그", false)
+
+repeat j for @videoCount {
+    if !@videoStop {
+        @videoItem = getListItem(@latestVideos, @j)
+
+        @videoTakenValue = getImageDetail(@videoItem, "Date Taken")
+        @videoTakenAtText: text
+        @videoTakenAtText = getText(@videoTakenValue)
+        @videoTakenDay: text
+        @videoTakenDay = formatDate(@videoTakenAtText, "Custom", "yyyy-MM-dd")
+
+        @videoCreatedValue = getImageDetail(@videoItem, "Creation Date")
+        @videoCreatedAtText: text
+        @videoCreatedAtText = getText(@videoCreatedValue)
+        @videoCreatedDay: text
+        @videoCreatedDay = formatDate(@videoCreatedAtText, "Custom", "yyyy-MM-dd")
+
+        @videoMatchesSelectedDay: bool
+        @videoMatchesSelectedDay = false
+        if @videoTakenDay == @selectedDay {
+            @videoMatchesSelectedDay = true
+        }
+        if @videoCreatedDay == @selectedDay {
+            @videoMatchesSelectedDay = true
+        }
+
+        if @videoMatchesSelectedDay {
+            if !@videoSeenSelectedDay {
+                showNotification("영상 날짜 매칭: taken={@videoTakenDay} / created={@videoCreatedDay}", "영상 매칭 디버그", false)
+            }
+            @videoSeenSelectedDay = true
+            @matchedVideoCount = @matchedVideoCount + 1
+
+            @videoNameValue = getImageDetail(@videoItem, "Name")
+            @videoName: text
+            @videoName = "{@videoNameValue}"
+
+            @videoTakenAtISO: text
+            @videoTakenAtISO = formatDate(@videoTakenAtText, "ISO 8601")
+
+            @videoCreatedAtISO: text
+            @videoCreatedAtISO = formatDate(@videoCreatedAtText, "ISO 8601")
+
+            @videoMetadataDateISO: text
+            @videoMetadataDateISO = @videoTakenAtISO
+            if @videoTakenDay != @selectedDay {
+                @videoMetadataDateISO = @videoCreatedAtISO
+            }
+
+            @videoFileSizeValue = getImageDetail(@videoItem, "File Size")
+            @videoFileSize: text
+            @videoFileSize = "{@videoFileSizeValue}"
+
+            @videoCheckResponse = jsonRequest(@checkURL, "POST", {
+                "original_name": "{@videoName}",
+                "created_at": "{@videoMetadataDateISO}",
+                "file_size": "{@videoFileSize}"
+            })
+            @videoCheckSentCount = @videoCheckSentCount + 1
+            @videoCheckDict = getDictionary(@videoCheckResponse)
+            @videoExistsValue = getValue(@videoCheckDict, "exists")
+
+            @videoExistsText: text
+            @videoExistsText = "{@videoExistsValue}"
+
+            if @videoExistsText == "false" {
+                if !@videoUploadDebugShown {
+                    showNotification("영상 업로드 직전: {@videoName}", "영상 업로드 디버그", false)
+                    @videoUploadDebugShown = true
+                }
+                @videoUploadBody = {}
+                @videoUploadBody = setValue(@videoUploadBody, "file", @videoItem)
+                @videoUploadBody = setValue(@videoUploadBody, "original_name", @videoName)
+                @videoUploadBody = setValue(@videoUploadBody, "created_at", @videoMetadataDateISO)
+                @videoUploadBody = setValue(@videoUploadBody, "file_size", @videoFileSize)
+                dynamicFormRequest(@uploadURL, "POST", @videoUploadBody)
+                @videoUploadSentCount = @videoUploadSentCount + 1
+            }
+        }
+
+        @videoMatchesPreviousDay: bool
+        @videoMatchesPreviousDay = false
+        if @videoTakenDay == @previousDay {
+            @videoMatchesPreviousDay = true
+        }
+        if @videoCreatedDay == @previousDay {
+            @videoMatchesPreviousDay = true
+        }
+
+        if @videoSeenSelectedDay {
+            if @videoMatchesPreviousDay {
+                @videoStop = true
+            }
+        }
+    }
+}
+
+show("selected={@selectedDay}\nfirst_photo_taken={@firstPhotoTakenDay}\nfirst_photo_created={@firstPhotoCreatedDay}\nphotos_scanned={@photoCount}\nphotos_matched={@matchedPhotoCount}\nphotos_checked={@photoCheckSentCount}\nphotos_uploaded={@photoUploadSentCount}\nfirst_video_taken={@firstVideoTakenDay}\nfirst_video_created={@firstVideoCreatedDay}\nvideos_scanned={@videoCount}\nvideos_matched={@matchedVideoCount}\nvideos_checked={@videoCheckSentCount}\nvideos_uploaded={@videoUploadSentCount}")
