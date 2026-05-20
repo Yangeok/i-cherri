@@ -93,9 +93,15 @@ func main() {
 	mux.HandleFunc("/check", app.handleCheck)
 	mux.HandleFunc("/upload", app.handleUpload)
 
+	// 모든 요청을 로깅하는 미들웨어 추가
+	loggingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[REQ] %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+		mux.ServeHTTP(w, r)
+	})
+
 	server := &http.Server{
 		Addr:              defaultAddr,
-		Handler:           mux,
+		Handler:           loggingHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

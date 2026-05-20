@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 14:07:17 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (멀티파트 규격 준수 버전 - 최종)
+수정일시: 2026-05-20 14:14:40 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (아이피 유연화 및 업로드 안정화 - 수정)
 */
 
 #include 'actions/photos'
@@ -15,8 +15,8 @@
 #define color blue
 #define mac false
 
-// Form 데이터 전송을 위한 전용 액션 정의
-action 'downloadurl' dynamicFormRequest(
+// 단축어 전용 액션 재정의
+action 'downloadurl' uploadFile(
     text url: 'WFURL',
     HTTPMethod ?method: 'WFHTTPMethod',
     variable body: 'WFFormValues'
@@ -24,10 +24,11 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 14:07:17 KST')
+comment('수정일시: 2026-05-20 14:14:40 KST')
 
+@serverIP = prompt("맥의 현재 내부 IP 주소를 확인하세요 (예: 192.168.0.x)", "Text", "192.168.0.101")
 @serverBase: text
-@serverBase = "http://192.168.0.101:8787"
+@serverBase = "http://{@serverIP}:8787"
 
 @checkURL: text
 @checkURL = "{@serverBase}/check"
@@ -70,7 +71,7 @@ repeat i for @totalCount {
         @pSize: text
         @pSize = "{@pSizeVal}"
 
-        // 1. 중복 체크
+        // 중복 체크
         @pCheckRes = jsonRequest(@checkURL, "POST", {
             "original_name": "{@pName}",
             "created_at": "{@pISO}",
@@ -81,6 +82,7 @@ repeat i for @totalCount {
         @pExStr: text
         @pExStr = "{@pExValue}"
 
+        // 로케일 독립적 체크
         @isExists: bool
         @isExists = true
         if @pExStr == "false" { @isExists = false }
@@ -88,19 +90,17 @@ repeat i for @totalCount {
         if @pExStr == "No" { @isExists = false }
         
         if !@isExists {
-            // 2. 업로드 (WFHTTPBodyType: Form 을 강제하는 dynamicFormRequest 사용)
             @uBody = {}
             @uBody = setValue(@uBody, "file", @item)
             @uBody = setValue(@uBody, "original_name", @pName)
             @uBody = setValue(@uBody, "created_at", @pISO)
             @uBody = setValue(@uBody, "file_size", @pSize)
             
-            @uRes = dynamicFormRequest(@uploadURL, "POST", @uBody)
-            
+            @uRes = uploadFile(@uploadURL, "POST", @uBody)
             @uDict = getDictionary(@uRes)
-            @uOKVal = getValue(@uDict, "ok")
+            @uOK = getValue(@uDict, "ok")
             @uOKStr: text
-            @uOKStr = "{@uOKVal}"
+            @uOKStr = "{@uOK}"
             
             if @uOKStr == "true" {
                 @uploadedCount = @uploadedCount + 1
@@ -109,4 +109,4 @@ repeat i for @totalCount {
     }
 }
 
-show("Final Result:\nTarget: {@targetDay}\nMatched: {@matchedCount}\nUploaded: {@uploadedCount}")
+show("Final Result:\nSelected: {@targetDay}\nMatched: {@matchedCount}\nUploaded: {@uploadedCount}")
