@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:56:06 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (초강력 가시성 디버그 버전)
+수정일시: 2026-05-20 13:57:40 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (로케일 독립적 불리언 체크 - 변수 수정)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:56:06 KST')
+comment('수정일시: 2026-05-20 13:57:40 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -58,7 +58,7 @@ comment('수정일시: 2026-05-20 13:56:06 KST')
 @uploadedCount = 0
 
 @debugText: text
-@debugText = "!!! DEBUG START 13:56 !!!\n"
+@debugText = "!!! DEBUG START 13:57 !!!\n"
 
 @latestItems = getLatestPhotos(@scanCount, true)
 @totalCount = count(@latestItems)
@@ -93,12 +93,15 @@ repeat i for @totalCount {
         })
         @pCheckDict = getDictionary(@pCheckRes)
         @pExVal = getValue(@pCheckDict, "exists")
+        
         @pExStr: text
         @pExStr = "{@pExVal}"
+        @debugText = "{@debugText}Photo:{@pName} / Exists:{@pExStr}\n"
 
-        @debugText = "{@debugText}Match:{@pName} / Exists:{@pExStr}\n"
-
-        if @pExStr == "false" {
+        // 로케일 독립적 불리언 체크
+        if !@pExVal {
+            @debugText = "{@debugText}-> Entering Upload Block\n"
+            
             @pUploadBody = {}
             @pUploadBody = setValue(@pUploadBody, "file", @item)
             @pUploadBody = setValue(@pUploadBody, "original_name", @pName)
@@ -108,14 +111,12 @@ repeat i for @totalCount {
             @uRes = dynamicFormRequest(@uploadURL, "POST", @pUploadBody)
             @uDict = getDictionary(@uRes)
             @uOKVal = getValue(@uDict, "ok")
-            @uOK: text
-            @uOK = "{@uOKVal}"
             
-            if @uOK == "true" {
+            if @uOKVal {
                 @uploadedCount = @uploadedCount + 1
-                @debugText = "{@debugText}-> Upload Success\n"
+                @debugText = "{@debugText}-> Upload OK\n"
             } else {
-                @debugText = "{@debugText}-> Upload Failed\n"
+                @debugText = "{@debugText}-> Upload FAILED\n"
             }
         }
     }
