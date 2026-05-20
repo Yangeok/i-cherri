@@ -1,0 +1,11 @@
+{
+  "hooksConfig": {
+    "disabled": [
+      "/Users/yangeok/.superset/hooks/gemini-hook.sh",
+      "/Users/yangeok/.superset/hooks/gemini-hook.sh",
+      "/Users/yangeok/.superset/hooks/gemini-hook.sh",
+      "/Users/yangeok/.superset/hooks/gemini-hook.sh",
+      "/Users/yangeok/.superset/hooks/gemini-hook.sh"
+    ]
+  }
+}

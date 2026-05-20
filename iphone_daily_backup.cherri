@@ -1,5 +1,5 @@
 /*
-수정일시: 2026-05-20 14:31:44 KST
+수정일시: 2026-05-20 14:35:26 KST
 설명: Go LAN 서버용 iPhone Daily 증분 백업 (IP 하드코딩 및 표준 전송 - 재수정)
 */
 
@@ -25,7 +25,7 @@ action 'downloadurl' rawFormUpload(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 14:31:44 KST')
+comment('수정일시: 2026-05-20 14:35:26 KST')
 
 // 서버 IP 하드코딩 (프롬프트 제거)
 @serverIP: text
