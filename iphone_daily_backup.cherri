@@ -1,5 +1,5 @@
 /*
-수정일시: 2026-05-20 13:45:00 KST
+수정일시: 2026-05-20 13:24:00 KST
 설명: Go LAN 서버용 iPhone Daily 증분 백업 단축어 (날짜 매칭 트림 처리)
 */
 
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:45:00 KST')
+comment('수정일시: 2026-05-20 13:24:00 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
