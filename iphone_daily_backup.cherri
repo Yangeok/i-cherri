@@ -1,5 +1,5 @@
 /*
-수정일시: 2026-05-20 14:16:54 KST
+수정일시: 2026-05-20 14:18:03 KST
 설명: Go LAN 서버용 iPhone Daily 증분 백업 (아이피 유연화 및 업로드 안정화 - 수정)
 */
 
@@ -24,7 +24,7 @@ action 'downloadurl' uploadFile(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 14:16:54 KST')
+comment('수정일시: 2026-05-20 14:18:03 KST')
 
 @serverIP = prompt("맥의 현재 내부 IP 주소를 확인하세요 (예: 192.168.0.x)", "Text", "192.168.0.101")
 @serverBase: text
