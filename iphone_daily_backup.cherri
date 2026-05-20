@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:32:58 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (단순화된 숫자 기반 매칭)
+수정일시: 2026-05-20 13:37:37 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (getLatestPhotos 기반 날짜 매칭 보정)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:32:58 KST')
+comment('수정일시: 2026-05-20 13:37:37 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -49,10 +49,9 @@ comment('수정일시: 2026-05-20 13:32:58 KST')
 
 @selectedDate = prompt("업로드할 날짜를 선택하세요", "Date")
 
-// 날짜 포맷팅 (yyyyMMdd)
-@targetDayRaw = formatDate(@selectedDate, "Custom", "yyyyMMdd")
+// 비교용 날짜 포맷 (yyyyMMdd)
 @targetDay: text
-@targetDay = getText(@targetDayRaw)
+@targetDay = formatDate(@selectedDate, "Custom", "yyyyMMdd")
 
 @healthResponse = downloadURL(@healthURL)
 @healthText: text
@@ -71,12 +70,12 @@ showNotification("헬스 응답: {@healthText}", "iPhone Daily Backup", false)
 showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup", false)
 
 @previousDate = adjustDate(@selectedDate, "Subtract", qty(1, "days"))
-@prevDayRaw = formatDate(@previousDate, "Custom", "yyyyMMdd")
 @prevDay: text
-@prevDay = getText(@prevDayRaw)
+@prevDay = formatDate(@previousDate, "Custom", "yyyyMMdd")
 
 @scanCount = 500
 
+// 최신 500장 가져오기
 @latestPhotos = getLatestPhotos(@scanCount, true)
 @photoCount = count(@latestPhotos)
 @photoSeenSelectedDay: bool
@@ -96,14 +95,12 @@ repeat i for @photoCount {
         @photoItem = getListItem(@latestPhotos, @i)
 
         @pTakenVal = getImageDetail(@photoItem, "Date Taken")
-        @pTakenDayRaw = formatDate(@pTakenVal, "Custom", "yyyyMMdd")
         @pTakenDay: text
-        @pTakenDay = getText(@pTakenDayRaw)
+        @pTakenDay = formatDate(@pTakenVal, "Custom", "yyyyMMdd")
 
         @pCreatedVal = getImageDetail(@photoItem, "Creation Date")
-        @pCreatedDayRaw = formatDate(@pCreatedVal, "Custom", "yyyyMMdd")
         @pCreatedDay: text
-        @pCreatedDay = getText(@pCreatedDayRaw)
+        @pCreatedDay = formatDate(@pCreatedVal, "Custom", "yyyyMMdd")
 
         @pMatch: bool
         @pMatch = false
@@ -115,7 +112,7 @@ repeat i for @photoCount {
         }
 
         if @i <= 3 {
-            @debugLog = "{@debugLog}P{@i}: T=[{@pTakenDay}] M={@pMatch}\n"
+            @debugLog = "{@debugLog}P{@i}: T=[{@pTakenDay}] C=[{@pCreatedDay}] M={@pMatch}\n"
         }
 
         if @pMatch {
@@ -179,6 +176,7 @@ repeat i for @photoCount {
     }
 }
 
+// 비디오 스캔
 @latestVideos = getLatestVideos(@scanCount)
 @videoCount = count(@latestVideos)
 @videoSeenSelectedDay: bool
@@ -195,14 +193,12 @@ repeat j for @videoCount {
         @vItem = getListItem(@latestVideos, @j)
 
         @vTakenVal = getImageDetail(@vItem, "Date Taken")
-        @vTakenDayRaw = formatDate(@vTakenVal, "Custom", "yyyyMMdd")
         @vTakenDay: text
-        @vTakenDay = getText(@vTakenDayRaw)
+        @vTakenDay = formatDate(@vTakenVal, "Custom", "yyyyMMdd")
 
         @vCreatedVal = getImageDetail(@vItem, "Creation Date")
-        @vCreatedDayRaw = formatDate(@vCreatedVal, "Custom", "yyyyMMdd")
         @vCreatedDay: text
-        @vCreatedDay = getText(@vCreatedDayRaw)
+        @vCreatedDay = formatDate(@vCreatedVal, "Custom", "yyyyMMdd")
 
         @vMatch: bool
         @vMatch = false
@@ -214,7 +210,7 @@ repeat j for @videoCount {
         }
 
         if @j <= 3 {
-            @debugLog = "{@debugLog}V{@j}: T=[{@vTakenDay}] M={@vMatch}\n"
+            @debugLog = "{@debugLog}V{@j}: T=[{@vTakenDay}] C=[{@vCreatedDay}] M={@vMatch}\n"
         }
 
         if @vMatch {
