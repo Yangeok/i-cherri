@@ -12,4 +12,4 @@
 
 - **Pre-commit Hook**: 모든 커밋 전 Go 빌드와 Cherri 컴파일 성공 여부를 자동으로 검증한다.
 - **Commit Convention**: 커밋 메시지는 Commitizen (cz) 스타일의 영문을 사용한다. (예: `feat: add backup feature`, `fix: resolve crash in sync`)
-- **Finalization**: 작업이 완료되면 반드시 커밋을 수행하여 상태를 보존한다.
+- **Finalization**: 작업이 완료되면 반드시 커밋을 수행하여 상태를 보존한다. 답변 시 변경된 컴포넌트(Go 앱, 단축어 등)와 실행해야 할 `make` 명령어를 짧게 안내한다.

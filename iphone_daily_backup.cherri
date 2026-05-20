@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 15:12:17 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (IP 하드코딩 및 표준 전송 - 재수정)
+수정일시: 2026-05-20 21:40:21 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (표준 전송 방식 복구)
 */
 
 #include 'actions/photos'
@@ -15,8 +15,8 @@
 #define color blue
 #define mac false
 
-// 수동으로 Form 전송 규격을 정의하여 Cherri 한계 우회
-action 'downloadurl' rawFormUpload(
+// 멀티파트 규격 준수를 위한 전용 액션 정의
+action 'downloadurl' robustUpload(
     text url: 'WFURL',
     HTTPMethod ?method: 'WFHTTPMethod',
     variable body: 'WFFormValues',
@@ -25,7 +25,7 @@ action 'downloadurl' rawFormUpload(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 15:12:17 KST')
+comment('수정일시: 2026-05-20 21:40:21 KST')
 
 // 서버 IP 하드코딩 (프롬프트 제거)
 @serverIP: text
@@ -100,7 +100,7 @@ repeat i for @totalCount {
             @uBody = setValue(@uBody, "created_at", @pISO)
             @uBody = setValue(@uBody, "file_size", @pSize)
             
-            @uRes = rawFormUpload(@uploadURL, "POST", @uBody, {})
+            @uRes = robustUpload(@uploadURL, "POST", @uBody, {})
             
             @uDict = getDictionary(@uRes)
             @uOKVal = getValue(@uDict, "ok")
