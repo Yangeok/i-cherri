@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 14:18:03 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (아이피 유연화 및 업로드 안정화 - 수정)
+수정일시: 2026-05-20 14:23:03 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (규격 강제 준수 및 입구 로그 강화)
 */
 
 #include 'actions/photos'
@@ -15,18 +15,19 @@
 #define color blue
 #define mac false
 
-// 단축어 전용 액션 재정의
-action 'downloadurl' uploadFile(
+// 멀티파트 규격 준수를 위한 전용 액션 정의
+action 'downloadurl' robustUpload(
     text url: 'WFURL',
     HTTPMethod ?method: 'WFHTTPMethod',
-    variable body: 'WFFormValues'
+    variable body: 'WFFormValues',
+    dictionary! ?headers: 'WFHTTPHeaders'
 ) {
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 14:18:03 KST')
+comment('수정일시: 2026-05-20 14:23:03 KST')
 
-@serverIP = prompt("맥의 현재 내부 IP 주소를 확인하세요 (예: 192.168.0.x)", "Text", "192.168.0.101")
+@serverIP = prompt("맥의 현재 내부 IP 주소를 확인하세요", "Text", "192.168.0.77")
 @serverBase: text
 @serverBase = "http://{@serverIP}:8787"
 
@@ -71,7 +72,7 @@ repeat i for @totalCount {
         @pSize: text
         @pSize = "{@pSizeVal}"
 
-        // 중복 체크
+        // 1. 중복 체크
         @pCheckRes = jsonRequest(@checkURL, "POST", {
             "original_name": "{@pName}",
             "created_at": "{@pISO}",
@@ -82,7 +83,6 @@ repeat i for @totalCount {
         @pExStr: text
         @pExStr = "{@pExValue}"
 
-        // 로케일 독립적 체크
         @isExists: bool
         @isExists = true
         if @pExStr == "false" { @isExists = false }
@@ -90,17 +90,19 @@ repeat i for @totalCount {
         if @pExStr == "No" { @isExists = false }
         
         if !@isExists {
+            // 2. 업로드 (가장 확실한 폼 데이터 규격 사용)
             @uBody = {}
             @uBody = setValue(@uBody, "file", @item)
             @uBody = setValue(@uBody, "original_name", @pName)
             @uBody = setValue(@uBody, "created_at", @pISO)
             @uBody = setValue(@uBody, "file_size", @pSize)
             
-            @uRes = uploadFile(@uploadURL, "POST", @uBody)
+            @uRes = robustUpload(@uploadURL, "POST", @uBody, {})
+            
             @uDict = getDictionary(@uRes)
-            @uOK = getValue(@uDict, "ok")
+            @uOKVal = getValue(@uDict, "ok")
             @uOKStr: text
-            @uOKStr = "{@uOK}"
+            @uOKStr = "{@uOKVal}"
             
             if @uOKStr == "true" {
                 @uploadedCount = @uploadedCount + 1

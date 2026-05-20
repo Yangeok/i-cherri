@@ -166,6 +166,7 @@ func (a *app) handleCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) handleUpload(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[REQ] POST /upload from %s", r.RemoteAddr)
 	if r.Method != http.MethodPost {
 		log.Printf("upload rejected remote=%s method=%s", r.RemoteAddr, r.Method)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
