@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 12:54:19 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 단축어
+수정일시: 2026-05-20 13:30:00 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 단축어 (날짜 매칭 디버그 강화)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 12:54:19 KST')
+comment('수정일시: 2026-05-20 13:30:00 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -99,6 +99,9 @@ showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup
 @photoStop: bool
 @photoStop = false
 
+@debugLog: text
+@debugLog = "Selected: {@selectedDay}\n"
+
 @firstPhotoItem = getFirstItem(@latestPhotos)
 @firstPhotoTakenValue = getImageDetail(@firstPhotoItem, "Date Taken")
 @firstPhotoTakenText = getText(@firstPhotoTakenValue)
@@ -124,6 +127,10 @@ repeat i for @photoCount {
         @photoCreatedDay: text
         @photoCreatedDay = formatDate(@photoCreatedAtText, "Custom", "yyyy-MM-dd")
 
+        if @i <= 5 {
+            @debugLog = "{@debugLog}Item {@i}: taken={@photoTakenDay}, created={@photoCreatedDay}\n"
+        }
+
         @photoMatchesSelectedDay: bool
         @photoMatchesSelectedDay = false
         if @photoTakenDay == @selectedDay {
@@ -135,7 +142,7 @@ repeat i for @photoCount {
 
         if @photoMatchesSelectedDay {
             if !@photoSeenSelectedDay {
-                showNotification("사진 날짜 매칭: taken={@photoTakenDay} / created={@photoCreatedDay}", "사진 매칭 디버그", false)
+                showNotification("사진 날짜 매칭 성공: {@photoTakenDay}", "사진 매칭 성공", false)
             }
             @photoSeenSelectedDay = true
             @matchedPhotoCount = @matchedPhotoCount + 1
@@ -174,7 +181,7 @@ repeat i for @photoCount {
 
             if @photoExistsText == "false" {
                 if !@photoUploadDebugShown {
-                    showNotification("사진 업로드 직전: {@photoName}", "사진 업로드 디버그", false)
+                    showNotification("업로드 시작: {@photoName}", "사진 업로드", false)
                     @photoUploadDebugShown = true
                 }
                 @photoUploadBody = {}
@@ -248,6 +255,10 @@ repeat j for @videoCount {
         @videoCreatedDay: text
         @videoCreatedDay = formatDate(@videoCreatedAtText, "Custom", "yyyy-MM-dd")
 
+        if @j <= 5 {
+            @debugLog = "{@debugLog}Video {@j}: taken={@videoTakenDay}, created={@videoCreatedDay}\n"
+        }
+
         @videoMatchesSelectedDay: bool
         @videoMatchesSelectedDay = false
         if @videoTakenDay == @selectedDay {
@@ -259,7 +270,7 @@ repeat j for @videoCount {
 
         if @videoMatchesSelectedDay {
             if !@videoSeenSelectedDay {
-                showNotification("영상 날짜 매칭: taken={@videoTakenDay} / created={@videoCreatedDay}", "영상 매칭 디버그", false)
+                showNotification("영상 날짜 매칭 성공: {@videoTakenDay}", "영상 매칭 성공", false)
             }
             @videoSeenSelectedDay = true
             @matchedVideoCount = @matchedVideoCount + 1
@@ -298,7 +309,7 @@ repeat j for @videoCount {
 
             if @videoExistsText == "false" {
                 if !@videoUploadDebugShown {
-                    showNotification("영상 업로드 직전: {@videoName}", "영상 업로드 디버그", false)
+                    showNotification("업로드 시작: {@videoName}", "영상 업로드", false)
                     @videoUploadDebugShown = true
                 }
                 @videoUploadBody = {}
@@ -328,4 +339,4 @@ repeat j for @videoCount {
     }
 }
 
-show("selected={@selectedDay}\nfirst_photo_taken={@firstPhotoTakenDay}\nfirst_photo_created={@firstPhotoCreatedDay}\nphotos_scanned={@photoCount}\nphotos_matched={@matchedPhotoCount}\nphotos_checked={@photoCheckSentCount}\nphotos_uploaded={@photoUploadSentCount}\nfirst_video_taken={@firstVideoTakenDay}\nfirst_video_created={@firstVideoCreatedDay}\nvideos_scanned={@videoCount}\nvideos_matched={@matchedVideoCount}\nvideos_checked={@videoCheckSentCount}\nvideos_uploaded={@videoUploadSentCount}")
+show("{@debugLog}\nResult:\nselected={@selectedDay}\nphotos_scanned={@photoCount}\nphotos_matched={@matchedPhotoCount}\nphotos_uploaded={@photoUploadSentCount}\nvideos_scanned={@videoCount}\nvideos_matched={@matchedVideoCount}\nvideos_uploaded={@videoUploadSentCount}")
