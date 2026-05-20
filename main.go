@@ -47,11 +47,15 @@ type uploadResult struct {
 	SHA256       string `json:"sha256"`
 }
 
+var buildTime = "unknown"
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
 	reindexFlag := flag.Bool("reindex", false, "scan backup_dir and rebuild sqlite index")
 	flag.Parse()
+
+	log.Printf("cherri-sync starting (build: %s)", buildTime)
 
 	backupDir, err := resolveBackupDir()
 	if err != nil {
