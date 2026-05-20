@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:40:52 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (루프 실행 및 로그 가시성 강제 - 수정)
+수정일시: 2026-05-20 13:44:55 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (N+1 방식 강제 스캔 - 변수 수정)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:40:52 KST')
+comment('수정일시: 2026-05-20 13:44:55 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -71,17 +71,7 @@ showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup
 @prevDay: text
 @prevDay = formatDate(@previousDate, "Custom", "yyyyMMdd")
 
-@scanCount = 500
-
-// 사진 가져오기 및 카운트 즉시 확인
-@latestPhotos = getLatestPhotos(@scanCount, true)
-@photoCount = count(@latestPhotos)
-
-@debugLog: text
-@debugLog = "Target: [{@targetDay}]\nPhotos Scanned: {@photoCount}\n"
-
-@photoSeenSelectedDay: bool
-@photoSeenSelectedDay = false
+@scanLimit = 500
 @matchedPhotoCount: number
 @matchedPhotoCount = 0
 @photoUploadSentCount: number
@@ -89,9 +79,15 @@ showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup
 @photoStop: bool
 @photoStop = false
 
-repeat i for @photoCount {
+@debugLog: text
+@debugLog = "Target: [{@targetDay}]\n"
+
+@latestItems = getLatestPhotos(@scanLimit, true)
+@totalCount = count(@latestItems)
+
+repeat i for @totalCount {
     if !@photoStop {
-        @photoItem = getListItem(@latestPhotos, @i)
+        @photoItem = getListItem(@latestItems, @i)
 
         @pTakenVal = getImageDetail(@photoItem, "Date Taken")
         @pTakenDay: text
@@ -110,16 +106,11 @@ repeat i for @photoCount {
             @pMatch = true
         }
 
-        // 루프가 도는지 강제로 로그에 기록 (처음 5개)
-        if @i <= 5 {
-            @debugLog = "{@debugLog}P{@i}: T=[{@pTakenDay}] C=[{@pCreatedDay}] Match=[{@pMatch}]\n"
+        if @i <= 10 {
+            @debugLog = "{@debugLog}#{@i}: T=[{@pTakenDay}] Match=[{@pMatch}]\n"
         }
 
         if @pMatch {
-            if !@photoSeenSelectedDay {
-                showNotification("사진 매칭 성공: {@pTakenDay}", "iPhone Daily Backup", false)
-            }
-            @photoSeenSelectedDay = true
             @matchedPhotoCount = @matchedPhotoCount + 1
 
             @pNameVal = getImageDetail(@photoItem, "Name")
@@ -144,9 +135,9 @@ repeat i for @photoCount {
                 "file_size": "{@pSize}"
             })
             @pCheckDict = getDictionary(@pCheckRes)
-            @pExistsValue = getValue(@pCheckDict, "exists")
+            @pExistsVal = getValue(@pCheckDict, "exists")
             @pExistsText: text
-            @pExistsText = "{@pExistsValue}"
+            @pExistsText = "{@pExistsVal}"
 
             if @pExistsText == "false" {
                 @pUploadBody = {}
@@ -168,7 +159,7 @@ repeat i for @photoCount {
             @pPrevMatch = true
         }
 
-        if @photoSeenSelectedDay {
+        if @matchedPhotoCount > 0 {
             if @pPrevMatch {
                 @photoStop = true
             }
@@ -176,105 +167,4 @@ repeat i for @photoCount {
     }
 }
 
-// 비디오 스캔 및 카운트
-@latestVideos = getLatestVideos(@scanCount)
-@videoCount = count(@latestVideos)
-@debugLog = "{@debugLog}Videos Scanned: {@videoCount}\n"
-
-@videoSeenSelectedDay: bool
-@videoSeenSelectedDay = false
-@matchedVideoCount: number
-@matchedVideoCount = 0
-@videoUploadSentCount: number
-@videoUploadSentCount = 0
-@videoStop: bool
-@videoStop = false
-
-repeat j for @videoCount {
-    if !@videoStop {
-        @vItem = getListItem(@latestVideos, @j)
-
-        @vTakenVal = getImageDetail(@vItem, "Date Taken")
-        @vTakenDay: text
-        @vTakenDay = formatDate(@vTakenVal, "Custom", "yyyyMMdd")
-
-        @vCreatedVal = getImageDetail(@vItem, "Creation Date")
-        @vCreatedDay: text
-        @vCreatedDay = formatDate(@vCreatedVal, "Custom", "yyyyMMdd")
-
-        @vMatch: bool
-        @vMatch = false
-        if @vTakenDay == @targetDay {
-            @vMatch = true
-        }
-        if @vCreatedDay == @targetDay {
-            @vMatch = true
-        }
-
-        if @j <= 5 {
-            @debugLog = "{@debugLog}V{@j}: T=[{@vTakenDay}] C=[{@vCreatedDay}] Match=[{@vMatch}]\n"
-        }
-
-        if @vMatch {
-            if !@videoSeenSelectedDay {
-                showNotification("영상 매칭 성공: {@vTakenDay}", "iPhone Daily Backup", false)
-            }
-            @videoSeenSelectedDay = true
-            @matchedVideoCount = @matchedVideoCount + 1
-
-            @vNameVal = getImageDetail(@vItem, "Name")
-            @vName: text
-            @vName = "{@vNameVal}"
-
-            @vTakenISOVal = formatDate(@vTakenVal, "ISO 8601")
-            @vMetadataISO: text
-            @vMetadataISO = getText(@vTakenISOVal)
-            if @vTakenDay != @targetDay {
-                @vCreatedISOVal = formatDate(@vCreatedVal, "ISO 8601")
-                @vMetadataISO = getText(@vCreatedISOVal)
-            }
-
-            @vSizeVal = getImageDetail(@vItem, "File Size")
-            @vSize: text
-            @vSize = "{@vSizeVal}"
-
-            @vCheckRes = jsonRequest(@checkURL, "POST", {
-                "original_name": "{@vName}",
-                "created_at": "{@vMetadataISO}",
-                "file_size": "{@vSize}"
-            })
-            @vCheckDict = getDictionary(@vCheckRes)
-            @vExistsValue = getValue(@vCheckDict, "exists")
-            @vExistsText: text
-            @vExistsText = "{@vExistsValue}"
-
-            if @vExistsText == "false" {
-                @vUploadBody = {}
-                @vUploadBody = setValue(@vUploadBody, "file", @vItem)
-                @vUploadBody = setValue(@vUploadBody, "original_name", @vName)
-                @vUploadBody = setValue(@vUploadBody, "created_at", @vMetadataISO)
-                @vUploadBody = setValue(@vUploadBody, "file_size", @vSize)
-                dynamicFormRequest(@uploadURL, "POST", @vUploadBody)
-                @videoUploadSentCount = @videoUploadSentCount + 1
-            }
-        }
-
-        @vPrevMatch: bool
-        @vPrevMatch = false
-        if @vTakenDay == @prevDay {
-            @vPrevMatch = true
-        }
-        if @vCreatedDay == @prevDay {
-            @vPrevMatch = true
-        }
-
-        if @videoSeenSelectedDay {
-            if @vPrevMatch {
-                @videoStop = true
-            }
-        }
-    }
-}
-
-// 결과 강제 표시 (showResult -> show 로 수정)
-show("{@debugLog}\nFinal Result:\nSelected: {@targetDay}\nPhotos Matched: {@matchedPhotoCount}\nVideos Matched: {@matchedVideoCount}")
+show("{@debugLog}\nFinal: Matched={@matchedPhotoCount}, Uploaded={@photoUploadSentCount}")
