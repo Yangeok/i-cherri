@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 14:02:15 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (업로드 에러 메시지 노출)
+수정일시: 2026-05-20 14:03:27 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (멀티파트 규격 강화)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 14:02:15 KST')
+comment('수정일시: 2026-05-20 14:03:27 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -44,9 +44,6 @@ comment('수정일시: 2026-05-20 14:02:15 KST')
 @uploadURL: text
 @uploadURL = "{@serverBase}/upload"
 
-@healthURL: text
-@healthURL = "{@serverBase}/health"
-
 @selectedDate = prompt("업로드할 날짜를 선택하세요", "Date")
 @targetDay: text
 @targetDay = formatDate(@selectedDate, "Custom", "yyyy-MM-dd")
@@ -56,9 +53,6 @@ comment('수정일시: 2026-05-20 14:02:15 KST')
 @matchedCount = 0
 @uploadedCount: number
 @uploadedCount = 0
-
-@debugText: text
-@debugText = "!!! ERROR DEBUG 14:02 !!!\n"
 
 @latestItems = getLatestPhotos(@scanCount, true)
 @totalCount = count(@latestItems)
@@ -92,9 +86,9 @@ repeat i for @totalCount {
             "file_size": "{@pSize}"
         })
         @pCheckDict = getDictionary(@pCheckRes)
-        @pExValue = getValue(@pCheckDict, "exists")
+        @pExVal = getValue(@pCheckDict, "exists")
         @pExStr: text
-        @pExStr = "{@pExValue}"
+        @pExStr = "{@pExVal}"
 
         @shouldUpload: bool
         @shouldUpload = false
@@ -103,14 +97,13 @@ repeat i for @totalCount {
         if @pExStr == "No" { @shouldUpload = true }
         
         if @shouldUpload {
-            showNotification("업로드 시도: {@pName}", "iPhone Daily Backup", false)
-            
             @pUploadBody = {}
             @pUploadBody = setValue(@pUploadBody, "file", @item)
             @pUploadBody = setValue(@pUploadBody, "original_name", @pName)
             @pUploadBody = setValue(@pUploadBody, "created_at", @pISO)
             @pUploadBody = setValue(@pUploadBody, "file_size", @pSize)
             
+            // 전송 시 헤더는 단축어가 자동 생성하게 둠
             @uRes = dynamicFormRequest(@uploadURL, "POST", @pUploadBody)
             @uDict = getDictionary(@uRes)
             
@@ -120,17 +113,9 @@ repeat i for @totalCount {
             
             if @uOKStr == "true" {
                 @uploadedCount = @uploadedCount + 1
-                @debugText = "{@debugText}OK: {@pName}\n"
-            } else {
-                @uErr = getValue(@uDict, "error")
-                @uErrStr: text
-                @uErrStr = "{@uErr}"
-                @debugText = "{@debugText}FAIL: {@pName} -> [{@uErrStr}]\n"
             }
-        } else {
-            @debugText = "{@debugText}SKIP (Exists): {@pName}\n"
         }
     }
 }
 
-show("{@debugText}\n--- FINAL ---\nMatched: {@matchedCount}\nUploaded: {@uploadedCount}")
+show("Final Result:\nTarget: {@targetDay}\nMatched: {@matchedCount}\nUploaded: {@uploadedCount}")
