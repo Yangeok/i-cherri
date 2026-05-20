@@ -160,7 +160,19 @@ ON files(original_name);
 
 ## 빌드와 설치
 
-### Go 모듈 정리
+### Makefile 사용 (권장)
+
+이 프로젝트는 편의를 위해 `Makefile`을 제공합니다.
+
+- **전체 빌드 (바이너리 + 단축어)**: `make all`
+- **Go 서버 빌드**: `make go`
+- **단축어 빌드 (Signed)**: `make shortcut`
+- **서버 재빌드 및 재시작**: `make run`
+- **결과물 삭제**: `make clean`
+
+### 수동 빌드
+
+#### Go 모듈 정리
 
 ```bash
 go mod tidy
