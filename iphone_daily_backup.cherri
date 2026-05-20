@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:25:42 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (타입 명시 및 ISO 기반 매칭)
+수정일시: 2026-05-20 13:27:44 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (초강력 문자열 기반 날짜 매칭)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:25:42 KST')
+comment('수정일시: 2026-05-20 13:27:44 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -49,12 +49,10 @@ comment('수정일시: 2026-05-20 13:25:42 KST')
 
 @selectedDate = prompt("업로드할 날짜를 선택하세요", "Date")
 
-@selectedISO: text
-@selectedISO = formatDate(@selectedDate, "ISO 8601")
-@selectedParts: array
-@selectedParts = splitText(@selectedISO, "T")
-@selectedDay: text
-@selectedDay = getFirstItem(@selectedParts)
+// 비교용 날짜 문자열 생성 (yyyyMMdd 형식, 순수 텍스트 추출)
+@targetDayRaw = formatDate(@selectedDate, "Custom", "yyyyMMdd")
+@targetDay: text
+@targetDay = getText(@targetDayRaw)
 
 @healthResponse = downloadURL(@healthURL)
 @healthText: text
@@ -73,12 +71,9 @@ showNotification("헬스 응답: {@healthText}", "iPhone Daily Backup", false)
 showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup", false)
 
 @previousDate = adjustDate(@selectedDate, "Subtract", qty(1, "days"))
-@previousISO: text
-@previousISO = formatDate(@previousDate, "ISO 8601")
-@previousParts: array
-@previousParts = splitText(@previousISO, "T")
-@previousDay: text
-@previousDay = getFirstItem(@previousParts)
+@prevDayRaw = formatDate(@previousDate, "Custom", "yyyyMMdd")
+@prevDay: text
+@prevDay = getText(@prevDayRaw)
 
 @scanCount = 500
 
@@ -94,94 +89,90 @@ showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup
 @photoStop = false
 
 @debugLog: text
-@debugLog = "Selected: [{@selectedDay}]\n"
+@debugLog = "Target: [{@targetDay}]\n"
 
 repeat i for @photoCount {
     if !@photoStop {
         @photoItem = getListItem(@latestPhotos, @i)
 
-        @photoTakenValue = getImageDetail(@photoItem, "Date Taken")
-        @photoTakenISO: text
-        @photoTakenISO = formatDate(@photoTakenValue, "ISO 8601")
-        @photoTakenParts: array
-        @photoTakenParts = splitText(@photoTakenISO, "T")
-        @photoTakenDay: text
-        @photoTakenDay = getFirstItem(@photoTakenParts)
+        @pTakenVal = getImageDetail(@photoItem, "Date Taken")
+        @pTakenDayRaw = formatDate(@pTakenVal, "Custom", "yyyyMMdd")
+        @pTakenDay: text
+        @pTakenDay = getText(@pTakenDayRaw)
 
-        @photoCreatedValue = getImageDetail(@photoItem, "Creation Date")
-        @photoCreatedISO: text
-        @photoCreatedISO = formatDate(@photoCreatedValue, "ISO 8601")
-        @photoCreatedParts: array
-        @photoCreatedParts = splitText(@photoCreatedISO, "T")
-        @photoCreatedDay: text
-        @photoCreatedDay = getFirstItem(@photoCreatedParts)
+        @pCreatedVal = getImageDetail(@photoItem, "Creation Date")
+        @pCreatedDayRaw = formatDate(@pCreatedVal, "Custom", "yyyyMMdd")
+        @pCreatedDay: text
+        @pCreatedDay = getText(@pCreatedDayRaw)
 
-        @photoMatchesSelectedDay: bool
-        @photoMatchesSelectedDay = false
-        if @photoTakenDay == @selectedDay {
-            @photoMatchesSelectedDay = true
+        @pMatch: bool
+        @pMatch = false
+        if @pTakenDay == @targetDay {
+            @pMatch = true
         }
-        if @photoCreatedDay == @selectedDay {
-            @photoMatchesSelectedDay = true
+        if @pCreatedDay == @targetDay {
+            @pMatch = true
         }
 
-        if @i <= 3 {
-            @debugLog = "{@debugLog}P{@i}: T=[{@photoTakenDay}] Match:{@photoMatchesSelectedDay}\n"
+        if @i <= 5 {
+            @debugLog = "{@debugLog}P{@i}: T={@pTakenDay} C={@pCreatedDay} M={@pMatch}\n"
         }
 
-        if @photoMatchesSelectedDay {
+        if @pMatch {
             if !@photoSeenSelectedDay {
-                showNotification("사진 매칭성공: {@photoTakenDay}", "iPhone Daily Backup", false)
+                showNotification("사진 매칭 성공: {@pTakenDay}", "iPhone Daily Backup", false)
             }
             @photoSeenSelectedDay = true
             @matchedPhotoCount = @matchedPhotoCount + 1
 
-            @photoNameValue = getImageDetail(@photoItem, "Name")
-            @photoName: text
-            @photoName = "{@photoNameValue}"
+            @pNameVal = getImageDetail(@photoItem, "Name")
+            @pName: text
+            @pName = "{@pNameVal}"
 
-            @photoMetadataDateISO: text
-            @photoMetadataDateISO = @photoTakenISO
-            if @photoTakenDay != @selectedDay {
-                @photoMetadataDateISO = @photoCreatedISO
+            @pISO = formatDate(@pTakenVal, "ISO 8601")
+            @pMetadataISO: text
+            @pMetadataISO = getText(@pISO)
+            if @pTakenDay != @targetDay {
+                @pISO2 = formatDate(@pCreatedVal, "ISO 8601")
+                @pMetadataISO = getText(@pISO2)
             }
 
-            @photoFileSizeValue = getImageDetail(@photoItem, "File Size")
-            @photoFileSize: text
-            @photoFileSize = "{@photoFileSizeValue}"
+            @pSizeVal = getImageDetail(@photoItem, "File Size")
+            @pSize: text
+            @pSize = "{@pSizeVal}"
 
-            @photoCheckResponse = jsonRequest(@checkURL, "POST", {
-                "original_name": "{@photoName}",
-                "created_at": "{@photoMetadataDateISO}",
-                "file_size": "{@photoFileSize}"
+            @pCheckRes = jsonRequest(@checkURL, "POST", {
+                "original_name": "{@pName}",
+                "created_at": "{@pMetadataISO}",
+                "file_size": "{@pSize}"
             })
-            @photoCheckDict = getDictionary(@photoCheckResponse)
-            @photoExistsValue = getValue(@photoCheckDict, "exists")
-            @photoExistsText: text
-            @photoExistsText = "{@photoExistsValue}"
+            @pCheckDict = getDictionary(@pCheckRes)
+            @pExistsVal = getValue(@pCheckDict, "exists")
+            @pExistsText: text
+            @pExistsText = "{@pExistsVal}"
 
-            if @photoExistsText == "false" {
-                @photoUploadBody = {}
-                @photoUploadBody = setValue(@photoUploadBody, "file", @photoItem)
-                @photoUploadBody = setValue(@photoUploadBody, "original_name", @photoName)
-                @photoUploadBody = setValue(@photoUploadBody, "created_at", @photoMetadataDateISO)
-                @photoUploadBody = setValue(@photoUploadBody, "file_size", @photoFileSize)
-                dynamicFormRequest(@uploadURL, "POST", @photoUploadBody)
+            if @pExistsText == "false" {
+                @pUploadBody = {}
+                @pUploadBody = setValue(@pUploadBody, "file", @photoItem)
+                @pUploadBody = setValue(@pUploadBody, "original_name", @pName)
+                @pUploadBody = setValue(@pUploadBody, "created_at", @pMetadataISO)
+                @pUploadBody = setValue(@pUploadBody, "file_size", @pSize)
+                dynamicFormRequest(@uploadURL, "POST", @pUploadBody)
                 @photoUploadSentCount = @photoUploadSentCount + 1
             }
         }
 
-        @photoMatchesPreviousDay: bool
-        @photoMatchesPreviousDay = false
-        if @photoTakenDay == @previousDay {
-            @photoMatchesPreviousDay = true
+        @pPrevMatch: bool
+        @pPrevMatch = false
+        if @pTakenDay == @prevDay {
+            @pPrevMatch = true
         }
-        if @photoCreatedDay == @previousDay {
-            @photoMatchesPreviousDay = true
+        if @pCreatedDay == @prevDay {
+            @pPrevMatch = true
         }
 
         if @photoSeenSelectedDay {
-            if @photoMatchesPreviousDay {
+            if @pPrevMatch {
                 @photoStop = true
             }
         }
@@ -201,94 +192,90 @@ repeat i for @photoCount {
 
 repeat j for @videoCount {
     if !@videoStop {
-        @videoItem = getListItem(@latestVideos, @j)
+        @vItem = getListItem(@latestVideos, @j)
 
-        @videoTakenValue = getImageDetail(@videoItem, "Date Taken")
-        @videoTakenISO: text
-        @videoTakenISO = formatDate(@videoTakenValue, "ISO 8601")
-        @videoTakenParts: array
-        @videoTakenParts = splitText(@videoTakenISO, "T")
-        @videoTakenDay: text
-        @videoTakenDay = getFirstItem(@videoTakenParts)
+        @vTakenVal = getImageDetail(@vItem, "Date Taken")
+        @vTakenDayRaw = formatDate(@vTakenVal, "Custom", "yyyyMMdd")
+        @vTakenDay: text
+        @vTakenDay = getText(@vTakenDayRaw)
 
-        @videoCreatedValue = getImageDetail(@videoItem, "Creation Date")
-        @videoCreatedISO: text
-        @videoCreatedISO = formatDate(@videoCreatedValue, "ISO 8601")
-        @videoCreatedParts: array
-        @videoCreatedParts = splitText(@videoCreatedISO, "T")
-        @videoCreatedDay: text
-        @videoCreatedDay = getFirstItem(@videoCreatedParts)
+        @vCreatedVal = getImageDetail(@vItem, "Creation Date")
+        @vCreatedDayRaw = formatDate(@vCreatedVal, "Custom", "yyyyMMdd")
+        @vCreatedDay: text
+        @vCreatedDay = getText(@vCreatedDayRaw)
 
-        @videoMatchesSelectedDay: bool
-        @videoMatchesSelectedDay = false
-        if @videoTakenDay == @selectedDay {
-            @videoMatchesSelectedDay = true
+        @vMatch: bool
+        @vMatch = false
+        if @vTakenDay == @targetDay {
+            @vMatch = true
         }
-        if @videoCreatedDay == @selectedDay {
-            @videoMatchesSelectedDay = true
+        if @vCreatedDay == @targetDay {
+            @vMatch = true
         }
 
-        if @j <= 3 {
-            @debugLog = "{@debugLog}V{@j}: T=[{@videoTakenDay}] Match:{@videoMatchesSelectedDay}\n"
+        if @j <= 5 {
+            @debugLog = "{@debugLog}V{@j}: T={@vTakenDay} C={@vCreatedDay} M={@vMatch}\n"
         }
 
-        if @videoMatchesSelectedDay {
+        if @vMatch {
             if !@videoSeenSelectedDay {
-                showNotification("영상 매칭성공: {@videoTakenDay}", "iPhone Daily Backup", false)
+                showNotification("영상 매칭 성공: {@vTakenDay}", "iPhone Daily Backup", false)
             }
             @videoSeenSelectedDay = true
             @matchedVideoCount = @matchedVideoCount + 1
 
-            @videoNameValue = getImageDetail(@videoItem, "Name")
-            @videoName: text
-            @videoName = "{@videoNameValue}"
+            @vNameVal = getImageDetail(@vItem, "Name")
+            @vName: text
+            @vName = "{@vNameVal}"
 
-            @videoMetadataDateISO: text
-            @videoMetadataDateISO = @videoTakenISO
-            if @videoTakenDay != @selectedDay {
-                @videoMetadataDateISO = @videoCreatedISO
+            @vISO = formatDate(@vTakenVal, "ISO 8601")
+            @vMetadataISO: text
+            @vMetadataISO = getText(@vISO)
+            if @vTakenDay != @targetDay {
+                @vISO2 = formatDate(@vCreatedVal, "ISO 8601")
+                @vMetadataISO = getText(@vISO2)
             }
 
-            @videoFileSizeValue = getImageDetail(@videoItem, "File Size")
-            @videoFileSize: text
-            @videoFileSize = "{@videoFileSizeValue}"
+            @vSizeVal = getImageDetail(@vItem, "File Size")
+            @vSize: text
+            @vSize = "{@vSizeVal}"
 
-            @videoCheckResponse = jsonRequest(@checkURL, "POST", {
-                "original_name": "{@videoName}",
-                "created_at": "{@videoMetadataDateISO}",
-                "file_size": "{@videoFileSize}"
+            @vCheckRes = jsonRequest(@checkURL, "POST", {
+                "original_name": "{@vName}",
+                "created_at": "{@vMetadataISO}",
+                "file_size": "{@vSize}"
             })
-            @videoCheckDict = getDictionary(@videoCheckResponse)
-            @videoExistsValue = getValue(@videoCheckDict, "exists")
-            @videoExistsText: text
-            @videoExistsText = "{@videoExistsValue}"
+            @vCheckDict = getDictionary(@vCheckRes)
+            @vExistsVal = getValue(@vCheckDict, "exists")
+            @vExistsText: text
+            @vExistsText = "{@vExistsVal}"
 
-            if @videoExistsText == "false" {
-                @videoUploadBody = {}
-                @videoUploadBody = setValue(@videoUploadBody, "file", @videoItem)
-                @videoUploadBody = setValue(@videoUploadBody, "original_name", @videoName)
-                @videoUploadBody = setValue(@videoUploadBody, "created_at", @videoMetadataDateISO)
-                @videoUploadBody = setValue(@videoUploadBody, "file_size", @videoFileSize)
-                dynamicFormRequest(@uploadURL, "POST", @videoUploadBody)
+            if @vExistsText == "false" {
+                @vUploadBody = {}
+                @vUploadBody = setValue(@vUploadBody, "file", @vItem)
+                @vUploadBody = setValue(@vUploadBody, "original_name", @vName)
+                @vUploadBody = setValue(@vUploadBody, "created_at", @vMetadataISO)
+                @vUploadBody = setValue(@vUploadBody, "file_size", @vSize)
+                dynamicFormRequest(@uploadURL, "POST", @vUploadBody)
                 @videoUploadSentCount = @videoUploadSentCount + 1
             }
         }
 
-        @videoMatchesPreviousDay: bool
-        @videoMatchesPreviousDay = false
-        if @videoTakenDay == @previousDay {
-            @videoMatchesPreviousDay = true
+        @vPrevMatch: bool
+        @vPrevMatch = false
+        if @vTakenDay == @prevDay {
+            @vPrevMatch = true
         }
-        if @videoCreatedDay == @previousDay {
-            @videoMatchesPreviousDay = true
+        if @vCreatedDay == @prevDay {
+            @vPrevMatch = true
         }
 
         if @videoSeenSelectedDay {
-            if @videoMatchesPreviousDay {
+            if @vPrevMatch {
                 @videoStop = true
             }
         }
     }
 }
 
-show("{@debugLog}\nResult:\nselected={@selectedDay}\nphotos_matched={@matchedPhotoCount}\nphotos_uploaded={@photoUploadSentCount}\nvideos_matched={@matchedVideoCount}\nvideos_uploaded={@videoUploadSentCount}")
+show("{@debugLog}\nResult:\nselected={@targetDay}\nphotos_matched={@matchedPhotoCount}\nphotos_uploaded={@photoUploadSentCount}\nvideos_matched={@matchedVideoCount}\nvideos_uploaded={@videoUploadSentCount}")
