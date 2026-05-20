@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:57:40 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (로케일 독립적 불리언 체크 - 변수 수정)
+수정일시: 2026-05-20 14:00:06 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (독일어 nein 대응 및 업로드 강제 실행)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:57:40 KST')
+comment('수정일시: 2026-05-20 14:00:06 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -58,7 +58,7 @@ comment('수정일시: 2026-05-20 13:57:40 KST')
 @uploadedCount = 0
 
 @debugText: text
-@debugText = "!!! DEBUG START 13:57 !!!\n"
+@debugText = "!!! FINAL FIX 14:00 !!!\n"
 
 @latestItems = getLatestPhotos(@scanCount, true)
 @totalCount = count(@latestItems)
@@ -92,15 +92,22 @@ repeat i for @totalCount {
             "file_size": "{@pSize}"
         })
         @pCheckDict = getDictionary(@pCheckRes)
-        @pExVal = getValue(@pCheckDict, "exists")
-        
+        @pExValue = getValue(@pCheckDict, "exists")
         @pExStr: text
-        @pExStr = "{@pExVal}"
+        @pExStr = "{@pExValue}"
+
+        // 다국어 대응 (false, nein, No, 거짓 등 모든 부정어에 대해 업로드 허용 시도)
+        @shouldUpload: bool
+        @shouldUpload = false
+        
+        if @pExStr == "false" { @shouldUpload = true }
+        if @pExStr == "nein" { @shouldUpload = true }
+        if @pExStr == "No" { @shouldUpload = true }
+        
         @debugText = "{@debugText}Photo:{@pName} / Exists:{@pExStr}\n"
 
-        // 로케일 독립적 불리언 체크
-        if !@pExVal {
-            @debugText = "{@debugText}-> Entering Upload Block\n"
+        if @shouldUpload {
+            showNotification("업로드 시작: {@pName}", "iPhone Daily Backup", false)
             
             @pUploadBody = {}
             @pUploadBody = setValue(@pUploadBody, "file", @item)
@@ -111,12 +118,14 @@ repeat i for @totalCount {
             @uRes = dynamicFormRequest(@uploadURL, "POST", @pUploadBody)
             @uDict = getDictionary(@uRes)
             @uOKVal = getValue(@uDict, "ok")
+            @uOKStr: text
+            @uOKStr = "{@uOKVal}"
             
-            if @uOKVal {
+            if @uOKStr == "true" {
                 @uploadedCount = @uploadedCount + 1
-                @debugText = "{@debugText}-> Upload OK\n"
+                @debugText = "{@debugText}-> Upload Success\n"
             } else {
-                @debugText = "{@debugText}-> Upload FAILED\n"
+                @debugText = "{@debugText}-> Upload Failed (Response: {@uOKStr})\n"
             }
         }
     }
