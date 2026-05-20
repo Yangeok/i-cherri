@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:30:00 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 단축어 (날짜 매칭 디버그 강화)
+수정일시: 2026-05-20 13:45:00 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 단축어 (날짜 매칭 트림 처리)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:30:00 KST')
+comment('수정일시: 2026-05-20 13:45:00 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -49,8 +49,10 @@ comment('수정일시: 2026-05-20 13:30:00 KST')
 
 @selectedDate = prompt("업로드할 날짜를 선택하세요", "Date")
 
+@selectedDayRaw: text
+@selectedDayRaw = formatDate(@selectedDate, "Custom", "yyyy-MM-dd")
 @selectedDay: text
-@selectedDay = formatDate(@selectedDate, "Custom", "yyyy-MM-dd")
+@selectedDay = trimWhitespace(@selectedDayRaw)
 
 @healthResponse = downloadURL(@healthURL)
 @healthText: text
@@ -75,8 +77,10 @@ showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup
 @previousDateText: text
 @previousDateText = getText(@previousDate)
 
+@previousDayRaw: text
+@previousDayRaw = formatDate(@previousDateText, "Custom", "yyyy-MM-dd")
 @previousDay: text
-@previousDay = formatDate(@previousDateText, "Custom", "yyyy-MM-dd")
+@previousDay = trimWhitespace(@previousDayRaw)
 
 @scanCount = 500
 
@@ -90,26 +94,13 @@ showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup
 @photoCheckSentCount = 0
 @photoUploadSentCount: number
 @photoUploadSentCount = 0
-@firstPhotoTakenDay: text
-@firstPhotoTakenDay = ""
-@firstPhotoCreatedDay: text
-@firstPhotoCreatedDay = ""
 @photoUploadDebugShown: bool
 @photoUploadDebugShown = false
 @photoStop: bool
 @photoStop = false
 
 @debugLog: text
-@debugLog = "Selected: {@selectedDay}\n"
-
-@firstPhotoItem = getFirstItem(@latestPhotos)
-@firstPhotoTakenValue = getImageDetail(@firstPhotoItem, "Date Taken")
-@firstPhotoTakenText = getText(@firstPhotoTakenValue)
-@firstPhotoTakenDay = formatDate(@firstPhotoTakenText, "Custom", "yyyy-MM-dd")
-@firstPhotoCreatedValue = getImageDetail(@firstPhotoItem, "Creation Date")
-@firstPhotoCreatedText = getText(@firstPhotoCreatedValue)
-@firstPhotoCreatedDay = formatDate(@firstPhotoCreatedText, "Custom", "yyyy-MM-dd")
-showNotification("선택: {@selectedDay} / 첫 사진 taken: {@firstPhotoTakenDay} / created: {@firstPhotoCreatedDay}", "사진 날짜 디버그", false)
+@debugLog = "Selected: [{@selectedDay}]\n"
 
 repeat i for @photoCount {
     if !@photoStop {
@@ -118,17 +109,21 @@ repeat i for @photoCount {
         @photoTakenValue = getImageDetail(@photoItem, "Date Taken")
         @photoTakenAtText: text
         @photoTakenAtText = getText(@photoTakenValue)
+        @photoTakenDayRaw: text
+        @photoTakenDayRaw = formatDate(@photoTakenAtText, "Custom", "yyyy-MM-dd")
         @photoTakenDay: text
-        @photoTakenDay = formatDate(@photoTakenAtText, "Custom", "yyyy-MM-dd")
+        @photoTakenDay = trimWhitespace(@photoTakenDayRaw)
 
         @photoCreatedValue = getImageDetail(@photoItem, "Creation Date")
         @photoCreatedAtText: text
         @photoCreatedAtText = getText(@photoCreatedValue)
+        @photoCreatedDayRaw: text
+        @photoCreatedDayRaw = formatDate(@photoCreatedAtText, "Custom", "yyyy-MM-dd")
         @photoCreatedDay: text
-        @photoCreatedDay = formatDate(@photoCreatedAtText, "Custom", "yyyy-MM-dd")
+        @photoCreatedDay = trimWhitespace(@photoCreatedDayRaw)
 
-        if @i <= 5 {
-            @debugLog = "{@debugLog}Item {@i}: taken={@photoTakenDay}, created={@photoCreatedDay}\n"
+        if @i <= 3 {
+            @debugLog = "{@debugLog}P{@i}: T=[{@photoTakenDay}] C=[{@photoCreatedDay}]\n"
         }
 
         @photoMatchesSelectedDay: bool
@@ -142,7 +137,7 @@ repeat i for @photoCount {
 
         if @photoMatchesSelectedDay {
             if !@photoSeenSelectedDay {
-                showNotification("사진 날짜 매칭 성공: {@photoTakenDay}", "사진 매칭 성공", false)
+                showNotification("사진 매칭성공: {@photoTakenDay}", "iPhone Daily Backup", false)
             }
             @photoSeenSelectedDay = true
             @matchedPhotoCount = @matchedPhotoCount + 1
@@ -181,7 +176,7 @@ repeat i for @photoCount {
 
             if @photoExistsText == "false" {
                 if !@photoUploadDebugShown {
-                    showNotification("업로드 시작: {@photoName}", "사진 업로드", false)
+                    showNotification("업로드 시작: {@photoName}", "iPhone Daily Backup", false)
                     @photoUploadDebugShown = true
                 }
                 @photoUploadBody = {}
@@ -221,23 +216,10 @@ repeat i for @photoCount {
 @videoCheckSentCount = 0
 @videoUploadSentCount: number
 @videoUploadSentCount = 0
-@firstVideoTakenDay: text
-@firstVideoTakenDay = ""
-@firstVideoCreatedDay: text
-@firstVideoCreatedDay = ""
 @videoUploadDebugShown: bool
 @videoUploadDebugShown = false
 @videoStop: bool
 @videoStop = false
-
-@firstVideoItem = getFirstItem(@latestVideos)
-@firstVideoTakenValue = getImageDetail(@firstVideoItem, "Date Taken")
-@firstVideoTakenText = getText(@firstVideoTakenValue)
-@firstVideoTakenDay = formatDate(@firstVideoTakenText, "Custom", "yyyy-MM-dd")
-@firstVideoCreatedValue = getImageDetail(@firstVideoItem, "Creation Date")
-@firstVideoCreatedText = getText(@firstVideoCreatedValue)
-@firstVideoCreatedDay = formatDate(@firstVideoCreatedText, "Custom", "yyyy-MM-dd")
-showNotification("선택: {@selectedDay} / 첫 영상 taken: {@firstVideoTakenDay} / created: {@firstVideoCreatedDay}", "영상 날짜 디버그", false)
 
 repeat j for @videoCount {
     if !@videoStop {
@@ -246,17 +228,21 @@ repeat j for @videoCount {
         @videoTakenValue = getImageDetail(@videoItem, "Date Taken")
         @videoTakenAtText: text
         @videoTakenAtText = getText(@videoTakenValue)
+        @videoTakenDayRaw: text
+        @videoTakenDayRaw = formatDate(@videoTakenAtText, "Custom", "yyyy-MM-dd")
         @videoTakenDay: text
-        @videoTakenDay = formatDate(@videoTakenAtText, "Custom", "yyyy-MM-dd")
+        @videoTakenDay = trimWhitespace(@videoTakenDayRaw)
 
         @videoCreatedValue = getImageDetail(@videoItem, "Creation Date")
         @videoCreatedAtText: text
         @videoCreatedAtText = getText(@videoCreatedValue)
+        @videoCreatedDayRaw: text
+        @videoCreatedDayRaw = formatDate(@videoCreatedAtText, "Custom", "yyyy-MM-dd")
         @videoCreatedDay: text
-        @videoCreatedDay = formatDate(@videoCreatedAtText, "Custom", "yyyy-MM-dd")
+        @videoCreatedDay = trimWhitespace(@videoCreatedDayRaw)
 
-        if @j <= 5 {
-            @debugLog = "{@debugLog}Video {@j}: taken={@videoTakenDay}, created={@videoCreatedDay}\n"
+        if @j <= 3 {
+            @debugLog = "{@debugLog}V{@j}: T=[{@videoTakenDay}] C=[{@videoCreatedDay}]\n"
         }
 
         @videoMatchesSelectedDay: bool
@@ -270,7 +256,7 @@ repeat j for @videoCount {
 
         if @videoMatchesSelectedDay {
             if !@videoSeenSelectedDay {
-                showNotification("영상 날짜 매칭 성공: {@videoTakenDay}", "영상 매칭 성공", false)
+                showNotification("영상 매칭성공: {@videoTakenDay}", "iPhone Daily Backup", false)
             }
             @videoSeenSelectedDay = true
             @matchedVideoCount = @matchedVideoCount + 1
@@ -309,7 +295,7 @@ repeat j for @videoCount {
 
             if @videoExistsText == "false" {
                 if !@videoUploadDebugShown {
-                    showNotification("업로드 시작: {@videoName}", "영상 업로드", false)
+                    showNotification("업로드 시작: {@videoName}", "iPhone Daily Backup", false)
                     @videoUploadDebugShown = true
                 }
                 @videoUploadBody = {}
