@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 13:24:00 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 단축어 (날짜 매칭 트림 처리)
+수정일시: 2026-05-20 13:25:42 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (타입 명시 및 ISO 기반 매칭)
 */
 
 #include 'actions/photos'
@@ -33,7 +33,7 @@ action 'downloadurl' dynamicFormRequest(
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 13:24:00 KST')
+comment('수정일시: 2026-05-20 13:25:42 KST')
 
 @serverBase: text
 @serverBase = "http://192.168.0.101:8787"
@@ -49,10 +49,12 @@ comment('수정일시: 2026-05-20 13:24:00 KST')
 
 @selectedDate = prompt("업로드할 날짜를 선택하세요", "Date")
 
-@selectedDayRaw: text
-@selectedDayRaw = formatDate(@selectedDate, "Custom", "yyyy-MM-dd")
+@selectedISO: text
+@selectedISO = formatDate(@selectedDate, "ISO 8601")
+@selectedParts: array
+@selectedParts = splitText(@selectedISO, "T")
 @selectedDay: text
-@selectedDay = trimWhitespace(@selectedDayRaw)
+@selectedDay = getFirstItem(@selectedParts)
 
 @healthResponse = downloadURL(@healthURL)
 @healthText: text
@@ -70,17 +72,13 @@ showNotification("헬스 응답: {@healthText}", "iPhone Daily Backup", false)
 @pingExistsText = "{@pingExistsValue}"
 showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup", false)
 
-@selectedDateISO: text
-@selectedDateISO = formatDate(@selectedDate, "ISO 8601")
-
-@previousDate = adjustDate(@selectedDateISO, "Subtract", qty(1, "days"))
-@previousDateText: text
-@previousDateText = getText(@previousDate)
-
-@previousDayRaw: text
-@previousDayRaw = formatDate(@previousDateText, "Custom", "yyyy-MM-dd")
+@previousDate = adjustDate(@selectedDate, "Subtract", qty(1, "days"))
+@previousISO: text
+@previousISO = formatDate(@previousDate, "ISO 8601")
+@previousParts: array
+@previousParts = splitText(@previousISO, "T")
 @previousDay: text
-@previousDay = trimWhitespace(@previousDayRaw)
+@previousDay = getFirstItem(@previousParts)
 
 @scanCount = 500
 
@@ -90,12 +88,8 @@ showNotification("서버 응답 확인: {@pingExistsText}", "iPhone Daily Backup
 @photoSeenSelectedDay = false
 @matchedPhotoCount: number
 @matchedPhotoCount = 0
-@photoCheckSentCount: number
-@photoCheckSentCount = 0
 @photoUploadSentCount: number
 @photoUploadSentCount = 0
-@photoUploadDebugShown: bool
-@photoUploadDebugShown = false
 @photoStop: bool
 @photoStop = false
 
@@ -107,24 +101,20 @@ repeat i for @photoCount {
         @photoItem = getListItem(@latestPhotos, @i)
 
         @photoTakenValue = getImageDetail(@photoItem, "Date Taken")
-        @photoTakenAtText: text
-        @photoTakenAtText = getText(@photoTakenValue)
-        @photoTakenDayRaw: text
-        @photoTakenDayRaw = formatDate(@photoTakenAtText, "Custom", "yyyy-MM-dd")
+        @photoTakenISO: text
+        @photoTakenISO = formatDate(@photoTakenValue, "ISO 8601")
+        @photoTakenParts: array
+        @photoTakenParts = splitText(@photoTakenISO, "T")
         @photoTakenDay: text
-        @photoTakenDay = trimWhitespace(@photoTakenDayRaw)
+        @photoTakenDay = getFirstItem(@photoTakenParts)
 
         @photoCreatedValue = getImageDetail(@photoItem, "Creation Date")
-        @photoCreatedAtText: text
-        @photoCreatedAtText = getText(@photoCreatedValue)
-        @photoCreatedDayRaw: text
-        @photoCreatedDayRaw = formatDate(@photoCreatedAtText, "Custom", "yyyy-MM-dd")
+        @photoCreatedISO: text
+        @photoCreatedISO = formatDate(@photoCreatedValue, "ISO 8601")
+        @photoCreatedParts: array
+        @photoCreatedParts = splitText(@photoCreatedISO, "T")
         @photoCreatedDay: text
-        @photoCreatedDay = trimWhitespace(@photoCreatedDayRaw)
-
-        if @i <= 3 {
-            @debugLog = "{@debugLog}P{@i}: T=[{@photoTakenDay}] C=[{@photoCreatedDay}]\n"
-        }
+        @photoCreatedDay = getFirstItem(@photoCreatedParts)
 
         @photoMatchesSelectedDay: bool
         @photoMatchesSelectedDay = false
@@ -133,6 +123,10 @@ repeat i for @photoCount {
         }
         if @photoCreatedDay == @selectedDay {
             @photoMatchesSelectedDay = true
+        }
+
+        if @i <= 3 {
+            @debugLog = "{@debugLog}P{@i}: T=[{@photoTakenDay}] Match:{@photoMatchesSelectedDay}\n"
         }
 
         if @photoMatchesSelectedDay {
@@ -146,16 +140,10 @@ repeat i for @photoCount {
             @photoName: text
             @photoName = "{@photoNameValue}"
 
-            @photoTakenAtISO: text
-            @photoTakenAtISO = formatDate(@photoTakenAtText, "ISO 8601")
-
-            @photoCreatedAtISO: text
-            @photoCreatedAtISO = formatDate(@photoCreatedAtText, "ISO 8601")
-
             @photoMetadataDateISO: text
-            @photoMetadataDateISO = @photoTakenAtISO
+            @photoMetadataDateISO = @photoTakenISO
             if @photoTakenDay != @selectedDay {
-                @photoMetadataDateISO = @photoCreatedAtISO
+                @photoMetadataDateISO = @photoCreatedISO
             }
 
             @photoFileSizeValue = getImageDetail(@photoItem, "File Size")
@@ -167,18 +155,12 @@ repeat i for @photoCount {
                 "created_at": "{@photoMetadataDateISO}",
                 "file_size": "{@photoFileSize}"
             })
-            @photoCheckSentCount = @photoCheckSentCount + 1
             @photoCheckDict = getDictionary(@photoCheckResponse)
             @photoExistsValue = getValue(@photoCheckDict, "exists")
-
             @photoExistsText: text
             @photoExistsText = "{@photoExistsValue}"
 
             if @photoExistsText == "false" {
-                if !@photoUploadDebugShown {
-                    showNotification("업로드 시작: {@photoName}", "iPhone Daily Backup", false)
-                    @photoUploadDebugShown = true
-                }
                 @photoUploadBody = {}
                 @photoUploadBody = setValue(@photoUploadBody, "file", @photoItem)
                 @photoUploadBody = setValue(@photoUploadBody, "original_name", @photoName)
@@ -212,12 +194,8 @@ repeat i for @photoCount {
 @videoSeenSelectedDay = false
 @matchedVideoCount: number
 @matchedVideoCount = 0
-@videoCheckSentCount: number
-@videoCheckSentCount = 0
 @videoUploadSentCount: number
 @videoUploadSentCount = 0
-@videoUploadDebugShown: bool
-@videoUploadDebugShown = false
 @videoStop: bool
 @videoStop = false
 
@@ -226,24 +204,20 @@ repeat j for @videoCount {
         @videoItem = getListItem(@latestVideos, @j)
 
         @videoTakenValue = getImageDetail(@videoItem, "Date Taken")
-        @videoTakenAtText: text
-        @videoTakenAtText = getText(@videoTakenValue)
-        @videoTakenDayRaw: text
-        @videoTakenDayRaw = formatDate(@videoTakenAtText, "Custom", "yyyy-MM-dd")
+        @videoTakenISO: text
+        @videoTakenISO = formatDate(@videoTakenValue, "ISO 8601")
+        @videoTakenParts: array
+        @videoTakenParts = splitText(@videoTakenISO, "T")
         @videoTakenDay: text
-        @videoTakenDay = trimWhitespace(@videoTakenDayRaw)
+        @videoTakenDay = getFirstItem(@videoTakenParts)
 
         @videoCreatedValue = getImageDetail(@videoItem, "Creation Date")
-        @videoCreatedAtText: text
-        @videoCreatedAtText = getText(@videoCreatedValue)
-        @videoCreatedDayRaw: text
-        @videoCreatedDayRaw = formatDate(@videoCreatedAtText, "Custom", "yyyy-MM-dd")
+        @videoCreatedISO: text
+        @videoCreatedISO = formatDate(@videoCreatedValue, "ISO 8601")
+        @videoCreatedParts: array
+        @videoCreatedParts = splitText(@videoCreatedISO, "T")
         @videoCreatedDay: text
-        @videoCreatedDay = trimWhitespace(@videoCreatedDayRaw)
-
-        if @j <= 3 {
-            @debugLog = "{@debugLog}V{@j}: T=[{@videoTakenDay}] C=[{@videoCreatedDay}]\n"
-        }
+        @videoCreatedDay = getFirstItem(@videoCreatedParts)
 
         @videoMatchesSelectedDay: bool
         @videoMatchesSelectedDay = false
@@ -252,6 +226,10 @@ repeat j for @videoCount {
         }
         if @videoCreatedDay == @selectedDay {
             @videoMatchesSelectedDay = true
+        }
+
+        if @j <= 3 {
+            @debugLog = "{@debugLog}V{@j}: T=[{@videoTakenDay}] Match:{@videoMatchesSelectedDay}\n"
         }
 
         if @videoMatchesSelectedDay {
@@ -265,16 +243,10 @@ repeat j for @videoCount {
             @videoName: text
             @videoName = "{@videoNameValue}"
 
-            @videoTakenAtISO: text
-            @videoTakenAtISO = formatDate(@videoTakenAtText, "ISO 8601")
-
-            @videoCreatedAtISO: text
-            @videoCreatedAtISO = formatDate(@videoCreatedAtText, "ISO 8601")
-
             @videoMetadataDateISO: text
-            @videoMetadataDateISO = @videoTakenAtISO
+            @videoMetadataDateISO = @videoTakenISO
             if @videoTakenDay != @selectedDay {
-                @videoMetadataDateISO = @videoCreatedAtISO
+                @videoMetadataDateISO = @videoCreatedISO
             }
 
             @videoFileSizeValue = getImageDetail(@videoItem, "File Size")
@@ -286,18 +258,12 @@ repeat j for @videoCount {
                 "created_at": "{@videoMetadataDateISO}",
                 "file_size": "{@videoFileSize}"
             })
-            @videoCheckSentCount = @videoCheckSentCount + 1
             @videoCheckDict = getDictionary(@videoCheckResponse)
             @videoExistsValue = getValue(@videoCheckDict, "exists")
-
             @videoExistsText: text
             @videoExistsText = "{@videoExistsValue}"
 
             if @videoExistsText == "false" {
-                if !@videoUploadDebugShown {
-                    showNotification("업로드 시작: {@videoName}", "iPhone Daily Backup", false)
-                    @videoUploadDebugShown = true
-                }
                 @videoUploadBody = {}
                 @videoUploadBody = setValue(@videoUploadBody, "file", @videoItem)
                 @videoUploadBody = setValue(@videoUploadBody, "original_name", @videoName)
@@ -325,4 +291,4 @@ repeat j for @videoCount {
     }
 }
 
-show("{@debugLog}\nResult:\nselected={@selectedDay}\nphotos_scanned={@photoCount}\nphotos_matched={@matchedPhotoCount}\nphotos_uploaded={@photoUploadSentCount}\nvideos_scanned={@videoCount}\nvideos_matched={@matchedVideoCount}\nvideos_uploaded={@videoUploadSentCount}")
+show("{@debugLog}\nResult:\nselected={@selectedDay}\nphotos_matched={@matchedPhotoCount}\nphotos_uploaded={@photoUploadSentCount}\nvideos_matched={@matchedVideoCount}\nvideos_uploaded={@videoUploadSentCount}")
