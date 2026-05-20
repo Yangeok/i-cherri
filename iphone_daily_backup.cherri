@@ -1,6 +1,6 @@
 /*
-수정일시: 2026-05-20 14:28:31 KST
-설명: Go LAN 서버용 iPhone Daily 증분 백업 (단축어 원시 전송 모드 - 문법 수정)
+수정일시: 2026-05-20 14:31:44 KST
+설명: Go LAN 서버용 iPhone Daily 증분 백업 (IP 하드코딩 및 표준 전송 - 재수정)
 */
 
 #include 'actions/photos'
@@ -15,18 +15,21 @@
 #define color blue
 #define mac false
 
-// 단축어 엔진이 가장 좋아하는 원시적인 Form 전송 액션 정의
-action 'downloadurl' stableUpload(
+// 수동으로 Form 전송 규격을 정의하여 Cherri 한계 우회
+action 'downloadurl' rawFormUpload(
     text url: 'WFURL',
     HTTPMethod ?method: 'WFHTTPMethod',
-    variable body: 'WFFormValues'
+    variable body: 'WFFormValues',
+    dictionary! ?headers: 'WFHTTPHeaders'
 ) {
     "WFHTTPBodyType": "Form"
 }
 
-comment('수정일시: 2026-05-20 14:28:31 KST')
+comment('수정일시: 2026-05-20 14:31:44 KST')
 
-@serverIP = prompt("맥의 현재 내부 IP 주소를 확인하세요", "Text", "192.168.0.77")
+// 서버 IP 하드코딩 (프롬프트 제거)
+@serverIP: text
+@serverIP = "192.168.0.101"
 @serverBase: text
 @serverBase = "http://{@serverIP}:8787"
 
@@ -82,6 +85,7 @@ repeat i for @totalCount {
         @pExStr: text
         @pExStr = "{@pExValue}"
 
+        // 로케일 대응 체크
         @isExists: bool
         @isExists = true
         if @pExStr == "false" { @isExists = false }
@@ -89,14 +93,14 @@ repeat i for @totalCount {
         if @pExStr == "No" { @isExists = false }
         
         if !@isExists {
-            // 2. 업로드 (딕셔너리 리터럴 대신 변수 구성으로 우회)
+            // 2. 업로드 (가장 확실한 Form 규격 사용)
             @uBody = {}
             @uBody = setValue(@uBody, "file", @item)
             @uBody = setValue(@uBody, "original_name", @pName)
             @uBody = setValue(@uBody, "created_at", @pISO)
             @uBody = setValue(@uBody, "file_size", @pSize)
             
-            @uRes = stableUpload(@uploadURL, "POST", @uBody)
+            @uRes = rawFormUpload(@uploadURL, "POST", @uBody, {})
             
             @uDict = getDictionary(@uRes)
             @uOKVal = getValue(@uDict, "ok")
