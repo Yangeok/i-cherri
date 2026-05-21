@@ -116,8 +116,7 @@ repeat i for @totalCount {
 
     @pTakenVal = getImageDetail(@item, "Creation Date")
     @pISOVal = formatDate(@pTakenVal, "ISO 8601")
-    @pISO: text
-    @pISO = getText(@pISOVal)
+    @pISO = "{@pISOVal}"
 
     @fileMeta = {
         "original_name": "{@pName}",
@@ -145,8 +144,7 @@ repeat i for @totalCount {
 
     @pTakenVal = getImageDetail(@item, "Creation Date")
     @pISOVal = formatDate(@pTakenVal, "ISO 8601")
-    @pISO: text
-    @pISO = getText(@pISOVal)
+    @pISO = "{@pISOVal}"
 
     // 조합 키 대조: "파일명|생성일"
     @mapKey: text
