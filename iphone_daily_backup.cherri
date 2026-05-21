@@ -29,18 +29,12 @@ comment('수정일시: 2026-05-21 15:13:30 KST')
 @uploadURL = "{@serverBase}/upload"
 
 // ShortcutInput이 있으면 자동화 날짜, 없으면 날짜 선택 프롬프트
-@inputStr: text
-@inputStr = getText(ShortcutInput)
-
-@hasInput: bool
-@hasInput = false
-if @inputStr {
-    @hasInput = true
-}
+@inputCount: number
+@inputCount = count(ShortcutInput)
 
 @targetDate: date
 
-if @hasInput {
+if @inputCount > 0 {
     @targetDate = ShortcutInput
 } else {
     @targetDate = prompt("업로드할 날짜를 선택하세요", "Date")
@@ -55,12 +49,10 @@ if @hasInput {
 @targetDay: text
 @targetDay = formatDate(@startDate, "Custom", "yyyy-MM-dd")
 
-// filter.photos: Photos 라이브러리 레벨에서 날짜 필터 (사진+영상 통합)
-// is.workflow.actions.filter.photos 를 standalone rawAction + setvariable 체인으로 출력 캡처
+// filter.photos: UUID는 setvariable이 출력을 참조하기 위해 필요
 @allMedia: variable
 rawAction("is.workflow.actions.filter.photos", {
     "UUID": "cafe0001-beef-dead-0000-123456789abc",
-    "CustomOutputName": "FilteredMedia",
     "WFContentItemFilter": {
         "Value": {
             "WFActionParameterFilterPrefix": 1,
@@ -70,17 +62,17 @@ rawAction("is.workflow.actions.filter.photos", {
                     "Property": "Creation Date",
                     "Removable": true,
                     "Values": {
-                        "Date": {
-                            "Value": {
-                                "Type": "Variable",
-                                "VariableName": "startDate"
-                            },
-                            "WFSerializationType": "WFTextTokenAttachment"
-                        },
                         "AnotherDate": {
                             "Value": {
                                 "Type": "Variable",
                                 "VariableName": "endDate"
+                            },
+                            "WFSerializationType": "WFTextTokenAttachment"
+                        },
+                        "Date": {
+                            "Value": {
+                                "Type": "Variable",
+                                "VariableName": "startDate"
                             },
                             "WFSerializationType": "WFTextTokenAttachment"
                         },
@@ -92,15 +84,13 @@ rawAction("is.workflow.actions.filter.photos", {
         },
         "WFSerializationType": "WFContentPredicateTableTemplate"
     },
-    "WFContentItemSortProperty": "Creation Date",
-    "WFContentItemSortOrder": "Latest First",
     "WFContentItemLimitEnabled": false
 })
 rawAction("is.workflow.actions.setvariable", {
     "WFVariableName": "allMedia",
     "WFInput": {
         "Value": {
-            "OutputName": "FilteredMedia",
+            "OutputName": "Filter Photos",
             "OutputUUID": "cafe0001-beef-dead-0000-123456789abc",
             "Type": "ActionOutput"
         },
