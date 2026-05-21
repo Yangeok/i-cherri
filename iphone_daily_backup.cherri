@@ -1,5 +1,5 @@
 /*
-수정일시: 2026-05-21 15:05:20 KST
+수정일시: 2026-05-21 15:09:37 KST
 설명: Go LAN 서버용 iPhone Daily 증분 백업 (사진+영상, filter.photos 네이티브 쿼리)
 */
 
@@ -15,10 +15,10 @@
 #define color blue
 #define mac false
 
-comment('수정일시: 2026-05-21 15:05:20 KST')
+comment('수정일시: 2026-05-21 15:09:37 KST')
 
 @serverIP: text
-@serverIP = "192.168.0.101"
+@serverIP = "MacBook-Pro-Intel.local"
 @serverBase: text
 @serverBase = "http://{@serverIP}:8787"
 
