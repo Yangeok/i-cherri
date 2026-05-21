@@ -27,3 +27,4 @@ vendor/
 # Temp files
 .tmp/
 com.local.cherri-sync.plist
+.gemini/
