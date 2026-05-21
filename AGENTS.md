@@ -63,3 +63,28 @@ rawAction 파라미터 최상위에서 `"${varName}"` → WFTextTokenAttachment 
 - **Pre-commit Hook**: 모든 커밋 전 Go 빌드와 Cherri 컴파일 성공 여부를 자동으로 검증한다.
 - **Commit Convention**: 커밋 메시지는 Commitizen (cz) 스타일의 영문을 사용한다. (예: `feat: add backup feature`, `fix: resolve crash in sync`)
 - **Finalization**: 작업이 완료되면 반드시 커밋을 수행하여 상태를 보존한다. 답변 시 변경된 컴포넌트(Go 앱, 단축어 등)와 실행해야 할 `make` 명령어를 짧게 안내한다.
+
+## GitHub Release Rules
+
+- **버저닝**: 사용자가 메이저/마이너 올리라고 명시하기 전까지는 패치 버전만 올린다. (예: `v0.1.0` → `v0.1.1`)
+- **릴리즈 타이틀**: 버전 태그만 쓴다. (예: `v0.1.1`)
+- **릴리즈 노트 템플릿** (주요 기능 + 릴리즈 파일 설명만):
+
+```
+## 주요 기능
+
+- 기능 설명 1
+- 기능 설명 2
+
+## 릴리즈 파일
+
+| 파일 | 설명 |
+|---|---|
+| `iPhone Daily Backup.shortcut` | 서명된 iOS 단축어 |
+| `cherri-sync-darwin-arm64` | 백업 서버 (Apple Silicon) |
+| `cherri-sync-darwin-x86_64` | 백업 서버 (Intel Mac) |
+| `organize-by-month-darwin-arm64` | 연월 폴더 정리 CLI (Apple Silicon) |
+| `organize-by-month-darwin-x86_64` | 연월 폴더 정리 CLI (Intel Mac) |
+```
+
+- **릴리즈 에셋**: `iPhone Daily Backup.shortcut`, `cherri-sync-darwin-arm64`, `cherri-sync-darwin-x86_64`, `organize-by-month-darwin-arm64`, `organize-by-month-darwin-x86_64`
