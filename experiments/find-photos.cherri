@@ -1,0 +1,6 @@
+#define color orange
+
+rawAction("is.workflow.actions.filter.photos", {
+	"WFContentItemFilter": "",
+	"WFContentItemLimitEnabled": false
+})
