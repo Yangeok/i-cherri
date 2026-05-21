@@ -1,5 +1,5 @@
 /*
-수정일시: 2026-05-21 13:55:57 KST
+수정일시: 2026-05-21 14:06:26 KST
 설명: Go LAN 서버용 iPhone Daily 증분 백업 (사진+영상, filter.photos 네이티브 쿼리)
 */
 
@@ -15,7 +15,7 @@
 #define color blue
 #define mac false
 
-comment('수정일시: 2026-05-21 13:55:57 KST')
+comment('수정일시: 2026-05-21 14:06:26 KST')
 
 @serverIP: text
 @serverIP = "192.168.0.101"
@@ -162,8 +162,9 @@ repeat i for @totalCount {
     // 조합 키 대조: "파일명|생성일"
     @mapKey: text
     @mapKey = "{@pName}|{@pISO}"
+    @mapKeyClean = replaceText(".", "_", @mapKey)
 
-    @pExValue = getValue(@checkMap, "{@mapKey}")
+    @pExValue = getValue(@checkMap, "{@mapKeyClean}")
     @pExStr: text
     @pExStr = "{@pExValue}"
 

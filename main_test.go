@@ -211,8 +211,8 @@ func TestGivenBatchCheck_WhenSomeFilesExist_ThenReturnsCorrectStatusMap(t *testi
 		t.Fatalf("failed to decode check-batch response: %v", err)
 	}
 
-	keyExist := "IMG_5555.HEIC|2026-05-21T10:00:00+09:00"
-	keyNotExist := "IMG_9999.HEIC|2026-05-21T10:00:00+09:00"
+	keyExist := "IMG_5555_HEIC|2026-05-21T10:00:00+09:00"
+	keyNotExist := "IMG_9999_HEIC|2026-05-21T10:00:00+09:00"
 
 	if val, ok := results[keyExist]; !ok || !val {
 		t.Fatalf("expected key %q to be true (exists), got %v (all: %v)", keyExist, val, results)

@@ -200,6 +200,7 @@ func (a *app) handleCheckBatch(w http.ResponseWriter, r *http.Request) {
 		originalName := strings.TrimSpace(file.OriginalName)
 		createdAt := normalizeCreatedAt(strings.TrimSpace(file.CreatedAt))
 		key := fmt.Sprintf("%s|%s", originalName, createdAt)
+		key = strings.ReplaceAll(key, ".", "_")
 
 		_, exists, err := lookupByMetadata(r.Context(), a.db, originalName, createdAt)
 		if err != nil {
