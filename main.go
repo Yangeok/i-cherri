@@ -353,7 +353,7 @@ func (a *app) saveUpload(w http.ResponseWriter, r *http.Request, src io.Reader, 
 
 	if existingPath, exists, err := lookupBySHA(r.Context(), a.db, shaValue); err == nil && exists {
 		log.Printf("upload sha-duplicate remote=%s sha256=%s existing=%s", r.RemoteAddr, shaValue, existingPath)
-		writeJSON(w, http.StatusOK, uploadResult{OK: false, Duplicate: true, ExistingPath: existingPath, SHA256: shaValue})
+		writeJSON(w, http.StatusOK, uploadResult{OK: true, Duplicate: true, ExistingPath: existingPath, SHA256: shaValue})
 		return
 	}
 

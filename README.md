@@ -37,6 +37,17 @@ i-cherri는 단순함과 성능을 위해 별도의 인증 레이어를 포함�
 
 ---
 
+## 📋 사전 요구 사항
+
+i-cherri를 빌드하고 실행하려면 다음 환경이 필요합니다.
+
+- **OS**: macOS (launchd 및 iOS Shortcut 연동 최적화)
+- **Go**: 1.20 버전 이상
+- **Cherri CLI**: iOS 단축어 소스(`.cherri`) 컴파일 및 서명을 위해 필요 ([설치 가이드](https://cherrilang.org/language/))
+- **Make**: 워크플로우 자동화를 위해 권장
+
+---
+
 ## 🚀 시작하기
 
 ### 1. 초기 전체 백업 및 인덱싱
