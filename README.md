@@ -144,6 +144,19 @@ CREATE TABLE files (
 
 ---
 
+## 🗺️ 로드맵 및 마일스톤
+
+i-cherri의 발전을 위한 마일스톤 계획입니다.
+
+| 마일스톤 | 대상 및 주요 기능 | 기대 효과 | 우선순위 / 난이도 | 관련 컴포넌트 |
+| :--- | :--- | :--- | :---: | :--- |
+| **M1: 성능 및 메타데이터** | <ul><li>`/check-batch` API 추가</li><li>서버 측 EXIF 자동 파싱</li><li>대용량 스트리밍 업로드</li></ul> | 단축어 실행 속도 획기적 개선 (10배+), 정확한 원본 촬영일 관리 | **높음** / 보통 | Go Server, Cherri Shortcut |
+| **M2: 다중 기기 & 무결성** | <ul><li>기기 식별 및 분리 저장</li><li>Live Photo 이미지-비디오 매칭</li><li>Bit-rot 감지 해시 검증</li></ul> | 여러 기기 백업 혼선 방지, 라이브 포토 통합 관리, 저장 안정성 | **보통** / 보통 | Go Server, SQLite DB, Cherri |
+| **M3: macOS 시스템 통합** | <ul><li>macOS Menu Bar App 개발</li><li>로컬 IP 자동 노출 기능</li><li>`launchd` 자동 설치 CLI</li></ul> | 단축어 IP 설정 편의성 개선, 서버 상태 상시 확인 및 시작/종료 관리 | **보통** / 보통 | Go Server, macOS UI (systray) |
+| **M4: 웹 대시보드 & UI** | <ul><li>임베디드 대시보드 UI</li><li>미디어 타임라인 그리드 뷰</li><li>썸네일 캐싱 및 HEIC 변환</li></ul> | 미디어 보관함 시각화, 편리한 웹 브라우징, 빠른 로딩 속도 | **낮음** / 높음 | Go Server (embed), Frontend (HTML/JS) |
+
+---
+
 ## 💬 API Reference
 
 - `GET /health`: 서버 상태 확인
