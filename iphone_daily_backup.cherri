@@ -1,5 +1,5 @@
 /*
-수정일시: 2026-05-21 15:09:37 KST
+수정일시: 2026-05-21 15:13:30 KST
 설명: Go LAN 서버용 iPhone Daily 증분 백업 (사진+영상, filter.photos 네이티브 쿼리)
 */
 
@@ -15,7 +15,7 @@
 #define color blue
 #define mac false
 
-comment('수정일시: 2026-05-21 15:09:37 KST')
+comment('수정일시: 2026-05-21 15:13:30 KST')
 
 @serverIP: text
 @serverIP = "MacBook-Pro-Intel.local"
@@ -38,20 +38,22 @@ if @inputStr {
     @hasInput = true
 }
 
-@targetDay: text
+@targetDate: date
 
 if @hasInput {
-    @targetDay = formatDate(ShortcutInput, "Custom", "yyyy-MM-dd")
+    @targetDate = ShortcutInput
 } else {
-    @selectedDate = prompt("업로드할 날짜를 선택하세요", "Date")
-    @targetDay = formatDate(@selectedDate, "Custom", "yyyy-MM-dd")
+    @targetDate = prompt("업로드할 날짜를 선택하세요", "Date")
 }
 
 // 날짜 범위: [startDate, endDate)
 @startDate: date
-@startDate = date("{@targetDay}")
+@startDate = adjustDate(@targetDate, "Get Start of Day")
 @endDate: date
 @endDate = adjustDate(@startDate, "Add", qty(1, "days"))
+
+@targetDay: text
+@targetDay = formatDate(@startDate, "Custom", "yyyy-MM-dd")
 
 // filter.photos: Photos 라이브러리 레벨에서 날짜 필터 (사진+영상 통합)
 // is.workflow.actions.filter.photos 를 standalone rawAction + setvariable 체인으로 출력 캡처
