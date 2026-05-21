@@ -101,6 +101,10 @@ func organize(srcDir, dstDir string, copy, dryRun bool) {
 			return err
 		}
 		if d.IsDir() {
+			// Skip year-month directories (e.g. 2021-09) to avoid reprocessing organized photos
+			if path != srcDir && isYearMonthDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
@@ -189,7 +193,16 @@ func organize(srcDir, dstDir string, copy, dryRun bool) {
 	for i := range tasks {
 		relFolder := tasks[i].dstDir
 		fileName := filepath.Base(tasks[i].srcPath)
-		dstPath := uniquePath(filepath.Join(relFolder, fileName), usedDstPaths)
+		targetPath := filepath.Join(relFolder, fileName)
+
+		// Safety: if the file is already at the target destination, do not rename or move it
+		if tasks[i].srcPath == targetPath {
+			tasks[i].dstPath = targetPath
+			usedDstPaths[targetPath] = true
+			continue
+		}
+
+		dstPath := uniquePath(targetPath, usedDstPaths)
 		tasks[i].dstPath = dstPath
 		usedDstPaths[dstPath] = true
 	}
@@ -210,6 +223,12 @@ func organize(srcDir, dstDir string, copy, dryRun bool) {
 		dstRel, err := filepath.Rel(dstDir, task.dstPath)
 		if err != nil {
 			dstRel = task.dstPath
+		}
+
+		if task.srcPath == task.dstPath {
+			// Skip actual operation and printing for files already in the correct place
+			okCount++
+			continue
 		}
 
 		fmt.Printf("[%s] %s  →  %s\n", action, srcRel, dstRel)
@@ -244,6 +263,24 @@ func organize(srcDir, dstDir string, copy, dryRun bool) {
 		label = "(dry-run) "
 	}
 	fmt.Printf("\n%sFinished: %d processed, %d errors, 0 skipped\n", label, okCount, errCount)
+}
+
+func isYearMonthDir(name string) bool {
+	if len(name) != 7 {
+		return false
+	}
+	if name[4] != '-' {
+		return false
+	}
+	for i := 0; i < 7; i++ {
+		if i == 4 {
+			continue
+		}
+		if name[i] < '0' || name[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func uniquePath(targetPath string, usedPaths map[string]bool) string {

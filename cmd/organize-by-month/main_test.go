@@ -110,3 +110,44 @@ func TestOrganizeWithAaeCompanion(t *testing.T) {
 		t.Errorf("Companion AAE file was not organized to %s", expectedAaeDst)
 	}
 }
+
+func TestOrganizeSkipsAlreadyOrganizedAndSkipsYyyyMmDirs(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := srcDir // same directory
+
+	// Create a YYYY-MM directory
+	alreadyOrganizedDir := filepath.Join(srcDir, "2021-09")
+	err := os.MkdirAll(alreadyOrganizedDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a file in the YYYY-MM directory
+	filePath := filepath.Join(alreadyOrganizedDir, "IMG_8477.JPG")
+	err = os.WriteFile(filePath, []byte("fake jpeg"), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set its mod time
+	originalTime := time.Date(2021, 9, 15, 12, 0, 0, 0, time.Local)
+	err = os.Chtimes(filePath, originalTime, originalTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Run organize (copy = false, dryRun = false)
+	// Since 2021-09 is skipped, it should not process IMG_8477.JPG at all, and it should not rename it to _1.JPG!
+	organize(srcDir, dstDir, false, false)
+
+	// Verify the original file still exists and has not been renamed
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		t.Errorf("File %s was unexpectedly renamed or deleted!", filePath)
+	}
+
+	// Verify no _1.JPG file was created
+	unexpectedPath := filepath.Join(alreadyOrganizedDir, "IMG_8477_1.JPG")
+	if _, err := os.Stat(unexpectedPath); err == nil {
+		t.Errorf("Unexpected renamed file %s was created!", unexpectedPath)
+	}
+}
