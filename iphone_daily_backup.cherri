@@ -1,5 +1,5 @@
 /*
-수정일시: 2026-05-21 12:00:00 KST
+수정일시: 2026-05-21 13:55:57 KST
 설명: Go LAN 서버용 iPhone Daily 증분 백업 (사진+영상, filter.photos 네이티브 쿼리)
 */
 
@@ -15,15 +15,15 @@
 #define color blue
 #define mac false
 
-comment('수정일시: 2026-05-21 12:00:00 KST')
+comment('수정일시: 2026-05-21 13:55:57 KST')
 
 @serverIP: text
 @serverIP = "192.168.0.101"
 @serverBase: text
 @serverBase = "http://{@serverIP}:8787"
 
-@checkURL: text
-@checkURL = "{@serverBase}/check"
+@checkBatchURL: text
+@checkBatchURL = "{@serverBase}/check-batch"
 
 @uploadURL: text
 @uploadURL = "{@serverBase}/upload"
@@ -115,6 +115,9 @@ rawAction("is.workflow.actions.setvariable", {
 @uploadedCount: number
 @uploadedCount = 0
 
+@batchList: variable
+
+// 1. 모든 미디어 메타데이터 수집 루프
 repeat i for @totalCount {
     @item = getListItem(@allMedia, @i)
 
@@ -127,13 +130,40 @@ repeat i for @totalCount {
     @pISO: text
     @pISO = getText(@pISOVal)
 
-    // 1. 중복 체크
-    @pCheckRes = jsonRequest(@checkURL, "POST", {
+    @fileMeta = {
         "original_name": "{@pName}",
         "created_at": "{@pISO}"
+    }
+    rawAction("is.workflow.actions.addtovariable", {
+        "WFVariableName": "batchList",
+        "WFInput": "${fileMeta}"
     })
-    @pCheckDict = getDictionary(@pCheckRes)
-    @pExValue = getValue(@pCheckDict, "exists")
+}
+
+// 2. 일괄 중복 체크 요청
+@pCheckRes = jsonRequest(@checkBatchURL, "POST", {
+    "files": "${batchList}"
+})
+@checkMap = getDictionary(@pCheckRes)
+
+// 3. 필터링 및 실제 업로드 루프
+repeat i for @totalCount {
+    @item = getListItem(@allMedia, @i)
+
+    @pNameVal = getImageDetail(@item, "Name")
+    @pName: text
+    @pName = "{@pNameVal}"
+
+    @pTakenVal = getImageDetail(@item, "Creation Date")
+    @pISOVal = formatDate(@pTakenVal, "ISO 8601")
+    @pISO: text
+    @pISO = getText(@pISOVal)
+
+    // 조합 키 대조: "파일명|생성일"
+    @mapKey: text
+    @mapKey = "{@pName}|{@pISO}"
+
+    @pExValue = getValue(@checkMap, "{@mapKey}")
     @pExStr: text
     @pExStr = "{@pExValue}"
 
@@ -156,7 +186,6 @@ repeat i for @totalCount {
     }
 
     if @shouldUpload {
-        // 2. 업로드: WFRequestVariable로 직접 파일 참조, 메타데이터는 쿼리 파라미터
         @pISOEncoded = urlEncode("{@pISO}")
         @metaURL: text
         @metaURL = "{@uploadURL}?original_name={@pName}&created_at={@pISOEncoded}"

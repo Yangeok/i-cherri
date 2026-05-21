@@ -93,6 +93,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", app.handleHealth)
 	mux.HandleFunc("/check", app.handleCheck)
+	mux.HandleFunc("/check-batch", app.handleCheckBatch)
 	mux.HandleFunc("/upload", app.handleUpload)
 
 	// 모든 요청을 진입점에서 로깅하는 미들웨어
@@ -165,6 +166,52 @@ func (a *app) handleCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"exists": false,
 	})
+}
+
+type checkItem struct {
+	OriginalName string `json:"original_name"`
+	CreatedAt    string `json:"created_at"`
+}
+
+type checkBatchRequest struct {
+	Files []checkItem `json:"files"`
+}
+
+func (a *app) handleCheckBatch(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[REQ] POST /check-batch from %s", r.RemoteAddr)
+	if r.Method != http.MethodPost {
+		log.Printf("check-batch rejected remote=%s method=%s", r.RemoteAddr, r.Method)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	defer r.Body.Close()
+	var req checkBatchRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&req); err != nil {
+		log.Printf("check-batch invalid-json remote=%s err=%v", r.RemoteAddr, err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+
+	results := make(map[string]bool)
+	for _, file := range req.Files {
+		originalName := strings.TrimSpace(file.OriginalName)
+		createdAt := normalizeCreatedAt(strings.TrimSpace(file.CreatedAt))
+		key := fmt.Sprintf("%s|%s", originalName, createdAt)
+
+		_, exists, err := lookupByMetadata(r.Context(), a.db, originalName, createdAt)
+		if err != nil {
+			log.Printf("check-batch lookup failed original_name=%q created_at=%q err=%v", originalName, createdAt, err)
+			results[key] = false
+			continue
+		}
+		results[key] = exists
+	}
+
+	log.Printf("check-batch remote=%s count=%d", r.RemoteAddr, len(req.Files))
+	writeJSON(w, http.StatusOK, results)
 }
 
 func (a *app) handleUpload(w http.ResponseWriter, r *http.Request) {

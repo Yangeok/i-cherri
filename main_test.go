@@ -167,6 +167,61 @@ func TestGivenDuplicateContent_WhenUploadedTwice_ThenSecondUploadReturnsDuplicat
 	}
 }
 
+func TestGivenBatchCheck_WhenSomeFilesExist_ThenReturnsCorrectStatusMap(t *testing.T) {
+	t.Helper()
+	app := newTestApp(t)
+
+	// Given - upload one file to make it exist
+	payload := []byte("batch-check-content")
+	createdAt := "2026-05-21T10:00:00+09:00"
+	uploadReq := newMultipartUploadRequest(t, payload, "IMG_5555.HEIC", "IMG_5555.HEIC", createdAt, "19")
+	uploadRR := httptest.NewRecorder()
+	app.handleUpload(uploadRR, uploadReq)
+
+	if uploadRR.Code != http.StatusOK {
+		t.Fatalf("expected upload status 200, got %d", uploadRR.Code)
+	}
+
+	// Prepare batch check request
+	batchReqBody := map[string]any{
+		"files": []map[string]string{
+			{
+				"original_name": "IMG_5555.HEIC",
+				"created_at":    createdAt,
+			},
+			{
+				"original_name": "IMG_9999.HEIC", // does not exist
+				"created_at":    createdAt,
+			},
+		},
+	}
+	req := newJSONRequest(t, "/check-batch", batchReqBody)
+	rr := httptest.NewRecorder()
+
+	// When
+	app.handleCheckBatch(rr, req)
+
+	// Then
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected check-batch status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var results map[string]bool
+	if err := json.Unmarshal(rr.Body.Bytes(), &results); err != nil {
+		t.Fatalf("failed to decode check-batch response: %v", err)
+	}
+
+	keyExist := "IMG_5555.HEIC|2026-05-21T10:00:00+09:00"
+	keyNotExist := "IMG_9999.HEIC|2026-05-21T10:00:00+09:00"
+
+	if val, ok := results[keyExist]; !ok || !val {
+		t.Fatalf("expected key %q to be true (exists), got %v (all: %v)", keyExist, val, results)
+	}
+	if val, ok := results[keyNotExist]; !ok || val {
+		t.Fatalf("expected key %q to be false (does not exist), got %v (all: %v)", keyNotExist, val, results)
+	}
+}
+
 func newTestApp(t *testing.T) *app {
 	t.Helper()
 
