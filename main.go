@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -93,15 +95,16 @@ func main() {
 	mux.HandleFunc("/check", app.handleCheck)
 	mux.HandleFunc("/upload", app.handleUpload)
 
-	// 모든 요청을 로깅하는 미들웨어 추가
-	loggingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("[REQ] %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+	// 모든 요청을 진입점에서 로깅하는 미들웨어
+	rootHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[ENTRY] %s %s from %s (Length: %d, Type: %s)", 
+			r.Method, r.URL.Path, r.RemoteAddr, r.ContentLength, r.Header.Get("Content-Type"))
 		mux.ServeHTTP(w, r)
 	})
 
 	server := &http.Server{
 		Addr:              defaultAddr,
-		Handler:           loggingHandler,
+		Handler:           rootHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -141,9 +144,8 @@ func (a *app) handleCheck(w http.ResponseWriter, r *http.Request) {
 
 	originalName := strings.TrimSpace(stringValue(payload["original_name"]))
 	createdAt := normalizeCreatedAt(strings.TrimSpace(stringValue(payload["created_at"])))
-	fileSize, _ := int64Value(payload["file_size"])
 
-	savedPath, exists, err := lookupByMetadata(r.Context(), a.db, originalName, createdAt, fileSize)
+	savedPath, exists, err := lookupByMetadata(r.Context(), a.db, originalName, createdAt)
 	if err != nil {
 		log.Printf("check failed name=%q err=%v", originalName, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "check failed"})
@@ -173,13 +175,50 @@ func (a *app) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 디버깅을 위해 Content-Type 로그 기록
 	contentType := r.Header.Get("Content-Type")
 	log.Printf("upload attempt remote=%s content-type=%q", r.RemoteAddr, contentType)
 
+	switch {
+	case strings.HasPrefix(contentType, "multipart/form-data"):
+		a.handleMultipartUpload(w, r)
+	case strings.HasPrefix(contentType, "application/json"):
+		a.handleJSONUpload(w, r)
+	default:
+		a.handleRawBodyUpload(w, r)
+	}
+}
+
+func (a *app) handleJSONUpload(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, a.maxBytes*2)
+
+	var payload struct {
+		FileData     string `json:"file_data"`
+		OriginalName string `json:"original_name"`
+		CreatedAt    string `json:"created_at"`
+		FileSize     string `json:"file_size"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		log.Printf("upload json-decode-failed remote=%s err=%v", r.RemoteAddr, err)
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+		return
+	}
+
+	fileBytes, err := base64.StdEncoding.DecodeString(payload.FileData)
+	if err != nil {
+		// iOS Shortcuts may produce URL-safe or padded variants
+		fileBytes, err = base64.RawStdEncoding.DecodeString(payload.FileData)
+		if err != nil {
+			log.Printf("upload base64-decode-failed remote=%s err=%v", r.RemoteAddr, err)
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid base64"})
+			return
+		}
+	}
+
+	a.saveUpload(w, r, bytes.NewReader(fileBytes), payload.OriginalName, "", payload.CreatedAt)
+}
+
+func (a *app) handleMultipartUpload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, a.maxBytes)
-	
-	// ParseMultipartForm 사용 (32MB까지 메모리 사용, 그 이상은 임시 파일)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		log.Printf("upload parse-failed remote=%s err=%v", r.RemoteAddr, err)
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("invalid multipart request: %v", err)})
@@ -201,6 +240,70 @@ func (a *app) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	createdAtRaw := r.FormValue("created_at")
 
+	a.saveUpload(w, r, file, originalName, header.Filename, createdAtRaw)
+}
+
+func (a *app) handleRawBodyUpload(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	originalName := q.Get("original_name")
+	if originalName == "" {
+		originalName = r.Header.Get("X-Original-Name")
+	}
+	createdAtRaw := q.Get("created_at")
+	if createdAtRaw == "" {
+		createdAtRaw = r.Header.Get("X-Created-At")
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, a.maxBytes)
+	a.saveUpload(w, r, r.Body, originalName, "", createdAtRaw)
+}
+
+func detectExt(p []byte) string {
+	if len(p) < 4 {
+		return ""
+	}
+	if p[0] == 0xFF && p[1] == 0xD8 && p[2] == 0xFF {
+		return ".jpg"
+	}
+	if p[0] == 0x89 && p[1] == 0x50 && p[2] == 0x4E && p[3] == 0x47 {
+		return ".png"
+	}
+	if p[0] == 0x47 && p[1] == 0x49 && p[2] == 0x46 {
+		return ".gif"
+	}
+	if len(p) >= 12 {
+		ftyp := string(p[4:8])
+		brand := string(p[8:12])
+		if ftyp == "ftyp" {
+			switch brand {
+			case "heic", "heix", "hevc", "hevx":
+				return ".heic"
+			case "mif1", "msf1":
+				return ".heif"
+			case "avif":
+				return ".avif"
+			case "qt  ":
+				return ".mov"
+			default:
+				if strings.HasPrefix(brand, "mp4") || brand == "isom" || brand == "M4V " {
+					return ".mp4"
+				}
+			}
+		}
+	}
+	if len(p) >= 12 && p[0] == 0x52 && p[1] == 0x49 && p[2] == 0x46 && p[3] == 0x46 &&
+		p[8] == 0x57 && p[9] == 0x45 && p[10] == 0x42 && p[11] == 0x50 {
+		return ".webp"
+	}
+	return ""
+}
+
+func (a *app) saveUpload(w http.ResponseWriter, r *http.Request, src io.Reader, originalName, fallbackName, createdAtRaw string) {
+	// Peek first 16 bytes for magic-number extension detection
+	var peek [16]byte
+	n, _ := io.ReadFull(src, peek[:])
+	src = io.MultiReader(bytes.NewReader(peek[:n]), src)
+
 	tmpFile, err := os.CreateTemp(filepath.Join(a.backupDir, ".tmp"), "upload-*")
 	if err != nil {
 		log.Printf("upload tmp-create-failed err=%v", err)
@@ -215,7 +318,7 @@ func (a *app) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	hasher := sha256.New()
-	written, err := io.Copy(io.MultiWriter(tmpFile, hasher), file)
+	written, err := io.Copy(io.MultiWriter(tmpFile, hasher), src)
 	if err != nil {
 		log.Printf("upload copy-failed err=%v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to save uploaded file"})
@@ -223,9 +326,23 @@ func (a *app) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = tmpFile.Close()
 
+	if written == 0 {
+		log.Printf("upload empty-body remote=%s", r.RemoteAddr)
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "empty body"})
+		return
+	}
+
 	shaValue := hex.EncodeToString(hasher.Sum(nil))
-	finalName := sanitizeFilename(chooseOriginalName(originalName, header.Filename))
-	
+	finalName := sanitizeFilename(chooseOriginalName(originalName, fallbackName))
+	if finalName == "" {
+		finalName = generatedName("upload", time.Now())
+	}
+	if filepath.Ext(finalName) == "" {
+		if ext := detectExt(peek[:n]); ext != "" {
+			finalName += ext
+		}
+	}
+
 	createdAtTime, createdAtStored := parseCreatedAtOrNow(createdAtRaw)
 	monthFolder := createdAtTime.Format("2006-01")
 	targetDir := filepath.Join(a.backupDir, monthFolder)
@@ -234,9 +351,9 @@ func (a *app) handleUpload(w http.ResponseWriter, r *http.Request) {
 	a.saveMu.Lock()
 	defer a.saveMu.Unlock()
 
-	// 중복 체크 및 저장 로직 (기존과 동일)
 	if existingPath, exists, err := lookupBySHA(r.Context(), a.db, shaValue); err == nil && exists {
-		writeJSON(w, http.StatusOK, uploadResult{OK: true, Duplicate: true, ExistingPath: existingPath, SHA256: shaValue})
+		log.Printf("upload sha-duplicate remote=%s sha256=%s existing=%s", r.RemoteAddr, shaValue, existingPath)
+		writeJSON(w, http.StatusOK, uploadResult{OK: false, Duplicate: true, ExistingPath: existingPath, SHA256: shaValue})
 		return
 	}
 
@@ -245,7 +362,7 @@ func (a *app) handleUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to move file"})
 		return
 	}
-	tmpFile = nil // defer에서 삭제 방지
+	tmpFile = nil
 
 	uploadedAt := time.Now().Format(time.RFC3339)
 	_ = insertFile(r.Context(), a.db, shaValue, finalName, targetPath, createdAtStored, written, uploadedAt)
@@ -255,6 +372,19 @@ func (a *app) handleUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func openDB(dbPath string) (*sql.DB, error) {
+	db, err := openDBOnce(dbPath)
+	if err != nil {
+		// corrupt WAL/SHM leftover — wipe and retry once
+		log.Printf("db open failed (%v), removing corrupt files and retrying", err)
+		for _, suf := range []string{"", "-wal", "-shm"} {
+			_ = os.Remove(dbPath + suf)
+		}
+		db, err = openDBOnce(dbPath)
+	}
+	return db, err
+}
+
+func openDBOnce(dbPath string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
@@ -378,17 +508,16 @@ func reindex(db *sql.DB, backupDir string) error {
 	return nil
 }
 
-func lookupByMetadata(ctx context.Context, db *sql.DB, originalName, createdAt string, fileSize int64) (string, bool, error) {
+func lookupByMetadata(ctx context.Context, db *sql.DB, originalName, createdAt string) (string, bool, error) {
 	var savedPath string
 	err := db.QueryRowContext(
 		ctx,
 		`SELECT saved_path
 		 FROM files
-		 WHERE original_name = ? AND created_at = ? AND file_size = ?
+		 WHERE original_name = ? AND created_at = ?
 		 LIMIT 1`,
 		originalName,
 		createdAt,
-		fileSize,
 	).Scan(&savedPath)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
