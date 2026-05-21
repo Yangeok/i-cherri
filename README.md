@@ -58,8 +58,11 @@ i-cherri를 빌드하고 실행하려면 다음 환경이 필요합니다.
 2. 사진/영상을 Mac의 백업 폴더 (기본값: `~/Photos`)로 직접 복사합니다.
 3. 복사된 파일들을 연월별 폴더(`YYYY-MM`)로 자동 정리합니다:
    ```bash
+   # 빌드 수행
+   make organize
+
    # 복사한 파일들을 연월 폴더로 이동 및 정리
-   python3 organize_by_month.py
+   ./dist/organize-by-month <백업된 폴더 경로>
    ```
    *참고: 파일은 반드시 `YYYY-MM` 폴더 구조로 정리되어야 서버가 인식합니다.*
 4. 인덱스를 생성합니다:
