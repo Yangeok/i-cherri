@@ -5,7 +5,7 @@
 # i-cherri
 
 <p align="center">
-  <a href="file:///Users/yangeok/Dev/Test/i-cherri/README.md">English</a> | 
+  <a href="README.md">English</a> | 
   <b>한국어</b>
 </p>
 
@@ -37,10 +37,10 @@ i-cherri는 단순함과 성능을 위해 별도의 인증 레이어를 포함�
 
 ## 🛠 구성 요소
 
-- [main.go](file:///Users/yangeok/Dev/Test/i-cherri/main.go): 고성능 Go HTTP 서버 및 인덱싱 엔진
-- [iphone_daily_backup.cherri](file:///Users/yangeok/Dev/Test/i-cherri/iphone_daily_backup.cherri): Cherri 기반 iOS 증분 백업 소스
-- [com.local.cherri-sync.plist](file:///Users/yangeok/Dev/Test/i-cherri/com.local.cherri-sync.plist): macOS 전용 launchd 자동 실행 템플릿
-- [Makefile](file:///Users/yangeok/Dev/Test/i-cherri/Makefile): 빌드 및 관리를 위한 워크플로우 자동화
+- [main.go](main.go): 고성능 Go HTTP 서버 및 인덱싱 엔진
+- [iphone_daily_backup.cherri](iphone_daily_backup.cherri): Cherri 기반 iOS 증분 백업 소스
+- [com.local.i-cherri.plist.template](com.local.i-cherri.plist.template): macOS 전용 launchd 자동 실행 템플릿
+- [Makefile](Makefile): 빌드 및 관리를 위한 워크플로우 자동화
 
 ---
 
@@ -63,11 +63,11 @@ i-cherri를 빌드하고 실행하려면 다음 환경이 필요합니다.
 2. 사진/영상을 Mac의 백업 폴더 (기본값: `~/Photos`)로 직접 복사합니다.
 3. 복사된 파일들을 연월별 폴더(`YYYY-MM`)로 자동 정리합니다:
    ```bash
-   # 빌드 수행
-   make organize
+   # init CLI 빌드
+   make init
 
    # 복사한 파일들을 연월 폴더로 이동 및 정리
-   ./dist/organize-by-month <백업된 폴더 경로>
+   ./dist/init <백업된 폴더 경로>
    ```
    *참고: 파일은 반드시 `YYYY-MM` 폴더 구조로 정리되어야 서버가 인식합니다.*
 4. 인덱스를 생성합니다:
@@ -132,7 +132,7 @@ make run
 ~/Photos/
 ├── 2026-04/
 ├── 2026-05/
-└── .iphone-backup-index.sqlite3
+└── .i-cherri.sqlite3
 ```
 
 ### SQLite 스키마
@@ -155,6 +155,7 @@ CREATE TABLE files (
 
 - `make all`: Go 서버 및 단축어 전체 빌드
 - `make go`: Go 서버 바이너리 빌드
+- `make init`: init CLI 빌드
 - `make shortcut`: Signed 단축어 빌드
 - `make reindex`: 사진 보관함 재인덱싱
 - `make run`: 서버 재빌드 및 백그라운드 실행

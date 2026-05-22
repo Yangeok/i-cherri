@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>English</b> | 
-  <a href="file:///Users/yangeok/Dev/Test/i-cherri/README.ko.md">한국어</a>
+  <a href="README.ko.md">한국어</a>
 </p>
 
 **i-cherri** is a macOS (and other OS) local LAN backup solution designed to secure, speed up, and streamline the backup of iPhone photos and videos.  
@@ -37,10 +37,10 @@ For simplicity and maximum performance, i-cherri does not include a separate aut
 
 ## 🛠 Components
 
-- [main.go](file:///Users/yangeok/Dev/Test/i-cherri/main.go): High-performance Go HTTP server and indexing engine
-- [iphone_daily_backup.cherri](file:///Users/yangeok/Dev/Test/i-cherri/iphone_daily_backup.cherri): Cherri-based iOS incremental backup source
-- [com.local.i-cherri.plist](file:///Users/yangeok/Dev/Test/i-cherri/com.local.i-cherri.plist): macOS launchd auto-run template
-- [Makefile](file:///Users/yangeok/Dev/Test/i-cherri/Makefile): Workflow automation for building and management
+- [main.go](main.go): High-performance Go HTTP server and indexing engine
+- [iphone_daily_backup.cherri](iphone_daily_backup.cherri): Cherri-based iOS incremental backup source
+- [com.local.i-cherri.plist.template](com.local.i-cherri.plist.template): macOS launchd auto-run template
+- [Makefile](Makefile): Workflow automation for building and management
 
 ---
 
