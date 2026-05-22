@@ -175,6 +175,14 @@ Roadmap for future improvements of i-cherri:
 | **M3: macOS Integration** | <ul><li>macOS Menu Bar App development</li><li>Local IP auto-discovery</li><li>`launchd` auto-install CLI</li></ul> | Better Shortcut configuration UX, real-time server status management | **Medium** / Medium | Go Server, macOS UI (systray) |
 | **M4: Web Dashboard & UI** | <ul><li>Embedded dashboard UI</li><li>Media timeline grid view</li><li>Thumbnail caching & HEIC conversion</li></ul> | Visualized photo library, comfortable web browsing, faster loading times | **Low** / High | Go Server (embed), Frontend (HTML/JS) |
 
+### 💡 M1 Hybrid Large Upload Architecture Detail
+To overcome the iOS Shortcuts memory limit (OOM crash on HTTP POST), M1 defines the following hybrid transmission structure:
+
+1. **Check First**: Before uploading, the Shortcut collects metadata (filename, creation date) and queries the Go server's `/check-batch` API in a single request to filter out already backed up media.
+2. **Small Files (HTTP POST)**: Media files under 100MB are uploaded directly via HTTP POST `/upload` from the Shortcut.
+3. **Large Files (SMB + Go Post-processing)**: Media files exceeding 100MB are copied to the server's temporary incoming directory (`.tmp/incoming/`) using the iOS native `Save File` action via SMB protocol. (iOS File app daemon handles streaming copy efficiently, preventing OOM).
+4. **Migration & Indexing**: Once the copy is completed, the Shortcut triggers the Go server (or the server automatically detects it). The Go server calculates the SHA-256 hash of the temporary file, verifies it's not a duplicate, moves (Renames) it to the final `YYYY-MM` directory, and registers it in the SQLite DB. Duplicate files are purged immediately.
+
 ---
 
 ## 💬 API Reference
