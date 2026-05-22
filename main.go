@@ -29,7 +29,7 @@ const (
 	defaultAddr      = ":8787"
 	defaultBackupDir = "~/Photos"
 	defaultMaxBytes  = int64(2147483648)
-	dbFileName       = ".iphone-backup-index.sqlite3"
+	dbFileName       = ".i-cherri.sqlite3"
 )
 
 type app struct {
@@ -57,7 +57,7 @@ func main() {
 	reindexFlag := flag.Bool("reindex", false, "scan backup_dir and rebuild sqlite index")
 	flag.Parse()
 
-	log.Printf("cherri-sync starting (build: %s)", buildTime)
+	log.Printf("i-cherri starting (build: %s)", buildTime)
 
 	backupDir, err := resolveBackupDir()
 	if err != nil {

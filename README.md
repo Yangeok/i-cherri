@@ -39,7 +39,7 @@ For simplicity and maximum performance, i-cherri does not include a separate aut
 
 - [main.go](file:///Users/yangeok/Dev/Test/i-cherri/main.go): High-performance Go HTTP server and indexing engine
 - [iphone_daily_backup.cherri](file:///Users/yangeok/Dev/Test/i-cherri/iphone_daily_backup.cherri): Cherri-based iOS incremental backup source
-- [com.local.cherri-sync.plist](file:///Users/yangeok/Dev/Test/i-cherri/com.local.cherri-sync.plist): macOS launchd auto-run template
+- [com.local.i-cherri.plist](file:///Users/yangeok/Dev/Test/i-cherri/com.local.i-cherri.plist): macOS launchd auto-run template
 - [Makefile](file:///Users/yangeok/Dev/Test/i-cherri/Makefile): Workflow automation for building and management
 
 ---
@@ -67,7 +67,7 @@ To build and run i-cherri, you need the following environment:
    make organize
 
    # Move and organize copied files into YYYY-MM folders
-   ./dist/organize-by-month <path_to_backup_directory>
+   ./dist/init <path_to_backup_directory>
    ```
    *Note: The server only recognizes files structured inside `YYYY-MM` directories.*
 4. Build the database index:
@@ -132,7 +132,7 @@ If a wired connection is inconvenient, you can copy the initial large batch of f
 ~/Photos/
 ├── 2026-04/
 ├── 2026-05/
-└── .iphone-backup-index.sqlite3
+└── .i-cherri.sqlite3
 ```
 
 ### SQLite Schema

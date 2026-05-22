@@ -1,4 +1,4 @@
-module cherri-sync
+module i-cherri
 
 go 1.19
 

@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.local.iphone-backup-server</string>
+  <string>com.local.i-cherri</string>
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/YOUR_USERNAME/bin/cherri-sync</string>
+    <string>/Users/YOUR_USERNAME/bin/i-cherri</string>
   </array>
 
   <key>RunAtLoad</key>
@@ -20,9 +20,9 @@
   <string>/Users/YOUR_USERNAME</string>
 
   <key>StandardOutPath</key>
-  <string>/Users/YOUR_USERNAME/Library/Logs/cherri-sync.out.log</string>
+  <string>/Users/YOUR_USERNAME/Library/Logs/i-cherri.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/YOUR_USERNAME/Library/Logs/cherri-sync.err.log</string>
+  <string>/Users/YOUR_USERNAME/Library/Logs/i-cherri.err.log</string>
 </dict>
 </plist>
