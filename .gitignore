@@ -28,3 +28,4 @@ vendor/
 .tmp/
 com.local.cherri-sync.plist
 .gemini/
+.antigravitycli/
