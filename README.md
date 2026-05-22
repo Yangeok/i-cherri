@@ -63,8 +63,8 @@ To build and run i-cherri, you need the following environment:
 2. Directly copy photos/videos to your Mac's backup directory (default: `~/Photos`).
 3. Organize the copied files into year-month folders (`YYYY-MM`) automatically:
    ```bash
-   # Build the organizer
-   make organize
+   # Build the init CLI
+   make init
 
    # Move and organize copied files into YYYY-MM folders
    ./dist/init <path_to_backup_directory>
@@ -155,6 +155,7 @@ CREATE TABLE files (
 
 - `make all`: Build both the Go server and the Shortcut
 - `make go`: Build only the Go server binary
+- `make init`: Build only the init CLI
 - `make shortcut`: Build only the Signed Shortcut
 - `make reindex`: Re-index the photos library database
 - `make run`: Rebuild Go binary and run the server in the background
