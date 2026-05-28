@@ -227,7 +227,43 @@ extension AppCoordinator: ReceiverRouteHandler {
             }
         }
         
+        // POST /pair
+        if method == "POST" && path == "/pair" {
+            return await handlePairRequest(request)
+        }
+        
         return .notFound
+    }
+    
+    private func handlePairRequest(_ request: HTTPRequest) async -> HTTPResponse {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        guard let body = try? decoder.decode(PairingStartRequest.self, from: request.body) else {
+            return .error(code: "invalid_body", message: "Failed to parse PairingStartRequest")
+        }
+        
+        let now = Date()
+        let trustToken = UUID().uuidString
+        let record = PairedDeviceRecord(
+            id: nil,
+            deviceId: body.deviceID,
+            deviceName: body.deviceName,
+            pairingStatus: "paired",
+            createdAt: now,
+            lastSeenAt: now,
+            trustToken: trustToken
+        )
+        
+        do {
+            try await DatabaseManager.shared.upsertDevice(record)
+            print("[AppCoordinator] Device paired: \(body.deviceName) (\(body.deviceID))")
+            
+            let response = PairingConfirmResponse(status: "paired", trustToken: trustToken)
+            return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
+        } catch {
+            return .error(code: "pair_error", message: error.localizedDescription, status: 500)
+        }
     }
     
     private func handleCommitRequest(_ request: HTTPRequest, uploadID: String) async -> HTTPResponse {
