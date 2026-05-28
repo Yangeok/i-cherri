@@ -2,10 +2,12 @@ import SwiftUI
 import ICherriProtocol
 
 // macOS menu bar status icon with quick-link popover showing receiver state.
-struct MenuBarExtraItem: Scene {
+public struct MenuBarExtraItem: Scene {
     @StateObject private var state = MenuBarState()
 
-    var body: some Scene {
+    public init() {}
+
+    public var body: some Scene {
         MenuBarExtra {
             MenuBarPopoverContent(state: state)
         } label: {

@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		F1706B662FC5DBA600D3C6C8 /* iCherri-Mac in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C8 /* iCherri-Mac */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		F1706B3E2FC5DBA000D3C6C7 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F1706B662FC5DBA600D3C6C8 /* iCherri-Mac in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = "iCherri-Mac";
 			packageProductDependencies = (
+				F1706B652FC5DBA600D3C6C8 /* iCherri-Mac */,
 			);
 			productName = "iCherri-Mac";
 			productReference = F1706B2C2FC5DB9F00D3C6C7 /* iCherri-Mac.app */;
@@ -204,8 +210,26 @@
 				F1706B3C2FC5DBA000D3C6C7 /* iCherri-MacTests */,
 				F1706B462FC5DBA000D3C6C7 /* iCherri-MacUITests */,
 			);
+			packageReferences = (
+				F1706B622FC5DBA500D3C6C8 /* XCLocalSwiftPackageReference */,
+			);
 		};
 /* End PBXProject section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		F1706B622FC5DBA500D3C6C8 /* XCLocalSwiftPackageReference */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "..";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F1706B652FC5DBA600D3C6C8 /* iCherri-Mac */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F1706B622FC5DBA500D3C6C8 /* XCLocalSwiftPackageReference */;
+			productName = "iCherri-Mac";
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXResourcesBuildPhase section */
 		F1706B2A2FC5DB9F00D3C6C7 /* Resources */ = {

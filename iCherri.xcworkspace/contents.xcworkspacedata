@@ -1,9 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Workspace version="1.0">
-   <FileRef location="group:apps/ios/iCherri-iOS"/>
-   <FileRef location="group:apps/mac/iCherri-Mac"/>
-   <FileRef location="group:packages/ICherriProtocol"/>
-   <FileRef location="group:packages/ICherriCore"/>
-   <FileRef location="group:packages/ICherriDesignSystem"/>
-   <FileRef location="group:packages/ICherriPreviewSupport"/>
+<Workspace
+   version = "1.0">
+   <FileRef
+      location = "group:apps/ios/iCherri-iOS">
+   </FileRef>
+   <FileRef
+      location = "group:apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios.xcodeproj">
+   </FileRef>
+   <FileRef
+      location = "group:apps/mac/iCherri-Mac">
+   </FileRef>
+   <FileRef
+      location = "group:apps/mac/iCherri-Mac/iCherri-Mac/iCherri-Mac.xcodeproj">
+   </FileRef>
+   <FileRef
+      location = "group:packages/ICherriProtocol">
+   </FileRef>
+   <FileRef
+      location = "group:packages/ICherriCore">
+   </FileRef>
+   <FileRef
+      location = "group:packages/ICherriDesignSystem">
+   </FileRef>
+   <FileRef
+      location = "group:packages/ICherriPreviewSupport">
+   </FileRef>
 </Workspace>

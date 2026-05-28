@@ -6,12 +6,13 @@
 //
 
 import SwiftUI
+import iCherri_iOS
 
 @main
 struct iCherri_iosApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            BackupDashboardView()
         }
     }
 }

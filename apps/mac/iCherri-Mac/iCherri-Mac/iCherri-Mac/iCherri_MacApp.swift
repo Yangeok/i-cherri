@@ -6,12 +6,11 @@
 //
 
 import SwiftUI
+import iCherri_Mac
 
 @main
 struct iCherri_MacApp: App {
     var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
+        MenuBarExtraItem()
     }
 }
