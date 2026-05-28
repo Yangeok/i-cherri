@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import iCherri_iOS
 
 @main
 struct iCherri_iosApp: App {

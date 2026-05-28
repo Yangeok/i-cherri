@@ -7,7 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		F1706B662FC5DBA600D3C6C7 /* iCherri-iOS in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C7 /* iCherri-iOS */; };
+		F1706B662FC5DBA600D3C6C1 /* ICherriProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C1 /* ICherriProtocol */; };
+		F1706B662FC5DBA600D3C6C2 /* ICherriCore in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C2 /* ICherriCore */; };
+		F1706B662FC5DBA600D3C6C3 /* ICherriDesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C3 /* ICherriDesignSystem */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -39,6 +41,16 @@
 			path = "iCherri-ios";
 			sourceTree = "<group>";
 		};
+		F1706B9C2FC5DBE900D3C6C7 /* Platform */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "../Platform";
+			sourceTree = "<group>";
+		};
+		F1706B9D2FC5DBE900D3C6C7 /* Features */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "../Features";
+			sourceTree = "<group>";
+		};
 		F1706BAC2FC5DBEA00D3C6C7 /* iCherri-iosTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "iCherri-iosTests";
@@ -56,7 +68,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F1706B662FC5DBA600D3C6C7 /* iCherri-iOS in Frameworks */,
+				F1706B662FC5DBA600D3C6C1 /* ICherriProtocol in Frameworks */,
+				F1706B662FC5DBA600D3C6C2 /* ICherriCore in Frameworks */,
+				F1706B662FC5DBA600D3C6C3 /* ICherriDesignSystem in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -81,6 +95,8 @@
 			isa = PBXGroup;
 			children = (
 				F1706B9B2FC5DBE900D3C6C7 /* iCherri-ios */,
+				F1706B9C2FC5DBE900D3C6C7 /* Platform */,
+				F1706B9D2FC5DBE900D3C6C7 /* Features */,
 				F1706BAC2FC5DBEA00D3C6C7 /* iCherri-iosTests */,
 				F1706BB62FC5DBEA00D3C6C7 /* iCherri-iosUITests */,
 				F1706B9A2FC5DBE900D3C6C7 /* Products */,
@@ -114,10 +130,14 @@
 			);
 			fileSystemSynchronizedGroups = (
 				F1706B9B2FC5DBE900D3C6C7 /* iCherri-ios */,
+				F1706B9C2FC5DBE900D3C6C7 /* Platform */,
+				F1706B9D2FC5DBE900D3C6C7 /* Features */,
 			);
 			name = "iCherri-ios";
 			packageProductDependencies = (
-				F1706B652FC5DBA600D3C6C7 /* iCherri-iOS */,
+				F1706B652FC5DBA600D3C6C1 /* ICherriProtocol */,
+				F1706B652FC5DBA600D3C6C2 /* ICherriCore */,
+				F1706B652FC5DBA600D3C6C3 /* ICherriDesignSystem */,
 			);
 			productName = "iCherri-ios";
 			productReference = F1706B992FC5DBE900D3C6C7 /* iCherri-ios.app */;
@@ -211,23 +231,43 @@
 				F1706BB22FC5DBEA00D3C6C7 /* iCherri-iosUITests */,
 			);
 			packageReferences = (
-				F1706B622FC5DBA500D3C6C7 /* XCLocalSwiftPackageReference */,
+				F1706B622FC5DBA500D3C6C1 /* XCLocalSwiftPackageReference "ICherriProtocol" */,
+				F1706B622FC5DBA500D3C6C2 /* XCLocalSwiftPackageReference "ICherriCore" */,
+				F1706B622FC5DBA500D3C6C3 /* XCLocalSwiftPackageReference "ICherriDesignSystem" */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		F1706B622FC5DBA500D3C6C7 /* XCLocalSwiftPackageReference */ = {
+		F1706B622FC5DBA500D3C6C1 /* XCLocalSwiftPackageReference "ICherriProtocol" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "..";
+			relativePath = "../../../../packages/ICherriProtocol";
+		};
+		F1706B622FC5DBA500D3C6C2 /* XCLocalSwiftPackageReference "ICherriCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../../../packages/ICherriCore";
+		};
+		F1706B622FC5DBA500D3C6C3 /* XCLocalSwiftPackageReference "ICherriDesignSystem" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../../../packages/ICherriDesignSystem";
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		F1706B652FC5DBA600D3C6C7 /* iCherri-iOS */ = {
+		F1706B652FC5DBA600D3C6C1 /* ICherriProtocol */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F1706B622FC5DBA500D3C6C7 /* XCLocalSwiftPackageReference */;
-			productName = "iCherri-iOS";
+			package = F1706B622FC5DBA500D3C6C1 /* XCLocalSwiftPackageReference "ICherriProtocol" */;
+			productName = "ICherriProtocol";
+		};
+		F1706B652FC5DBA600D3C6C2 /* ICherriCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F1706B622FC5DBA500D3C6C2 /* XCLocalSwiftPackageReference "ICherriCore" */;
+			productName = "ICherriCore";
+		};
+		F1706B652FC5DBA600D3C6C3 /* ICherriDesignSystem */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F1706B622FC5DBA500D3C6C3 /* XCLocalSwiftPackageReference "ICherriDesignSystem" */;
+			productName = "ICherriDesignSystem";
 		};
 /* End XCSwiftPackageProductDependency section */
 
@@ -428,6 +468,8 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Local network access is required to connect to your Mac for backup.";
+				"INFOPLIST_KEY_NSBonjourServices[0]" = "_icherri._tcp";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -457,6 +499,8 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Local network access is required to connect to your Mac for backup.";
+				"INFOPLIST_KEY_NSBonjourServices[0]" = "_icherri._tcp";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
