@@ -78,11 +78,11 @@ public struct BackupDashboardView: View {
     private var backupTriggerSection: some View {
         GroupBox {
             VStack(spacing: 16) {
-                if let receiver = viewModel.pairedReceiver {
+                if let receiverName = viewModel.pairedReceiverName {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
-                        Text("Connected to \(receiver.name)")
+                        Text("Connected to \(receiverName)")
                             .font(.subheadline)
                         Spacer()
                     }
@@ -141,7 +141,7 @@ public struct BackupDashboardView: View {
             Text(receiver.name)
                 .font(.subheadline)
             Spacer()
-            if viewModel.pairedReceiver?.id == receiver.id {
+            if viewModel.isPaired && viewModel.pairedReceiver?.id == receiver.id {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             } else {
                 Button("Connect") { Task { await viewModel.pair(with: receiver) } }
@@ -163,19 +163,27 @@ final class BackupDashboardViewModel: ObservableObject {
     @Published var localNetworkStatus: PermissionStatus = .unknown
     @Published var discoveredReceivers: [DiscoveredReceiver] = []
     @Published var pairedReceiver: DiscoveredReceiver?
+    @Published var pairedReceiverName: String?
     @Published var isPaired = false
     @Published var isBackingUp = false
 
     private let scanner = PhotoLibraryScanner()
     private let bonjourBrowser = BonjourBrowser()
+    private let trustTokenKey = "iCherriTrustToken"
+    private let receiverURLKey = "iCherriReceiverURL"
+    private let receiverNameKey = "iCherriReceiverName"
 
     func onAppear() async {
         updatePhotoPermission()
+        restorePairingState()
         bonjourBrowser.startBrowsing()
         // Observe browser changes
         Task { @MainActor in
             for await receivers in bonjourBrowser.$discoveredReceivers.values {
                 self.discoveredReceivers = receivers
+                if let pairedReceiverName {
+                    self.pairedReceiver = receivers.first(where: { $0.name == pairedReceiverName })
+                }
             }
         }
     }
@@ -186,8 +194,10 @@ final class BackupDashboardViewModel: ObservableObject {
     }
 
     func pair(with receiver: DiscoveredReceiver) async {
-        pairedReceiver = receiver
-        
+        let previousReceiver = pairedReceiver
+        let previousReceiverName = pairedReceiverName
+        let previousIsPaired = isPaired
+
         // Resolve endpoint and send pair request to Mac server
         do {
             let baseURL = try await resolveEndpoint(receiver.endpoint)
@@ -211,18 +221,25 @@ final class BackupDashboardViewModel: ObservableObject {
                 let confirmResponse = try decoder.decode(PairingConfirmResponse.self, from: data)
                 
                 // Store trust token for future requests
-                UserDefaults.standard.set(confirmResponse.trustToken, forKey: "iCherriTrustToken")
-                UserDefaults.standard.set(baseURL.absoluteString, forKey: "iCherriReceiverURL")
-                
+                UserDefaults.standard.set(confirmResponse.trustToken, forKey: trustTokenKey)
+                UserDefaults.standard.set(baseURL.absoluteString, forKey: receiverURLKey)
+                UserDefaults.standard.set(receiver.name, forKey: receiverNameKey)
+
+                pairedReceiver = receiver
+                pairedReceiverName = receiver.name
                 isPaired = true
                 print("[Pair] Successfully paired with \(receiver.name), token: \(confirmResponse.trustToken.prefix(8))...")
             } else {
                 print("[Pair] Server returned error: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
-                isPaired = false
+                pairedReceiver = previousReceiver
+                pairedReceiverName = previousReceiverName
+                isPaired = previousIsPaired
             }
         } catch {
             print("[Pair] Failed to pair: \(error)")
-            isPaired = false
+            pairedReceiver = previousReceiver
+            pairedReceiverName = previousReceiverName
+            isPaired = previousIsPaired
         }
     }
 
@@ -235,6 +252,24 @@ final class BackupDashboardViewModel: ObservableObject {
     private func updatePhotoPermission() {
         let status = scanner.currentAuthorizationStatus()
         photoPermissionStatus = status == .authorized || status == .limited ? .granted : .denied
+    }
+
+    private func restorePairingState() {
+        let defaults = UserDefaults.standard
+        guard
+            let trustToken = defaults.string(forKey: trustTokenKey),
+            !trustToken.isEmpty,
+            let receiverURL = defaults.string(forKey: receiverURLKey),
+            !receiverURL.isEmpty
+        else {
+            pairedReceiver = nil
+            pairedReceiverName = nil
+            isPaired = false
+            return
+        }
+
+        pairedReceiverName = defaults.string(forKey: receiverNameKey)
+        isPaired = true
     }
     
     private func currentDeviceInfo() -> DeviceInfo {
