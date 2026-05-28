@@ -65,6 +65,14 @@ clean:
 	rm -rf $(DIST_DIR)
 	rm -f "$(SHORTCUT_OUTPUT)"
 
+mac-app:
+	@echo "🖥️  Building macOS App..."
+	xcodebuild build -project apps/mac/iCherri-Mac/iCherri-Mac/iCherri-Mac.xcodeproj -scheme iCherri-Mac -destination 'platform=macOS'
+
+ios-app:
+	@echo "📱 Building iOS App..."
+	xcodebuild build -project apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios.xcodeproj -scheme iCherri-ios -destination 'generic/platform=iOS'
+
 help:
 	@echo "Usage:"
 	@echo "  make all         - Build Go binaries (server & init) and Signed shortcut"
@@ -76,4 +84,6 @@ help:
 	@echo "  make reindex     - Rebuild Go binary and reindex backup directory"
 	@echo "  make db-clean    - Remove SQLite DB + WAL/SHM files"
 	@echo "  make db-reset    - db-clean + reindex"
+	@echo "  make mac-app     - Build macOS SwiftUI App"
+	@echo "  make ios-app     - Build iOS SwiftUI App"
 	@echo "  make clean       - Remove all built artifacts"
