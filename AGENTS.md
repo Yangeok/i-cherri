@@ -88,3 +88,9 @@ rawAction 파라미터 최상위에서 `"${varName}"` → WFTextTokenAttachment 
 ```
 
 - **릴리즈 에셋**: `iPhone Daily Backup.shortcut`, `cherri-sync-darwin-arm64`, `cherri-sync-darwin-x86_64`, `organize-by-month-darwin-arm64`, `organize-by-month-darwin-x86_64`
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan: [plan.md](file:///Users/yangeok/Dev/Test/i-cherri/specs/001-rewrite-to-swift/plan.md)
+<!-- SPECKIT END -->
+

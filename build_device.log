@@ -1,0 +1,197 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild build -project apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios.xcodeproj -scheme iCherri-ios -destination platform=iOS,id=00008120-000C7CA20E72201E -allowProvisioningUpdates
+
+User defaults from command line:
+    IDEPackageSupportUseBuiltinSCM = YES
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  ICherriCore: /Users/yangeok/Dev/Test/i-cherri/packages/ICherriCore @ local
+  iCherri-iOS: /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS @ local
+  ICherriDesignSystem: /Users/yangeok/Dev/Test/i-cherri/packages/ICherriDesignSystem @ local
+  ICherriProtocol: /Users/yangeok/Dev/Test/i-cherri/packages/ICherriProtocol @ local
+
+Prepare packages
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (10 targets)
+    Target 'iCherri-ios' in project 'iCherri-ios'
+        ➜ Explicit dependency on target 'iCherri-iOS' in project 'iCherri-iOS'
+    Target 'iCherri-iOS' in project 'iCherri-iOS'
+        ➜ Explicit dependency on target 'iCherri-iOS' in project 'iCherri-iOS'
+        ➜ Explicit dependency on target 'iCherri-iOS_iCherri-iOS' in project 'iCherri-iOS'
+        ➜ Explicit dependency on target 'ICherriProtocol' in project 'ICherriProtocol'
+        ➜ Explicit dependency on target 'ICherriCore' in project 'ICherriCore'
+        ➜ Explicit dependency on target 'ICherriDesignSystem' in project 'ICherriDesignSystem'
+    Target 'iCherri-iOS' in project 'iCherri-iOS'
+        ➜ Explicit dependency on target 'iCherri-iOS_iCherri-iOS' in project 'iCherri-iOS'
+        ➜ Explicit dependency on target 'ICherriProtocol' in project 'ICherriProtocol'
+        ➜ Explicit dependency on target 'ICherriCore' in project 'ICherriCore'
+        ➜ Explicit dependency on target 'ICherriDesignSystem' in project 'ICherriDesignSystem'
+    Target 'ICherriDesignSystem' in project 'ICherriDesignSystem'
+        ➜ Explicit dependency on target 'ICherriDesignSystem' in project 'ICherriDesignSystem'
+        ➜ Explicit dependency on target 'ICherriProtocol' in project 'ICherriProtocol'
+    Target 'ICherriDesignSystem' in project 'ICherriDesignSystem'
+        ➜ Explicit dependency on target 'ICherriProtocol' in project 'ICherriProtocol'
+    Target 'ICherriCore' in project 'ICherriCore'
+        ➜ Explicit dependency on target 'ICherriCore' in project 'ICherriCore'
+        ➜ Explicit dependency on target 'ICherriProtocol' in project 'ICherriProtocol'
+    Target 'ICherriCore' in project 'ICherriCore'
+        ➜ Explicit dependency on target 'ICherriProtocol' in project 'ICherriProtocol'
+    Target 'ICherriProtocol' in project 'ICherriProtocol'
+        ➜ Explicit dependency on target 'ICherriProtocol' in project 'ICherriProtocol'
+    Target 'ICherriProtocol' in project 'ICherriProtocol' (no dependencies)
+    Target 'iCherri-iOS_iCherri-iOS' in project 'iCherri-iOS' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios/Preview Content/Preview Assets.xcassets /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: 8ec9188f994330c7c8b1d80292925a81
+Build description path: /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/XCBuildData/8ec9188f994330c7c8b1d80292925a81.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.2.sdk /Users/yangeok/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphoneos18.2-22C146-d5b9239ec3bf5b3adbecdf21472871e3.sdkstatcache
+    cd /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.2.sdk -o /Users/yangeok/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphoneos18.2-22C146-d5b9239ec3bf5b3adbecdf21472871e3.sdkstatcache
+
+WriteAuxiliaryFile /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-ios.build/Debug-iphoneos/iCherri-ios.build/Objects-normal/arm64/iCherri-ios.SwiftFileList (in target 'iCherri-ios' from project 'iCherri-ios')
+    cd /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios
+    write-file /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-ios.build/Debug-iphoneos/iCherri-ios.build/Objects-normal/arm64/iCherri-ios.SwiftFileList
+
+WriteAuxiliaryFile /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-ios.build/Debug-iphoneos/iCherri-ios.build/Objects-normal/arm64/iCherri-ios.LinkFileList (in target 'iCherri-ios' from project 'iCherri-ios')
+    cd /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios
+    write-file /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-ios.build/Debug-iphoneos/iCherri-ios.build/Objects-normal/arm64/iCherri-ios.LinkFileList
+
+WriteAuxiliaryFile /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-ios.build/Debug-iphoneos/iCherri-ios.build/Objects-normal/arm64/iCherri-ios-OutputFileMap.json (in target 'iCherri-ios' from project 'iCherri-ios')
+    cd /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios
+    write-file /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-ios.build/Debug-iphoneos/iCherri-ios.build/Objects-normal/arm64/iCherri-ios-OutputFileMap.json
+
+ProcessInfoPlistFile /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Products/Debug-iphoneos/iCherri-iOS_iCherri-iOS.bundle/Info.plist /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS_iCherri-iOS.build/empty-iCherri-iOS_iCherri-iOS.plist (in target 'iCherri-iOS_iCherri-iOS' from project 'iCherri-iOS')
+    cd /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS
+    builtin-infoPlistUtility /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS_iCherri-iOS.build/empty-iCherri-iOS_iCherri-iOS.plist -producttype com.apple.product-type.bundle -expandbuildsettings -format binary -platform iphoneos -additionalcontentfile /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS_iCherri-iOS.build/assetcatalog_generated_info.plist -requiredArchitecture arm64 -o /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Products/Debug-iphoneos/iCherri-iOS_iCherri-iOS.bundle/Info.plist
+
+GenerateAssetSymbols /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios/Assets.xcassets /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios/Preview\ Content/Preview\ Assets.xcassets (in target 'iCherri-iOS' from project 'iCherri-iOS')
+    cd /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS
+    /Applications/Xcode.app/Contents/Developer/usr/bin/actool --output-format human-readable-text --notices --warnings --export-dependency-info /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/assetcatalog_dependencies --output-partial-info-plist /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/assetcatalog_generated_info.plist --compress-pngs --enable-on-demand-resources NO --development-region en --target-device iphone --target-device ipad --minimum-deployment-target 16.0 --platform iphoneos --compile /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Products/Debug-iphoneos /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios/Assets.xcassets /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios/Preview\ Content/Preview\ Assets.xcassets --bundle-identifier icherri-ios.iCherri-iOS --generate-swift-asset-symbol-extensions NO --generate-swift-asset-symbols /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/DerivedSources/GeneratedAssetSymbols.swift --generate-objc-asset-symbols /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/DerivedSources/GeneratedAssetSymbols.h --generate-asset-symbol-index /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/DerivedSources/GeneratedAssetSymbols-Index.plist
+/* com.apple.actool.compilation-results */
+/Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/DerivedSources/GeneratedAssetSymbols-Index.plist
+/Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/DerivedSources/GeneratedAssetSymbols.h
+/Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/DerivedSources/GeneratedAssetSymbols.swift
+
+
+WriteAuxiliaryFile /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/Objects-normal/arm64/iCherri-iOS.LinkFileList (in target 'iCherri-iOS' from project 'iCherri-iOS')
+    cd /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS
+    write-file /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/Objects-normal/arm64/iCherri-iOS.LinkFileList
+
+SwiftDriver iCherri-iOS normal arm64 com.apple.xcode.tools.swift.compiler (in target 'iCherri-iOS' from project 'iCherri-iOS')
+    cd /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios.xcodeproj
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name iCherri_iOS -Onone -enforce-exclusivity\=checked @/Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/Objects-normal/arm64/iCherri-iOS.SwiftFileList -DSWIFT_PACKAGE -DDEBUG -DXcode -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.2.sdk -target arm64-apple-ios16.0 -g -module-cache-path /Users/yangeok/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -Xfrontend -serialize-debugging-options -profile-coverage-mapping -profile-generate -enable-testing -suppress-warnings -index-store-path /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Index.noindex/DataStore -enable-experimental-feature OpaqueTypeErasure -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Products/Debug-iphoneos -I /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib -F /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Products/Debug-iphoneos/PackageFrameworks -F /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Products/Debug-iphoneos/PackageFrameworks -F /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Products/Debug-iphoneos/PackageFrameworks -F /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Products/Debug-iphoneos -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.2.sdk/Developer/Library/Frameworks -c -j12 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Users/yangeok/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphoneos18.2-22C146-d5b9239ec3bf5b3adbecdf21472871e3.sdkstatcache -output-file-map /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/Objects-normal/arm64/iCherri-iOS-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/Objects-normal/arm64/iCherri_iOS.swiftmodule -validate-clang-modules-once -clang-build-session-file /Users/yangeok/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/Session.modulevalidation -package-name icherri_ios -Xcc -I/Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/Objects-normal/arm64/iCherri-iOS_const_extract_protocols.json -Xcc -I/Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Products/Debug-iphoneos/include -Xcc -I/Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/DerivedSources-normal/arm64 -Xcc -I/Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/DerivedSources/arm64 -Xcc -I/Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/DerivedSources -Xcc -DSWIFT_PACKAGE -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/Objects-normal/arm64/iCherri-iOS-Swift.h -working-directory /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios.xcodeproj -experimental-emit-module-separately -disable-cmo
+
+error: Cycle in dependencies between targets 'iCherri-ios' and 'iCherri-iOS'; building could produce unreliable results.
+Cycle path: iCherri-ios → iCherri-iOS → iCherri-ios
+Cycle details:
+→ Target 'iCherri-ios' has an explicit dependency on Target 'iCherri-iOS'
+→ Target 'iCherri-iOS' has an explicit dependency on Target 'iCherri-iOS'
+
+
+Raw dependency cycle trace:
+
+target:  ->
+
+node: <all> ->
+
+command: <all> ->
+
+node: /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-ios.build/Debug-iphoneos/iCherri-ios.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata ->
+
+command: P0:target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061-:Debug:ExtractAppIntentsMetadata ->
+
+node: /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-ios.build/Debug-iphoneos/iCherri-ios.build/Objects-normal/arm64/ContentView.swiftconstvalues ->
+
+command: P0:target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061-:Debug:SwiftDriver Compilation iCherri-ios normal arm64 com.apple.xcode.tools.swift.compiler ->
+
+CYCLE POINT ->
+
+node: /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-ios.build/Debug-iphoneos/iCherri-ios.build/DerivedSources/GeneratedAssetSymbols.swift ->
+
+command: P0:target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061-:Debug:GenerateAssetSymbols /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios/Preview Content/Preview Assets.xcassets /Users/yangeok/Dev/Test/i-cherri/apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios/Assets.xcassets ->
+
+node: <target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--ModuleVerifierTaskProducer> ->
+
+command: P0:::Gate target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--ModuleVerifierTaskProducer ->
+
+node: <target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--ModuleMapTaskProducer> ->
+
+command: P0:::Gate target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--ModuleMapTaskProducer ->
+
+node: <target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--HeadermapTaskProducer> ->
+
+command: P0:::Gate target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--HeadermapTaskProducer ->
+
+node: <target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--RealityAssetsTaskProducer> ->
+
+command: P0:::Gate target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--RealityAssetsTaskProducer ->
+
+node: <target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--GenerateAppPlaygroundAssetCatalogTaskProducer> ->
+
+command: P0:::Gate target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--GenerateAppPlaygroundAssetCatalogTaskProducer ->
+
+node: <target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--GeneratedFilesTaskProducer> ->
+
+command: P0:::Gate target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--GeneratedFilesTaskProducer ->
+
+node: <target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--ProductStructureTaskProducer> ->
+
+command: P0:::Gate target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--ProductStructureTaskProducer ->
+
+node: <target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--begin-compiling> ->
+
+command: P0:target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061-:Debug:Gate target-iCherri-ios-46c6ca37e5de7b2893b50f786f8f1e8f99e1b9fd6b3290316644d7b57f1f6061--begin-compiling ->
+
+node: <target-iCherri-iOS-PACKAGE-PRODUCT:iCherri-iOS-SDKROOT:iphoneos:SDK_VARIANT:iphoneos-modules-ready> ->
+
+command: P0:target-iCherri-iOS-PACKAGE-PRODUCT:iCherri-iOS-SDKROOT:iphoneos:SDK_VARIANT:iphoneos:Debug:Gate target-iCherri-iOS-PACKAGE-PRODUCT:iCherri-iOS-SDKROOT:iphoneos:SDK_VARIANT:iphoneos-modules-ready ->
+
+node: <target-iCherri-iOS-PACKAGE-PRODUCT:iCherri-iOS-SDKROOT:iphoneos:SDK_VARIANT:iphoneos-begin-compiling> ->
+
+command: P0:target-iCherri-iOS-PACKAGE-PRODUCT:iCherri-iOS-SDKROOT:iphoneos:SDK_VARIANT:iphoneos:Debug:Gate target-iCherri-iOS-PACKAGE-PRODUCT:iCherri-iOS-SDKROOT:iphoneos:SDK_VARIANT:iphoneos-begin-compiling ->
+
+node: <target-iCherri-iOS-PACKAGE-TARGET:iCherri-iOS-SDKROOT:iphoneos:SDK_VARIANT:iphoneos-modules-ready> ->
+
+command: P0:target-iCherri-iOS-PACKAGE-TARGET:iCherri-iOS-SDKROOT:iphoneos:SDK_VARIANT:iphoneos:Debug:Gate target-iCherri-iOS-PACKAGE-TARGET:iCherri-iOS-SDKROOT:iphoneos:SDK_VARIANT:iphoneos-modules-ready ->
+
+node: /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Products/Debug-iphoneos/iCherri_iOS.swiftmodule/Project/arm64-apple-ios.swiftsourceinfo ->
+
+command: P2:target-iCherri-iOS-PACKAGE-TARGET:iCherri-iOS-SDKROOT:iphoneos:SDK_VARIANT:iphoneos:Debug:Copy /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Products/Debug-iphoneos/iCherri_iOS.swiftmodule/Project/arm64-apple-ios.swiftsourceinfo /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/Objects-normal/arm64/iCherri_iOS.swiftsourceinfo ->
+
+node: /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/Objects-normal/arm64/iCherri_iOS.swiftsourceinfo/ ->
+
+directoryTreeSignature: � ->
+
+directoryContents: /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/Objects-normal/arm64/iCherri_iOS.swiftsourceinfo ->
+
+node: /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-iOS.build/Debug-iphoneos/iCherri-iOS.build/Objects-normal/arm64/iCherri_iOS.swiftsourceinfo ->
+
+command: P2:target-iCherri-iOS-PACKAGE-TARGET:iCherri-iOS-SDKROOT:iphoneos:SDK_VARIANT:iphoneos:Debug:SwiftDriver Compilation Requirements iCherri-iOS normal arm64 com.apple.xcode.tools.swift.compiler ->
+
+customTask: <SwiftDriverJob identifier=-8759814254776923650 arch=arm64 variant=normal jobKey=targetJob(0) jobSignature=<ByteString:"83b93a7ee0a9a12f2a28c3ff45a13420"> isUsingWholeModuleOptimization=false compilerLocation=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc casOptions=nil> ->
+
+node: /Users/yangeok/Library/Developer/Xcode/DerivedData/iCherri-ios-fyomzfektztnusftbxdfjniecmto/Build/Intermediates.noindex/iCherri-ios.build/Debug-iphoneos/iCherri-ios.build/DerivedSources/GeneratedAssetSymbols.swift
+** BUILD FAILED **
+
+
+The following build commands failed:
+	Building project iCherri-ios with scheme iCherri-ios
+(1 failure)

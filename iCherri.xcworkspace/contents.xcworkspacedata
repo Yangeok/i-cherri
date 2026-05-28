@@ -2,16 +2,10 @@
 <Workspace
    version = "1.0">
    <FileRef
-      location = "group:apps/ios/iCherri-iOS">
+      location = "group:apps/ios/iCherri-ios.xcodeproj">
    </FileRef>
    <FileRef
-      location = "group:apps/ios/iCherri-iOS/iCherri-ios/iCherri-ios.xcodeproj">
-   </FileRef>
-   <FileRef
-      location = "group:apps/mac/iCherri-Mac">
-   </FileRef>
-   <FileRef
-      location = "group:apps/mac/iCherri-Mac/iCherri-Mac/iCherri-Mac.xcodeproj">
+      location = "group:apps/mac/iCherri-Mac.xcodeproj">
    </FileRef>
    <FileRef
       location = "group:packages/ICherriProtocol">
