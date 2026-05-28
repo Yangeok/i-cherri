@@ -21,6 +21,16 @@ struct PairedDeviceRecord: Codable, FetchableRecord, PersistableRecord {
         case lastSeenAt = "last_seen_at", trustToken = "trust_token"
     }
 
+    enum CodingKeys: String, CodingKey {
+        case id
+        case deviceId = "device_id"
+        case deviceName = "device_name"
+        case pairingStatus = "pairing_status"
+        case createdAt = "created_at"
+        case lastSeenAt = "last_seen_at"
+        case trustToken = "trust_token"
+    }
+
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
     }
@@ -63,6 +73,29 @@ struct BackupAssetRecord: Codable, FetchableRecord, PersistableRecord, Identifia
         case lastError = "last_error"
     }
 
+    enum CodingKeys: String, CodingKey {
+        case id
+        case backupId = "backup_id"
+        case deviceId = "device_id"
+        case assetLocalId = "asset_local_id"
+        case originalFilename = "original_filename"
+        case mediaType = "media_type"
+        case creationDate = "creation_date"
+        case modificationDate = "modification_date"
+        case byteSize = "byte_size"
+        case durationSeconds = "duration_seconds"
+        case pixelWidth = "pixel_width"
+        case pixelHeight = "pixel_height"
+        case quickFingerprint = "quick_fingerprint"
+        case contentSha256 = "content_sha256"
+        case finalPath = "final_path"
+        case status
+        case duplicateOfBackupId = "duplicate_of_backup_id"
+        case firstSeenAt = "first_seen_at"
+        case completedAt = "completed_at"
+        case lastError = "last_error"
+    }
+
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
     }
@@ -91,6 +124,22 @@ struct UploadSessionRecord: Codable, FetchableRecord, PersistableRecord {
         case expectedByteSize = "expected_byte_size", receivedBytes = "received_bytes"
         case chunkSize = "chunk_size", status, createdAt = "created_at"
         case updatedAt = "updated_at", expiresAt = "expires_at", metadataJson = "metadata_json", lastError = "last_error"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case uploadId = "upload_id"
+        case deviceId = "device_id"
+        case assetLocalId = "asset_local_id"
+        case tempPath = "temp_path"
+        case expectedByteSize = "expected_byte_size"
+        case receivedBytes = "received_bytes"
+        case chunkSize = "chunk_size"
+        case status
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case expiresAt = "expires_at"
+        case metadataJson = "metadata_json"
+        case lastError = "last_error"
     }
 }
 
