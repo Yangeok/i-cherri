@@ -28,6 +28,10 @@ final class UploadHandler {
             let tempPath = incomingDir.appendingPathComponent(uploadID + ".tmp")
             let expiresAt = Date().addingTimeInterval(24 * 3600)
 
+            // Serialize AssetMetadata to JSON string
+            let metadataData = try JSONEncoder().encode(body.asset)
+            let metadataJson = String(data: metadataData, encoding: .utf8) ?? ""
+
             try await sessionManager.createSession(
                 uploadID: uploadID,
                 deviceID: body.device.deviceID,
@@ -35,7 +39,8 @@ final class UploadHandler {
                 tempPath: tempPath.path,
                 expectedByteSize: body.expectedByteSize,
                 chunkSize: body.requestedChunkSize,
-                expiresAt: expiresAt
+                expiresAt: expiresAt,
+                metadataJson: metadataJson
             )
 
             FileManager.default.createFile(atPath: tempPath.path, contents: nil)

@@ -29,3 +29,15 @@ vendor/
 com.local.cherri-sync.plist
 .gemini/
 .antigravitycli/
+
+# Swift / Xcode
+.build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.swp
+*.orig
+!/packages/
+.swiftpm/
+*.resolved

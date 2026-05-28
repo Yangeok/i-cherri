@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import ICherriCore
 
 // MARK: - Database Records
 
@@ -81,6 +82,7 @@ struct UploadSessionRecord: Codable, FetchableRecord, PersistableRecord {
     var createdAt: Date
     var updatedAt: Date
     var expiresAt: Date
+    var metadataJson: String
     var lastError: String?
 
     enum Columns: String, ColumnExpression {
@@ -88,7 +90,7 @@ struct UploadSessionRecord: Codable, FetchableRecord, PersistableRecord {
         case assetLocalId = "asset_local_id", tempPath = "temp_path"
         case expectedByteSize = "expected_byte_size", receivedBytes = "received_bytes"
         case chunkSize = "chunk_size", status, createdAt = "created_at"
-        case updatedAt = "updated_at", expiresAt = "expires_at", lastError = "last_error"
+        case updatedAt = "updated_at", expiresAt = "expires_at", metadataJson = "metadata_json", lastError = "last_error"
     }
 }
 
@@ -171,6 +173,7 @@ actor DatabaseManager {
                 t.column("created_at", .datetime).notNull()
                 t.column("updated_at", .datetime).notNull()
                 t.column("expires_at", .datetime).notNull()
+                t.column("metadata_json", .text).notNull()
                 t.column("last_error", .text)
             }
         }
@@ -328,10 +331,53 @@ actor DatabaseManager {
                 .fetchAll(db)
         }
     }
+
+    // MARK: - Dashboard Query Helpers
+
+    func fetchAllDevices() throws -> [PairedDeviceRecord] {
+        try queue.read { db in
+            try PairedDeviceRecord.order(Column("last_seen_at").desc).fetchAll(db)
+        }
+    }
+
+    func fetchAllAssets() throws -> [BackupAssetRecord] {
+        try queue.read { db in
+            try BackupAssetRecord.order(Column("completed_at").desc).fetchAll(db)
+        }
+    }
+
+    func fetchAllSessions() throws -> [UploadSessionRecord] {
+        try queue.read { db in
+            try UploadSessionRecord.order(Column("updated_at").desc).fetchAll(db)
+        }
+    }
 }
 
 // MARK: - Errors
 
 enum DatabaseError: Error {
     case notOpen
+}
+
+extension DatabaseManager: BackupIndexQuerying {
+    public func findByDeviceAndAssetID(deviceID: String, assetLocalID: String) async throws -> BackupIndexEntry? {
+        if let record = try await fetchAsset(deviceId: deviceID, assetLocalId: assetLocalID) {
+            return BackupIndexEntry(backupID: record.backupId, status: record.status, contentSHA256: record.contentSha256)
+        }
+        return nil
+    }
+
+    public func findByFingerprint(_ fingerprint: String) async throws -> BackupIndexEntry? {
+        if let record = try await fetchAsset(fingerprint: fingerprint) {
+            return BackupIndexEntry(backupID: record.backupId, status: record.status, contentSHA256: record.contentSha256)
+        }
+        return nil
+    }
+
+    public func findBySHA256(_ sha256: String) async throws -> BackupIndexEntry? {
+        if let record = try await fetchAsset(sha256: sha256) {
+            return BackupIndexEntry(backupID: record.backupId, status: record.status, contentSHA256: record.contentSha256)
+        }
+        return nil
+    }
 }

@@ -70,6 +70,10 @@ actor ReceiverHTTPServer {
     // Injected route handlers
     var routeHandler: ReceiverRouteHandler?
 
+    func setRouteHandler(_ handler: ReceiverRouteHandler) {
+        self.routeHandler = handler
+    }
+
     init(port: UInt16 = 48372) {
         self.port = port
     }

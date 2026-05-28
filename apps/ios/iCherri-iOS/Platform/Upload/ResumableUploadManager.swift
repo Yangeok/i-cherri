@@ -56,8 +56,7 @@ public actor ResumableUploadManager {
 
     private func initOrResumeSession(metadata: AssetMetadata) async throws -> (uploadID: String, startOffset: Int64, chunkSize: Int) {
         // Try to find an existing paused session
-        let assetRef = UploadAssetRef(assetLocalID: metadata.assetLocalID, byteSize: metadata.byteSize)
-        let initResponse = try await backupClient.initUpload(asset: assetRef, filename: metadata.originalFilename)
+        let initResponse = try await backupClient.initUpload(asset: metadata, filename: metadata.originalFilename)
 
         // If already received some bytes (server reused session), resume from there
         if initResponse.receivedBytes > 0 {

@@ -189,7 +189,39 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func load() async {
-        // Populated by the app coordinator which injects DatabaseManager
+        do {
+            self.backupFolderPath = AppCoordinator.shared.backupFolder.path
+            
+            let devices = try await DatabaseManager.shared.fetchAllDevices()
+            let assets = try await DatabaseManager.shared.fetchAllAssets()
+            let sessions = try await DatabaseManager.shared.fetchAllSessions()
+            
+            self.pairedDevices = devices
+            self.allAssets = assets
+            self.activeSessions = sessions.map { r in
+                // Parse metadata to extract filename if needed, or use original filename
+                var filename = "Upload"
+                if let data = r.metadataJson.data(using: .utf8),
+                   let metadata = try? JSONDecoder().decode(AssetMetadata.self, from: data) {
+                    filename = metadata.originalFilename
+                }
+                
+                return SessionManager.SessionInfo(
+                    uploadID: r.uploadId,
+                    deviceID: r.deviceId,
+                    assetLocalID: filename, // Show filename in the sessions view
+                    tempPath: r.tempPath,
+                    expectedByteSize: r.expectedByteSize,
+                    receivedBytes: r.receivedBytes,
+                    chunkSize: r.chunkSize,
+                    status: r.status,
+                    expiresAt: r.expiresAt,
+                    metadataJson: r.metadataJson
+                )
+            }
+        } catch {
+            print("[DashboardViewModel] Load failed: \(error)")
+        }
     }
 
     func assets(for deviceId: String) -> [BackupAssetRecord] {
@@ -209,13 +241,9 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func selectBackupFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose the backup root folder"
-        if panel.runModal() == .OK, let url = panel.url {
-            backupFolderPath = url.path
+        AppCoordinator.shared.selectBackupFolder()
+        Task {
+            await load()
         }
     }
 }

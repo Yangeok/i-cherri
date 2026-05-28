@@ -10,6 +10,12 @@ import iCherri_Mac
 
 @main
 struct iCherri_MacApp: App {
+    init() {
+        Task {
+            await AppCoordinator.shared.start()
+        }
+    }
+
     var body: some Scene {
         MenuBarExtraItem()
     }

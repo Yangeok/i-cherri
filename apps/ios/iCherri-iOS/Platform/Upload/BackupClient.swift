@@ -37,7 +37,7 @@ public actor BackupClient {
     }
 
     // Initiates an upload session.
-    public func initUpload(asset: UploadAssetRef, filename: String) async throws -> UploadInitResponse {
+    public func initUpload(asset: AssetMetadata, filename: String) async throws -> UploadInitResponse {
         let request = UploadInitRequest(device: device, asset: asset, filename: filename)
         return try await post(path: "/uploads/init", body: request)
     }

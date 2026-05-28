@@ -18,6 +18,7 @@ actor SessionManager {
         let chunkSize: Int
         let status: String
         let expiresAt: Date
+        let metadataJson: String
     }
 
     func createSession(
@@ -27,7 +28,8 @@ actor SessionManager {
         tempPath: String,
         expectedByteSize: Int64,
         chunkSize: Int,
-        expiresAt: Date
+        expiresAt: Date,
+        metadataJson: String
     ) async throws {
         let now = Date()
         let record = UploadSessionRecord(
@@ -42,6 +44,7 @@ actor SessionManager {
             createdAt: now,
             updatedAt: now,
             expiresAt: expiresAt,
+            metadataJson: metadataJson,
             lastError: nil
         )
         try await dbManager.insertUploadSession(record)
@@ -58,7 +61,8 @@ actor SessionManager {
             receivedBytes: record.receivedBytes,
             chunkSize: record.chunkSize,
             status: record.status,
-            expiresAt: record.expiresAt
+            expiresAt: record.expiresAt,
+            metadataJson: record.metadataJson
         )
     }
 
@@ -92,7 +96,8 @@ actor SessionManager {
                 receivedBytes: r.receivedBytes,
                 chunkSize: r.chunkSize,
                 status: r.status,
-                expiresAt: r.expiresAt
+                expiresAt: r.expiresAt,
+                metadataJson: r.metadataJson
             )
         }
     }
