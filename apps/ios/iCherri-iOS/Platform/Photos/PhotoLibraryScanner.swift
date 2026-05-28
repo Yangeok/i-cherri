@@ -1,0 +1,168 @@
+import Foundation
+import Photos
+import ICherriProtocol
+
+public enum PhotoLibraryAuthStatus {
+    case authorized
+    case limited
+    case denied
+    case notDetermined
+}
+
+// Handles PHAsset access permission and scans all media assets from the photo library.
+public final class PhotoLibraryScanner {
+    public init() {}
+
+    public func requestAuthorization() async -> PhotoLibraryAuthStatus {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        return mapStatus(status)
+    }
+
+    public func currentAuthorizationStatus() -> PhotoLibraryAuthStatus {
+        mapStatus(PHPhotoLibrary.authorizationStatus(for: .readWrite))
+    }
+
+    // Scans all media assets and returns AssetMetadata array. Targets >1000 assets/sec.
+    public func scanAllAssets(deviceID: String) async -> [AssetMetadata] {
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
+        options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
+
+        let result = PHAsset.fetchAssets(with: options)
+        var assets: [AssetMetadata] = []
+        assets.reserveCapacity(result.count)
+
+        result.enumerateObjects { asset, _, _ in
+            guard let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) else { return }
+            assets.append(metadata)
+        }
+
+        return assets
+    }
+
+    // Fetches raw file data for a given asset local identifier.
+    public func fetchData(for assetLocalID: String) async throws -> Data {
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: [assetLocalID], options: nil)
+        guard let asset = result.firstObject else {
+            throw PhotoScannerError.assetNotFound(assetLocalID)
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.version = .original
+            options.isNetworkAccessAllowed = true
+            options.deliveryMode = .highQualityFormat
+
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, info in
+                if let error = info?[PHImageErrorKey] as? Error {
+                    continuation.resume(throwing: error)
+                } else if let data {
+                    continuation.resume(returning: data)
+                } else {
+                    continuation.resume(throwing: PhotoScannerError.dataUnavailable(assetLocalID))
+                }
+            }
+        }
+    }
+
+    // Opens a streaming resource for a video or large asset.
+    public func openInputStream(for assetLocalID: String) async throws -> InputStream {
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: [assetLocalID], options: nil)
+        guard let asset = result.firstObject, asset.mediaType == .video else {
+            throw PhotoScannerError.assetNotFound(assetLocalID)
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let options = PHVideoRequestOptions()
+            options.version = .original
+            options.isNetworkAccessAllowed = true
+            options.deliveryMode = .highQualityFormat
+
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, info in
+                if let error = info?[PHImageErrorKey] as? Error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let urlAsset = avAsset as? AVURLAsset,
+                      let stream = InputStream(url: urlAsset.url) else {
+                    continuation.resume(throwing: PhotoScannerError.dataUnavailable(assetLocalID))
+                    return
+                }
+                continuation.resume(returning: stream)
+            }
+        }
+    }
+
+    // MARK: - Private
+
+    private static func extractMetadata(from asset: PHAsset, deviceID: String) -> AssetMetadata? {
+        guard let filename = (asset.value(forKey: "filename") as? String) ?? inferFilename(from: asset) else {
+            return nil
+        }
+        let mediaType = resolveMediaType(asset)
+        let creation = asset.creationDate ?? Date()
+        let modification = asset.modificationDate ?? creation
+        let byteSize = Int64(asset.value(forKey: "fileSize") as? Int ?? 0)
+        let fingerprint = FingerprintBuilder.build(
+            creationDate: creation,
+            modificationDate: modification,
+            byteSize: byteSize,
+            pixelWidth: asset.pixelWidth,
+            pixelHeight: asset.pixelHeight
+        )
+
+        return AssetMetadata(
+            deviceID: deviceID,
+            assetLocalID: asset.localIdentifier,
+            originalFilename: filename,
+            mediaType: mediaType,
+            creationDate: creation,
+            modificationDate: modification,
+            byteSize: byteSize,
+            pixelWidth: asset.pixelWidth,
+            pixelHeight: asset.pixelHeight,
+            quickFingerprint: fingerprint,
+            durationSeconds: asset.duration > 0 ? asset.duration : nil
+        )
+    }
+
+    private static func resolveMediaType(_ asset: PHAsset) -> MediaType {
+        switch asset.mediaType {
+        case .image:
+            return asset.mediaSubtypes.contains(.photoLive) ? .livePhotoComponent : .photo
+        case .video:
+            return .video
+        default:
+            return .unknown
+        }
+    }
+
+    private static func inferFilename(from asset: PHAsset) -> String? {
+        let resources = PHAssetResource.assetResources(for: asset)
+        return resources.first?.originalFilename
+    }
+
+    private func mapStatus(_ status: PHAuthorizationStatus) -> PhotoLibraryAuthStatus {
+        switch status {
+        case .authorized: return .authorized
+        case .limited: return .limited
+        case .denied, .restricted: return .denied
+        case .notDetermined: return .notDetermined
+        @unknown default: return .denied
+        }
+    }
+}
+
+// Builds quick_fingerprint string from asset metadata fields.
+enum FingerprintBuilder {
+    static func build(creationDate: Date, modificationDate: Date, byteSize: Int64, pixelWidth: Int, pixelHeight: Int) -> String {
+        let ts = Int64(creationDate.timeIntervalSince1970)
+        return "\(ts)_\(byteSize)_\(pixelWidth)_\(pixelHeight)"
+    }
+}
+
+enum PhotoScannerError: Error {
+    case assetNotFound(String)
+    case dataUnavailable(String)
+    case permissionDenied
+}
