@@ -230,7 +230,7 @@ final class BackupDashboardViewModel: ObservableObject {
 
     func requestPhotoPermission() async {
         let status = await scanner.requestAuthorization()
-        photoPermissionStatus = status == .authorized || status == .limited ? .granted : .denied
+        photoPermissionStatus = permissionStatus(for: status)
     }
 
     func pair(with receiver: DiscoveredReceiver) async {
@@ -436,7 +436,18 @@ final class BackupDashboardViewModel: ObservableObject {
 
     private func updatePhotoPermission() {
         let status = scanner.currentAuthorizationStatus()
-        photoPermissionStatus = status == .authorized || status == .limited ? .granted : .denied
+        photoPermissionStatus = permissionStatus(for: status)
+    }
+
+    private func permissionStatus(for status: PhotoLibraryAuthStatus) -> PermissionStatus {
+        switch status {
+        case .authorized, .limited:
+            return .granted
+        case .denied:
+            return .denied
+        case .notDetermined:
+            return .unknown
+        }
     }
 
     private func restorePairingState() {
