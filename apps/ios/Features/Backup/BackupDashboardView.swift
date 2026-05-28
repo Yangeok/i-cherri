@@ -106,6 +106,12 @@ public struct BackupDashboardView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(viewModel.isBackingUp)
+                if let backupStatusMessage = viewModel.backupStatusMessage {
+                    Label(backupStatusMessage, systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         } label: {
             Label("Backup", systemImage: "externaldrive.fill.badge.icloud")
@@ -182,6 +188,7 @@ final class BackupDashboardViewModel: ObservableObject {
     @Published var isBackingUp = false
     @Published var pairingStatusMessage: String?
     @Published var pairingErrorMessage: String?
+    @Published var backupStatusMessage: String?
 
     private let scanner = PhotoLibraryScanner()
     private let bonjourBrowser = BonjourBrowser()
@@ -274,7 +281,8 @@ final class BackupDashboardViewModel: ObservableObject {
     func startBackup() async {
         isBackingUp = true
         defer { isBackingUp = false }
-        // Backup orchestration delegated to BackupClient
+        backupStatusMessage = "Start Backup is not wired to the upload pipeline yet."
+        print("[Backup] Start Backup tapped, but upload orchestration is not implemented in BackupDashboardViewModel.startBackup()")
     }
 
     private func updatePhotoPermission() {
