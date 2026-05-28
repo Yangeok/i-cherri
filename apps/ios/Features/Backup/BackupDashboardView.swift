@@ -28,6 +28,22 @@ public struct BackupDashboardView: View {
             .navigationBarTitleDisplayMode(.large)
         }
         .task { await viewModel.onAppear() }
+        .sheet(
+            isPresented: Binding(
+                get: { viewModel.activeBackupProgressViewModel != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        viewModel.dismissBackupProgress()
+                    }
+                }
+            )
+        ) {
+            if let progressViewModel = viewModel.activeBackupProgressViewModel {
+                NavigationStack {
+                    BackupProgressView(viewModel: progressViewModel)
+                }
+            }
+        }
     }
 
     // MARK: - Sections
@@ -189,6 +205,7 @@ final class BackupDashboardViewModel: ObservableObject {
     @Published var pairingStatusMessage: String?
     @Published var pairingErrorMessage: String?
     @Published var backupStatusMessage: String?
+    @Published var activeBackupProgressViewModel: BackupProgressViewModel?
 
     private let scanner = PhotoLibraryScanner()
     private let bonjourBrowser = BonjourBrowser()
@@ -279,10 +296,142 @@ final class BackupDashboardViewModel: ObservableObject {
     }
 
     func startBackup() async {
+        guard photoPermissionStatus == .granted else {
+            backupStatusMessage = "Allow Photos access before starting backup."
+            return
+        }
+        guard
+            let receiverURLString = UserDefaults.standard.string(forKey: receiverURLKey),
+            let receiverURL = URL(string: receiverURLString)
+        else {
+            backupStatusMessage = "Connect to a Mac receiver first."
+            return
+        }
+
         isBackingUp = true
-        defer { isBackingUp = false }
-        backupStatusMessage = "Start Backup is not wired to the upload pipeline yet."
-        print("[Backup] Start Backup tapped, but upload orchestration is not implemented in BackupDashboardViewModel.startBackup()")
+        backupStatusMessage = "Scanning photo library..."
+        let device = currentDeviceInfo()
+        let scannedAssets = await scanner.scanAllAssets(deviceID: device.deviceID)
+        let progressViewModel = BackupProgressViewModel(totalCount: scannedAssets.count)
+        activeBackupProgressViewModel = progressViewModel
+
+        let backupTask = Task { [weak self] in
+            guard let self else { return }
+            defer { Task { @MainActor in self.isBackingUp = false } }
+
+            do {
+                try Task.checkCancellation()
+
+                if scannedAssets.isEmpty {
+                    await MainActor.run {
+                        progressViewModel.update(
+                            filename: "No media found",
+                            completed: 0,
+                            success: 0,
+                            duplicates: 0,
+                            failed: 0,
+                            bytesPerSecond: 0
+                        )
+                        self.backupStatusMessage = "No photos or videos found to back up."
+                    }
+                    return
+                }
+
+                let backupClient = BackupClient(receiverBaseURL: receiverURL, device: device)
+                let chunkSender = ChunkUploadSender(receiverBaseURL: receiverURL, device: device)
+                let progressCoordinator = BackupUploadProgressCoordinator(viewModel: progressViewModel)
+                await chunkSender.setProgressDelegate(progressCoordinator)
+                let uploadManager = ResumableUploadManager(
+                    backupClient: backupClient,
+                    chunkSender: chunkSender,
+                    scanner: scanner
+                )
+
+                let batchResponse = try await backupClient.checkBatch(candidates: scannedAssets)
+                let assetIndex = Dictionary(uniqueKeysWithValues: scannedAssets.map { ($0.assetLocalID, $0) })
+
+                var completed = batchResponse.alreadyBackedUp.count + batchResponse.duplicates.count + batchResponse.unsupported.count
+                var success = 0
+                var duplicates = batchResponse.alreadyBackedUp.count + batchResponse.duplicates.count
+                var failed = batchResponse.unsupported.count
+
+                await progressCoordinator.updateSnapshot(
+                    filename: "Preparing uploads...",
+                    completed: completed,
+                    success: success,
+                    duplicates: duplicates,
+                    failed: failed,
+                    bytesPerSecond: 0
+                )
+
+                for requirement in batchResponse.requiredUploads {
+                    try Task.checkCancellation()
+
+                    guard let metadata = assetIndex[requirement.assetLocalID] else {
+                        failed += 1
+                        completed += 1
+                        await progressCoordinator.updateSnapshot(
+                            filename: "Missing asset metadata",
+                            completed: completed,
+                            success: success,
+                            duplicates: duplicates,
+                            failed: failed,
+                            bytesPerSecond: 0
+                        )
+                        continue
+                    }
+
+                    await progressCoordinator.beginAsset(
+                        filename: metadata.originalFilename,
+                        completed: completed,
+                        success: success,
+                        duplicates: duplicates,
+                        failed: failed
+                    )
+
+                    do {
+                        _ = try await uploadManager.upload(
+                            assetLocalID: metadata.assetLocalID,
+                            metadata: metadata
+                        )
+                        success += 1
+                    } catch {
+                        failed += 1
+                        print("[Backup] Failed to upload \(metadata.originalFilename): \(error)")
+                    }
+
+                    completed += 1
+                    await progressCoordinator.updateSnapshot(
+                        filename: metadata.originalFilename,
+                        completed: completed,
+                        success: success,
+                        duplicates: duplicates,
+                        failed: failed,
+                        bytesPerSecond: 0
+                    )
+                }
+
+                await MainActor.run {
+                    self.backupStatusMessage = "Backup complete. Uploaded \(success), skipped \(duplicates), failed \(failed)."
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.backupStatusMessage = "Backup canceled."
+                }
+            } catch {
+                print("[Backup] Backup run failed: \(error)")
+                await MainActor.run {
+                    self.backupStatusMessage = "Backup failed: \(self.describeBackupError(error))"
+                }
+            }
+        }
+
+        progressViewModel.bindCancellation(to: backupTask)
+        await backupTask.value
+    }
+
+    func dismissBackupProgress() {
+        activeBackupProgressViewModel = nil
     }
 
     private func updatePhotoPermission() {
@@ -307,6 +456,19 @@ final class BackupDashboardViewModel: ObservableObject {
         pairedReceiverName = defaults.string(forKey: receiverNameKey)
         isPaired = true
         pairingStatusMessage = pairedReceiverName.map { "Connected to \($0)." }
+    }
+
+    private func describeBackupError(_ error: Error) -> String {
+        if let backupError = error as? BackupClientError {
+            switch backupError {
+            case .httpError(let statusCode, let data):
+                let body = String(data: data, encoding: .utf8) ?? "No response body"
+                return "HTTP \(statusCode): \(body)"
+            case .invalidResponse:
+                return "Invalid server response."
+            }
+        }
+        return error.localizedDescription
     }
     
     private func currentDeviceInfo() -> DeviceInfo {
@@ -354,5 +516,68 @@ final class BackupDashboardViewModel: ObservableObject {
             }
             connection.start(queue: .global(qos: .userInitiated))
         }
+    }
+}
+
+@MainActor
+private final class BackupUploadProgressCoordinator: ChunkUploadProgressDelegate {
+    private let viewModel: BackupProgressViewModel
+    private var currentFilename: String = "Preparing uploads..."
+    private var completed: Int = 0
+    private var success: Int = 0
+    private var duplicates: Int = 0
+    private var failed: Int = 0
+    private var assetStartDate = Date()
+
+    init(viewModel: BackupProgressViewModel) {
+        self.viewModel = viewModel
+    }
+
+    func beginAsset(filename: String, completed: Int, success: Int, duplicates: Int, failed: Int) {
+        assetStartDate = Date()
+        updateSnapshot(
+            filename: filename,
+            completed: completed,
+            success: success,
+            duplicates: duplicates,
+            failed: failed,
+            bytesPerSecond: 0
+        )
+    }
+
+    func updateSnapshot(
+        filename: String,
+        completed: Int,
+        success: Int,
+        duplicates: Int,
+        failed: Int,
+        bytesPerSecond: Double
+    ) {
+        currentFilename = filename
+        self.completed = completed
+        self.success = success
+        self.duplicates = duplicates
+        self.failed = failed
+        viewModel.update(
+            filename: filename,
+            completed: completed,
+            success: success,
+            duplicates: duplicates,
+            failed: failed,
+            bytesPerSecond: bytesPerSecond
+        )
+    }
+
+    func didSendBytes(_ bytes: Int64, totalSent: Int64, totalExpected: Int64) async {
+        let elapsed = max(Date().timeIntervalSince(assetStartDate), 0.001)
+        let bytesPerSecond = Double(totalSent) / elapsed
+        viewModel.update(
+            filename: currentFilename,
+            completed: completed,
+            success: success,
+            duplicates: duplicates,
+            failed: failed,
+            bytesPerSecond: bytesPerSecond
+        )
     }
 }

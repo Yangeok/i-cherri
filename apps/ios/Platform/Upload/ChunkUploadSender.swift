@@ -17,6 +17,10 @@ public actor ChunkUploadSender {
         self.session = URLSession(configuration: config)
     }
 
+    public func setProgressDelegate(_ delegate: ChunkUploadProgressDelegate?) {
+        self.progressDelegate = delegate
+    }
+
     // Uploads from data in memory (small files).
     public func send(
         data: Data,

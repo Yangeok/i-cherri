@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ICherriProtocol
 
 // Manages the full lifecycle of a resumable upload: init → chunk send → (resume on abort) → commit.
@@ -22,14 +23,14 @@ public actor ResumableUploadManager {
     // Performs a full upload with automatic resumption if interrupted.
     public func upload(
         assetLocalID: String,
-        metadata: AssetMetadata,
-        contentHash: String
+        metadata: AssetMetadata
     ) async throws -> UploadResult {
         // Init or resume existing session
         let (uploadID, startOffset, chunkSize) = try await initOrResumeSession(metadata: metadata)
 
         // Fetch data and send
         let data = try await scanner.fetchData(for: assetLocalID)
+        let contentHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         try await chunkSender.send(
             data: data,
             uploadID: uploadID,

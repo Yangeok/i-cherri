@@ -130,6 +130,10 @@ public final class BackupProgressViewModel: ObservableObject {
         self.totalCount = totalCount
     }
 
+    public func bindCancellation(to task: Task<Void, Never>) {
+        cancellationToken = task
+    }
+
     public func update(filename: String, completed: Int, success: Int, duplicates: Int, failed: Int, bytesPerSecond: Double) {
         currentFilename = filename
         completedCount = completed
