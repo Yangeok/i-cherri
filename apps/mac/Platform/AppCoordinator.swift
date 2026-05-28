@@ -258,6 +258,9 @@ extension AppCoordinator: ReceiverRouteHandler {
         do {
             try await DatabaseManager.shared.upsertDevice(record)
             print("[AppCoordinator] Device paired: \(body.deviceName) (\(body.deviceID))")
+            await MainActor.run {
+                NotificationCenter.default.post(name: .receiverDataDidChange, object: nil)
+            }
             
             let response = PairingConfirmResponse(status: "paired", trustToken: trustToken)
             return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
@@ -310,6 +313,9 @@ extension AppCoordinator: ReceiverRouteHandler {
             switch result {
             case .success(let backupID, let displayPath):
                 try await sessionManager.completeSession(uploadID: uploadID)
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .receiverDataDidChange, object: nil)
+                }
                 
                 let response = CommitUploadResponse.success(backupID: backupID, displayPath: displayPath)
                 return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)

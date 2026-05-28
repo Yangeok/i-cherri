@@ -156,4 +156,5 @@ final class MenuBarState: ObservableObject {
 extension Notification.Name {
     static let openDashboard = Notification.Name("iCherri.openDashboard")
     static let changeBackupFolder = Notification.Name("iCherri.changeBackupFolder")
+    static let receiverDataDidChange = Notification.Name("iCherri.receiverDataDidChange")
 }

@@ -69,6 +69,18 @@ public struct BackupDashboardView: View {
                         receiverRow(receiver)
                     }
                 }
+                if let message = viewModel.pairingStatusMessage {
+                    Label(message, systemImage: viewModel.isPaired ? "checkmark.circle.fill" : "dot.radiowaves.left.and.right")
+                        .font(.caption)
+                        .foregroundStyle(viewModel.isPaired ? .green : .secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let errorMessage = viewModel.pairingErrorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         } label: {
             Label("Available Receivers", systemImage: "macbook.and.iphone")
@@ -147,6 +159,7 @@ public struct BackupDashboardView: View {
                 Button("Connect") { Task { await viewModel.pair(with: receiver) } }
                     .font(.caption)
                     .buttonStyle(.bordered)
+                    .disabled(viewModel.isPairing)
             }
         }
         .padding(.vertical, 4)
@@ -165,7 +178,10 @@ final class BackupDashboardViewModel: ObservableObject {
     @Published var pairedReceiver: DiscoveredReceiver?
     @Published var pairedReceiverName: String?
     @Published var isPaired = false
+    @Published var isPairing = false
     @Published var isBackingUp = false
+    @Published var pairingStatusMessage: String?
+    @Published var pairingErrorMessage: String?
 
     private let scanner = PhotoLibraryScanner()
     private let bonjourBrowser = BonjourBrowser()
@@ -197,6 +213,12 @@ final class BackupDashboardViewModel: ObservableObject {
         let previousReceiver = pairedReceiver
         let previousReceiverName = pairedReceiverName
         let previousIsPaired = isPaired
+        let previousStatusMessage = pairingStatusMessage
+
+        isPairing = true
+        pairingErrorMessage = nil
+        pairingStatusMessage = "Connecting to \(receiver.name)..."
+        defer { isPairing = false }
 
         // Resolve endpoint and send pair request to Mac server
         do {
@@ -207,6 +229,7 @@ final class BackupDashboardViewModel: ObservableObject {
             let url = baseURL.appendingPathComponent("/pair")
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
+            request.timeoutInterval = 10
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue(device.deviceID, forHTTPHeaderField: "X-iCherri-Device-ID")
             
@@ -228,18 +251,23 @@ final class BackupDashboardViewModel: ObservableObject {
                 pairedReceiver = receiver
                 pairedReceiverName = receiver.name
                 isPaired = true
+                pairingStatusMessage = "Connected to \(receiver.name)."
                 print("[Pair] Successfully paired with \(receiver.name), token: \(confirmResponse.trustToken.prefix(8))...")
             } else {
                 print("[Pair] Server returned error: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
                 pairedReceiver = previousReceiver
                 pairedReceiverName = previousReceiverName
                 isPaired = previousIsPaired
+                pairingStatusMessage = previousStatusMessage
+                pairingErrorMessage = "Pairing failed. Receiver returned HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)."
             }
         } catch {
             print("[Pair] Failed to pair: \(error)")
             pairedReceiver = previousReceiver
             pairedReceiverName = previousReceiverName
             isPaired = previousIsPaired
+            pairingStatusMessage = previousStatusMessage
+            pairingErrorMessage = "Pairing failed: \(error.localizedDescription)"
         }
     }
 
@@ -270,6 +298,7 @@ final class BackupDashboardViewModel: ObservableObject {
 
         pairedReceiverName = defaults.string(forKey: receiverNameKey)
         isPaired = true
+        pairingStatusMessage = pairedReceiverName.map { "Connected to \($0)." }
     }
     
     private func currentDeviceInfo() -> DeviceInfo {

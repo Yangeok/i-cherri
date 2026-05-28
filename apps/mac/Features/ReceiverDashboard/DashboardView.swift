@@ -18,6 +18,9 @@ struct DashboardView: View {
         .onReceive(NotificationCenter.default.publisher(for: .changeBackupFolder)) { _ in
             viewModel.selectBackupFolder()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .receiverDataDidChange)) { _ in
+            Task { await viewModel.load() }
+        }
     }
 
     // MARK: - Sidebar
@@ -190,6 +193,7 @@ final class DashboardViewModel: ObservableObject {
 
     func load() async {
         do {
+            let previousSelection = selectedDevice
             self.backupFolderPath = AppCoordinator.shared.backupFolder.path
             
             let devices = try await DatabaseManager.shared.fetchAllDevices()
@@ -218,6 +222,12 @@ final class DashboardViewModel: ObservableObject {
                     expiresAt: r.expiresAt,
                     metadataJson: r.metadataJson
                 )
+            }
+
+            if let previousSelection, devices.contains(where: { $0.deviceId == previousSelection }) {
+                self.selectedDevice = previousSelection
+            } else {
+                self.selectedDevice = devices.first?.deviceId
             }
         } catch {
             print("[DashboardViewModel] Load failed: \(error)")

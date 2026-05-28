@@ -8,8 +8,13 @@ SIGN_SERVER_PORT=38080
 SIGN_SERVER_URL=http://localhost:$(SIGN_SERVER_PORT)
 BACKUP_DIR=$(HOME)/Photos
 DB_FILE=$(BACKUP_DIR)/.i-cherri.sqlite3
+IOS_PROJECT=apps/ios/iCherri-ios.xcodeproj
+IOS_SCHEME=iCherri-ios
+IOS_BUNDLE_ID=com.yangeok.iCherri-ios
+IOS_DERIVED_DATA=$(CURDIR)/.build/ios-derived
+IOS_APP_PATH=$(IOS_DERIVED_DATA)/Build/Products/Debug-iphoneos/$(IOS_SCHEME).app
 
-.PHONY: all go shortcut sign-server clean run reindex db-clean db-reset help init
+.PHONY: all go shortcut sign-server clean run reindex db-clean db-reset help init mac-app ios-app ios-run
 
 all: go shortcut init
 
@@ -73,6 +78,18 @@ ios-app:
 	@echo "📱 Building iOS App..."
 	xcodebuild build -project apps/ios/iCherri-ios.xcodeproj -scheme iCherri-ios -destination 'generic/platform=iOS'
 
+ios-run:
+	@echo "📱 Building, installing, and launching iOS app..."
+	@DEVICE_ID="$${IOS_DEVICE_ID:-$$(xcodebuild -project "$(IOS_PROJECT)" -scheme "$(IOS_SCHEME)" -showdestinations 2>/dev/null | sed -n "s/.*platform:iOS, arch:arm64, id:\\([^,}]*\\).*/\\1/p" | head -1)}"; \
+	if [ -z "$$DEVICE_ID" ]; then \
+		echo "❌ No connected iOS device found. Connect and unlock a device, or run: IOS_DEVICE_ID=<udid> make ios-run"; \
+		exit 1; \
+	fi; \
+	echo "📲 Using device $$DEVICE_ID"; \
+	xcodebuild build -project "$(IOS_PROJECT)" -scheme "$(IOS_SCHEME)" -destination "id=$$DEVICE_ID" -derivedDataPath "$(IOS_DERIVED_DATA)"; \
+	xcrun devicectl device install app --device "$$DEVICE_ID" "$(IOS_APP_PATH)"; \
+	xcrun devicectl device process launch --device "$$DEVICE_ID" --terminate-existing "$(IOS_BUNDLE_ID)"
+
 help:
 	@echo "Usage:"
 	@echo "  make all         - Build Go binaries (server & init) and Signed shortcut"
@@ -86,4 +103,5 @@ help:
 	@echo "  make db-reset    - db-clean + reindex"
 	@echo "  make mac-app     - Build macOS SwiftUI App"
 	@echo "  make ios-app     - Build iOS SwiftUI App"
+	@echo "  make ios-run     - Build + install + launch iOS app on a connected device"
 	@echo "  make clean       - Remove all built artifacts"
