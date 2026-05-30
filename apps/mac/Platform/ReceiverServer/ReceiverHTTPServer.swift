@@ -180,11 +180,13 @@ actor ReceiverHTTPServer {
     // MARK: - HTTP Parser
 
     private func parseHTTP(_ data: Data) -> HTTPRequest? {
-        guard let raw = String(data: data, encoding: .utf8) else { return nil }
-        let parts = raw.components(separatedBy: "\r\n\r\n")
-        guard parts.count >= 1 else { return nil }
+        let separator = Data("\r\n\r\n".utf8)
+        guard let headerEnd = data.range(of: separator) else { return nil }
 
-        let headerLines = parts[0].components(separatedBy: "\r\n")
+        guard let headerSection = String(data: data[..<headerEnd.lowerBound], encoding: .utf8) else { return nil }
+        let bodyData = Data(data[headerEnd.upperBound...])
+
+        let headerLines = headerSection.components(separatedBy: "\r\n")
         guard let requestLine = headerLines.first else { return nil }
 
         let tokens = requestLine.split(separator: " ", maxSplits: 2).map(String.init)
@@ -199,13 +201,6 @@ actor ReceiverHTTPServer {
             if pair.count == 2 {
                 headers[pair[0].lowercased().trimmingCharacters(in: .whitespaces)] = pair[1].trimmingCharacters(in: .whitespaces)
             }
-        }
-
-        let bodyData: Data
-        if parts.count > 1, let bodyStr = parts[1...].joined(separator: "\r\n\r\n").data(using: .utf8) {
-            bodyData = bodyStr
-        } else {
-            bodyData = Data()
         }
 
         return HTTPRequest(method: method, path: path, headers: headers, body: bodyData)
