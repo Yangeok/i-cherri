@@ -2,9 +2,11 @@ import SwiftUI
 import Network
 import ICherriProtocol
 import ICherriDesignSystem
+import Inject
 
 // Onboarding + pairing + backup trigger dashboard for iOS.
 public struct BackupDashboardView: View {
+    @ObserveInjection var inject
     @StateObject private var viewModel = BackupDashboardViewModel()
 
     public init() {}
@@ -44,6 +46,7 @@ public struct BackupDashboardView: View {
                 }
             }
         }
+        .enableInjection()
     }
 
     // MARK: - Sections
@@ -221,8 +224,23 @@ final class BackupDashboardViewModel: ObservableObject {
         Task { @MainActor in
             for await receivers in bonjourBrowser.$discoveredReceivers.values {
                 self.discoveredReceivers = receivers
+                self.localNetworkStatus = receivers.isEmpty ? self.localNetworkStatus : .granted
                 if let pairedReceiverName {
                     self.pairedReceiver = receivers.first(where: { $0.name == pairedReceiverName })
+                }
+            }
+        }
+        Task { @MainActor in
+            for await status in bonjourBrowser.$status.values {
+                switch status {
+                case .ready:
+                    self.localNetworkStatus = .granted
+                case .failed:
+                    self.localNetworkStatus = .denied
+                case .idle, .browsing:
+                    if self.localNetworkStatus != .granted {
+                        self.localNetworkStatus = .unknown
+                    }
                 }
             }
         }

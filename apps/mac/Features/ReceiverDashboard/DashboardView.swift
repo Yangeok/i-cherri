@@ -1,9 +1,11 @@
 import SwiftUI
 import ICherriDesignSystem
 import ICherriProtocol
+import Inject
 
 // macOS receiver dashboard showing paired devices, active sessions, and backup history.
 struct DashboardView: View {
+    @ObserveInjection var inject
     @StateObject private var viewModel = DashboardViewModel()
 
     var body: some View {
@@ -13,6 +15,7 @@ struct DashboardView: View {
             detailContent
         }
         .navigationTitle("iCherri Receiver")
+        .enableInjection()
         .toolbar { toolbarContent }
         .task { await viewModel.load() }
         .onReceive(NotificationCenter.default.publisher(for: .changeBackupFolder)) { _ in

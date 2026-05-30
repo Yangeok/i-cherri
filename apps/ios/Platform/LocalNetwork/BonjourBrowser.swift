@@ -1,6 +1,13 @@
 import Foundation
 import Network
 
+public enum BonjourBrowserStatus: Sendable {
+    case idle
+    case browsing
+    case ready
+    case failed
+}
+
 public struct DiscoveredReceiver: Sendable, Identifiable {
     public let id: String
     public let name: String
@@ -17,6 +24,7 @@ public struct DiscoveredReceiver: Sendable, Identifiable {
 @MainActor
 public final class BonjourBrowser: ObservableObject {
     @Published public private(set) var discoveredReceivers: [DiscoveredReceiver] = []
+    @Published public private(set) var status: BonjourBrowserStatus = .idle
 
     private var browser: NWBrowser?
     private let queue = DispatchQueue(label: "com.icherri.bonjour-browser", qos: .userInitiated)
@@ -24,6 +32,7 @@ public final class BonjourBrowser: ObservableObject {
     public init() {}
 
     public func startBrowsing() {
+        status = .browsing
         let params = NWParameters()
         params.includePeerToPeer = true
 
@@ -54,11 +63,15 @@ public final class BonjourBrowser: ObservableObject {
         browser?.cancel()
         browser = nil
         discoveredReceivers = []
+        status = .idle
     }
 
     private func handleStateChange(_ state: NWBrowser.State) {
         switch state {
+        case .ready:
+            status = .ready
         case .failed:
+            status = .failed
             stopBrowsing()
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 self?.startBrowsing()

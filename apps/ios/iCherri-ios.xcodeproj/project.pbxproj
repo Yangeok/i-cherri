@@ -10,6 +10,7 @@
 		F1706B662FC5DBA600D3C6C1 /* ICherriProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C1 /* ICherriProtocol */; };
 		F1706B662FC5DBA600D3C6C2 /* ICherriCore in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C2 /* ICherriCore */; };
 		F1706B662FC5DBA600D3C6C3 /* ICherriDesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C3 /* ICherriDesignSystem */; };
+		F1706B662FC5DBA600D3C6C4 /* Inject in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C4 /* Inject */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -71,6 +72,7 @@
 				F1706B662FC5DBA600D3C6C1 /* ICherriProtocol in Frameworks */,
 				F1706B662FC5DBA600D3C6C2 /* ICherriCore in Frameworks */,
 				F1706B662FC5DBA600D3C6C3 /* ICherriDesignSystem in Frameworks */,
+				F1706B662FC5DBA600D3C6C4 /* Inject in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -138,6 +140,7 @@
 				F1706B652FC5DBA600D3C6C1 /* ICherriProtocol */,
 				F1706B652FC5DBA600D3C6C2 /* ICherriCore */,
 				F1706B652FC5DBA600D3C6C3 /* ICherriDesignSystem */,
+				F1706B652FC5DBA600D3C6C4 /* Inject */,
 			);
 			productName = "iCherri-ios";
 			productReference = F1706B992FC5DBE900D3C6C7 /* iCherri-ios.app */;
@@ -234,6 +237,7 @@
 				F1706B622FC5DBA500D3C6C1 /* XCLocalSwiftPackageReference "ICherriProtocol" */,
 				F1706B622FC5DBA500D3C6C2 /* XCLocalSwiftPackageReference "ICherriCore" */,
 				F1706B622FC5DBA500D3C6C3 /* XCLocalSwiftPackageReference "ICherriDesignSystem" */,
+				F1706B622FC5DBA500D3C6C4 /* XCRemoteSwiftPackageReference "Inject" */,
 			);
 		};
 /* End PBXProject section */
@@ -253,6 +257,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		F1706B622FC5DBA500D3C6C4 /* XCRemoteSwiftPackageReference "Inject" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/krzysztofzablocki/Inject.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.5.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		F1706B652FC5DBA600D3C6C1 /* ICherriProtocol */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -268,6 +283,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F1706B622FC5DBA500D3C6C3 /* XCLocalSwiftPackageReference "ICherriDesignSystem" */;
 			productName = "ICherriDesignSystem";
+		};
+		F1706B652FC5DBA600D3C6C4 /* Inject */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F1706B622FC5DBA500D3C6C4 /* XCRemoteSwiftPackageReference "Inject" */;
+			productName = "Inject";
 		};
 /* End XCSwiftPackageProductDependency section */
 

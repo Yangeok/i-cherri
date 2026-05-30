@@ -62,11 +62,9 @@ final class AppCoordinator: NSObject, ObservableObject {
         do {
             let backupDir = self.backupFolder
             let tmpDir = backupDir.appendingPathComponent(".tmp")
-            let incomingDir = tmpDir.appendingPathComponent("incoming")
-            
+
             try FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: incomingDir, withIntermediateDirectories: true)
             
             let dbPath = backupDir.appendingPathComponent(".i-cherri.sqlite3").path
             try await DatabaseManager.shared.open(at: dbPath)
@@ -80,9 +78,9 @@ final class AppCoordinator: NSObject, ObservableObject {
             // Handlers
             let queryProcessor = CheckBatchProcessor(index: DatabaseManager.shared)
             self.checkBatchHandler = CheckBatchHandler(processor: queryProcessor)
-            self.uploadHandler = UploadHandler(sessionManager: manager, incomingDir: incomingDir)
+            self.uploadHandler = UploadHandler(sessionManager: manager, incomingDir: tmpDir)
             self.uploadStatusHandler = UploadStatusHandler(sessionManager: manager)
-            
+
             // HTTP Server
             let srv = ReceiverHTTPServer(port: port)
             await srv.setRouteHandler(self)
@@ -91,7 +89,7 @@ final class AppCoordinator: NSObject, ObservableObject {
             self.isServerRunning = true
             print("[AppCoordinator] HTTP Server running on port \(port)")
             // Cleanup Scheduler
-            let scheduler = CleanupScheduler(sessionManager: manager, incomingDir: incomingDir)
+            let scheduler = CleanupScheduler(sessionManager: manager, incomingDir: tmpDir)
             await scheduler.start()
             self.cleanupScheduler = scheduler
             

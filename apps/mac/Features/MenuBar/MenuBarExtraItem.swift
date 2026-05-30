@@ -1,4 +1,5 @@
 import SwiftUI
+import Inject
 import ICherriProtocol
 
 // macOS menu bar status icon with quick-link popover showing receiver state.
@@ -34,6 +35,7 @@ public struct MenuBarExtraItem: Scene {
 }
 
 struct MenuBarPopoverContent: View {
+    @ObserveInjection var inject
     @ObservedObject var state: MenuBarState
 
     var body: some View {
@@ -46,6 +48,7 @@ struct MenuBarPopoverContent: View {
         }
         .frame(width: 260)
         .padding(.vertical, 4)
+        .enableInjection()
     }
 
     private var headerSection: some View {

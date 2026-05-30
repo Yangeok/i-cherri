@@ -13,8 +13,12 @@ IOS_SCHEME=iCherri-ios
 IOS_BUNDLE_ID=com.yangeok.iCherri-ios
 IOS_DERIVED_DATA=$(CURDIR)/.build/ios-derived
 IOS_APP_PATH=$(IOS_DERIVED_DATA)/Build/Products/Debug-iphoneos/$(IOS_SCHEME).app
+MAC_PROJECT=apps/mac/iCherri-Mac.xcodeproj
+MAC_SCHEME=iCherri-Mac
+MAC_DERIVED_DATA=$(CURDIR)/.build/mac-derived
+MAC_APP_PATH=$(MAC_DERIVED_DATA)/Build/Products/Debug/$(MAC_SCHEME).app
 
-.PHONY: all go shortcut sign-server clean run reindex db-clean db-reset help init mac-app ios-app ios-run ios-console ios-dev mac-logs
+.PHONY: all go shortcut sign-server clean run reindex db-clean db-reset help init mac-app mac-run mac-dev ios-app ios-run ios-console ios-dev mac-logs
 
 all: go shortcut init
 
@@ -72,7 +76,12 @@ clean:
 
 mac-app:
 	@echo "🖥️  Building macOS App..."
-	xcodebuild build -project apps/mac/iCherri-Mac.xcodeproj -scheme iCherri-Mac -destination 'platform=macOS'
+	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -destination 'platform=macOS' -derivedDataPath $(MAC_DERIVED_DATA)
+
+mac-run:
+	@echo "🖥️  Building and launching macOS App..."
+	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -destination 'platform=macOS' -derivedDataPath $(MAC_DERIVED_DATA)
+	open $(MAC_APP_PATH)
 
 ios-app:
 	@echo "📱 Building iOS App..."
@@ -102,6 +111,9 @@ ios-console:
 
 ios-dev: ios-run
 	@$(MAKE) ios-console
+
+mac-dev: mac-run
+	@$(MAKE) mac-logs
 
 mac-logs:
 	@echo "🖥️  Streaming macOS app logs..."

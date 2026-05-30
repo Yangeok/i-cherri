@@ -102,7 +102,7 @@ public final class PhotoLibraryScanner {
         let mediaType = resolveMediaType(asset)
         let creation = asset.creationDate ?? Date()
         let modification = asset.modificationDate ?? creation
-        let byteSize = Int64(asset.value(forKey: "fileSize") as? Int ?? 0)
+        let byteSize: Int64 = 0
         let fingerprint = FingerprintBuilder.build(
             creationDate: creation,
             modificationDate: modification,
@@ -155,8 +155,11 @@ public final class PhotoLibraryScanner {
 
 // Builds quick_fingerprint string from asset metadata fields.
 enum FingerprintBuilder {
-    static func build(creationDate: Date, modificationDate: Date, byteSize: Int64, pixelWidth: Int, pixelHeight: Int) -> String {
+    static func build(creationDate: Date, modificationDate: Date, byteSize: Int64, pixelWidth: Int, pixelHeight: Int, durationSeconds: Double? = nil) -> String {
         let ts = Int64(creationDate.timeIntervalSince1970)
+        if let dur = durationSeconds, dur > 0 {
+            return "\(ts)_\(byteSize)_\(pixelWidth)_\(pixelHeight)_\(Int64(dur * 1000))"
+        }
         return "\(ts)_\(byteSize)_\(pixelWidth)_\(pixelHeight)"
     }
 }

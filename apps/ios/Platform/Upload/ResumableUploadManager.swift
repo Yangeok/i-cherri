@@ -25,12 +25,32 @@ public actor ResumableUploadManager {
         assetLocalID: String,
         metadata: AssetMetadata
     ) async throws -> UploadResult {
-        // Init or resume existing session
-        let (uploadID, startOffset, chunkSize) = try await initOrResumeSession(metadata: metadata)
-
         // Fetch data and send
         let data = try await scanner.fetchData(for: assetLocalID)
         let contentHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let normalizedMetadata = AssetMetadata(
+            deviceID: metadata.deviceID,
+            assetLocalID: metadata.assetLocalID,
+            originalFilename: metadata.originalFilename,
+            mediaType: metadata.mediaType,
+            creationDate: metadata.creationDate,
+            modificationDate: metadata.modificationDate,
+            byteSize: Int64(data.count),
+            pixelWidth: metadata.pixelWidth,
+            pixelHeight: metadata.pixelHeight,
+            quickFingerprint: FingerprintBuilder.build(
+                creationDate: metadata.creationDate,
+                modificationDate: metadata.modificationDate,
+                byteSize: Int64(data.count),
+                pixelWidth: metadata.pixelWidth,
+                pixelHeight: metadata.pixelHeight,
+                durationSeconds: metadata.durationSeconds
+            ),
+            durationSeconds: metadata.durationSeconds
+        )
+
+        // Init or resume existing session
+        let (uploadID, startOffset, chunkSize) = try await initOrResumeSession(metadata: normalizedMetadata)
         try await chunkSender.send(
             data: data,
             uploadID: uploadID,
@@ -42,7 +62,7 @@ public actor ResumableUploadManager {
         let commitResponse = try await backupClient.commitUpload(
             uploadID: uploadID,
             assetLocalID: assetLocalID,
-            finalByteSize: metadata.byteSize,
+            finalByteSize: normalizedMetadata.byteSize,
             finalContentHash: contentHash
         )
 

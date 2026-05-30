@@ -1,8 +1,10 @@
 import SwiftUI
 import ICherriDesignSystem
+import Inject
 
 // Animated real-time backup progress screen with speed, ETA, and per-asset status.
 public struct BackupProgressView: View {
+    @ObserveInjection var inject
     @ObservedObject var viewModel: BackupProgressViewModel
 
     public init(viewModel: BackupProgressViewModel) {
@@ -23,6 +25,7 @@ public struct BackupProgressView: View {
             .padding(.top, 40)
         }
         .navigationBarBackButtonHidden(true)
+        .enableInjection()
     }
 
     // MARK: - Header
