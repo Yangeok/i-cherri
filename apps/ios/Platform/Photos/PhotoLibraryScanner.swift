@@ -65,8 +65,8 @@ public final class PhotoLibraryScanner {
         }
     }
 
-    // Opens a streaming resource for a video or large asset.
-    public func openInputStream(for assetLocalID: String) async throws -> InputStream {
+    // Opens a streaming resource for a video asset, returning stream + file size.
+    public func openInputStreamWithSize(for assetLocalID: String) async throws -> (InputStream, Int64) {
         let result = PHAsset.fetchAssets(withLocalIdentifiers: [assetLocalID], options: nil)
         guard let asset = result.firstObject, asset.mediaType == .video else {
             throw PhotoScannerError.assetNotFound(assetLocalID)
@@ -84,13 +84,20 @@ public final class PhotoLibraryScanner {
                     return
                 }
                 guard let urlAsset = avAsset as? AVURLAsset,
-                      let stream = InputStream(url: urlAsset.url) else {
+                      let stream = InputStream(url: urlAsset.url),
+                      let size = try? urlAsset.url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
                     continuation.resume(throwing: PhotoScannerError.dataUnavailable(assetLocalID))
                     return
                 }
-                continuation.resume(returning: stream)
+                continuation.resume(returning: (stream, Int64(size)))
             }
         }
+    }
+
+    // Opens a streaming resource for a video or large asset.
+    public func openInputStream(for assetLocalID: String) async throws -> InputStream {
+        let (stream, _) = try await openInputStreamWithSize(for: assetLocalID)
+        return stream
     }
 
     // MARK: - Private

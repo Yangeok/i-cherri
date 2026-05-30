@@ -435,6 +435,7 @@ final class BackupDashboardViewModel: ObservableObject {
             } catch is CancellationError {
                 await MainActor.run {
                     self.backupStatusMessage = "Backup canceled."
+                    self.activeBackupProgressViewModel = nil
                 }
             } catch {
                 print("[Backup] Backup run failed: \(error)")
