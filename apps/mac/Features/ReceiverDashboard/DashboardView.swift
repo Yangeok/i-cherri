@@ -24,6 +24,27 @@ struct DashboardView: View {
         .onReceive(NotificationCenter.default.publisher(for: .receiverDataDidChange)) { _ in
             Task { await viewModel.load() }
         }
+        .alert(
+            "Delete Paired Device?",
+            isPresented: Binding(
+                get: { viewModel.devicePendingDeletion != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        viewModel.cancelDeleteDevice()
+                    }
+                }
+            ),
+            presenting: viewModel.devicePendingDeletion
+        ) { device in
+            Button("Delete", role: .destructive) {
+                Task { await viewModel.confirmDeleteDevice(device) }
+            }
+            Button("Cancel", role: .cancel) {
+                viewModel.cancelDeleteDevice()
+            }
+        } message: { device in
+            Text("This removes \(device.deviceName), its backup history, active sessions, and failure logs from this Mac.")
+        }
     }
 
     // MARK: - Sidebar
@@ -34,6 +55,11 @@ struct DashboardView: View {
                 ForEach(viewModel.pairedDevices, id: \.deviceId) { device in
                     deviceRow(device)
                         .tag(device.deviceId)
+                        .contextMenu {
+                            Button("Delete Device", role: .destructive) {
+                                viewModel.requestDeleteDevice(device)
+                            }
+                        }
                 }
             }
             Section("Sessions") {
@@ -98,6 +124,15 @@ struct DashboardView: View {
                 statusPill(device.pairingStatus)
             }
             .padding(.bottom, 4)
+
+            HStack {
+                Spacer()
+                Button(role: .destructive) {
+                    viewModel.requestDeleteDevice(device)
+                } label: {
+                    Label("Delete Device", systemImage: "trash")
+                }
+            }
 
             HStack(spacing: 16) {
                 GlowBadge(label: "Backed Up", value: "\(viewModel.assetCount(for: device.deviceId))", color: .green)
@@ -189,6 +224,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var allAssets: [BackupAssetRecord] = []
     @Published var selectedDevice: String?
     @Published var backupFolderPath: String?
+    @Published var devicePendingDeletion: PairedDeviceRecord?
 
     var selectedDeviceInfo: PairedDeviceRecord? {
         pairedDevices.first { $0.deviceId == selectedDevice }
@@ -257,6 +293,35 @@ final class DashboardViewModel: ObservableObject {
         AppCoordinator.shared.selectBackupFolder()
         Task {
             await load()
+        }
+    }
+
+    func requestDeleteDevice(_ device: PairedDeviceRecord) {
+        devicePendingDeletion = device
+    }
+
+    func cancelDeleteDevice() {
+        devicePendingDeletion = nil
+    }
+
+    func confirmDeleteDevice(_ device: PairedDeviceRecord) async {
+        defer { devicePendingDeletion = nil }
+
+        do {
+            let tempPaths = try await DatabaseManager.shared.deletePairedDevice(deviceId: device.deviceId)
+            let keychain = MacKeychainStore()
+            try? keychain.deleteTrustToken(for: device.deviceId)
+            for path in tempPaths {
+                try? FileManager.default.removeItem(atPath: path)
+            }
+
+            if selectedDevice == device.deviceId {
+                selectedDevice = nil
+            }
+
+            await load()
+        } catch {
+            print("[DashboardViewModel] Delete device failed: \(error)")
         }
     }
 }

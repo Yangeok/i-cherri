@@ -478,6 +478,23 @@ actor DatabaseManager {
                 .fetchAll(db)
         }
     }
+
+    func deletePairedDevice(deviceId: String) throws -> [String] {
+        try queue.write { db in
+            let tempPaths = try String.fetchAll(
+                db,
+                sql: "SELECT temp_path FROM upload_sessions WHERE device_id = ?",
+                arguments: [deviceId]
+            )
+
+            try db.execute(sql: "DELETE FROM upload_sessions WHERE device_id = ?", arguments: [deviceId])
+            try db.execute(sql: "DELETE FROM upload_failure_logs WHERE device_id = ?", arguments: [deviceId])
+            try db.execute(sql: "DELETE FROM backup_assets WHERE device_id = ?", arguments: [deviceId])
+            try db.execute(sql: "DELETE FROM paired_devices WHERE device_id = ?", arguments: [deviceId])
+
+            return tempPaths
+        }
+    }
 }
 
 // MARK: - Errors
