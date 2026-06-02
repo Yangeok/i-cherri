@@ -318,11 +318,28 @@ extension AppCoordinator: ReceiverRouteHandler {
                 let response = CommitUploadResponse.success(backupID: backupID, displayPath: displayPath)
                 return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
             case .checksumMismatch:
+                try? FileManager.default.removeItem(atPath: session.tempPath)
+                try? await sessionManager.failSession(
+                    uploadID: uploadID,
+                    errorCode: "checksum_mismatch",
+                    errorMessage: "SHA256 checksum mismatch"
+                )
                 return .error(code: "checksum_mismatch", message: "SHA256 checksum mismatch", status: 400)
             case .sizeMismatch:
+                try? FileManager.default.removeItem(atPath: session.tempPath)
+                try? await sessionManager.failSession(
+                    uploadID: uploadID,
+                    errorCode: "size_mismatch",
+                    errorMessage: "File size mismatch"
+                )
                 return .error(code: "size_mismatch", message: "File size mismatch", status: 400)
             }
         } catch {
+            try? await sessionManager.failSession(
+                uploadID: uploadID,
+                errorCode: "commit_error",
+                errorMessage: error.localizedDescription
+            )
             return .error(code: "commit_error", message: error.localizedDescription, status: 500)
         }
     }

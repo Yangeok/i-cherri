@@ -71,12 +71,27 @@ actor SessionManager {
     }
 
     func completeSession(uploadID: String) async throws {
-        try await dbManager.updateUploadProgress(uploadId: uploadID, receivedBytes: -1, status: "completed")
         try await dbManager.deleteUploadSession(uploadId: uploadID)
     }
 
-    func failSession(uploadID: String, error: String) async throws {
-        try await dbManager.updateUploadProgress(uploadId: uploadID, receivedBytes: -1, status: "failed")
+    func failSession(uploadID: String, errorCode: String, errorMessage: String) async throws {
+        guard let session = try await dbManager.fetchUploadSession(uploadId: uploadID) else { return }
+
+        let record = UploadFailureLogRecord(
+            id: nil,
+            uploadId: session.uploadId,
+            deviceId: session.deviceId,
+            assetLocalId: session.assetLocalId,
+            status: "failed",
+            errorCode: errorCode,
+            errorMessage: errorMessage,
+            receivedBytes: session.receivedBytes,
+            expectedByteSize: session.expectedByteSize,
+            createdAt: Date(),
+            metadataJson: session.metadataJson
+        )
+        try await dbManager.insertUploadFailureLog(record)
+        try await dbManager.deleteUploadSession(uploadId: uploadID)
     }
 
     func pauseSession(uploadID: String) async throws {

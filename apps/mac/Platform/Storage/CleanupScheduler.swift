@@ -34,7 +34,11 @@ actor CleanupScheduler {
             let expired = try await sessionManager.fetchExpiredSessions()
             for session in expired {
                 removeFile(at: session.tempPath)
-                try? await sessionManager.failSession(uploadID: session.uploadID, error: "expired")
+                try? await sessionManager.failSession(
+                    uploadID: session.uploadID,
+                    errorCode: "session_expired",
+                    errorMessage: "Upload session expired before completion"
+                )
             }
             removeOrphanedTempFiles(knownPaths: Set(expired.map(\.tempPath)))
         } catch {

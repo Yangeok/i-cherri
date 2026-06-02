@@ -143,6 +143,54 @@ struct UploadSessionRecord: Codable, FetchableRecord, PersistableRecord {
     }
 }
 
+struct UploadFailureLogRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "upload_failure_logs"
+
+    var id: Int64?
+    var uploadId: String
+    var deviceId: String
+    var assetLocalId: String
+    var status: String
+    var errorCode: String
+    var errorMessage: String
+    var receivedBytes: Int64
+    var expectedByteSize: Int64
+    var createdAt: Date
+    var metadataJson: String
+
+    enum Columns: String, ColumnExpression {
+        case id
+        case uploadId = "upload_id"
+        case deviceId = "device_id"
+        case assetLocalId = "asset_local_id"
+        case status
+        case errorCode = "error_code"
+        case errorMessage = "error_message"
+        case receivedBytes = "received_bytes"
+        case expectedByteSize = "expected_byte_size"
+        case createdAt = "created_at"
+        case metadataJson = "metadata_json"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case uploadId = "upload_id"
+        case deviceId = "device_id"
+        case assetLocalId = "asset_local_id"
+        case status
+        case errorCode = "error_code"
+        case errorMessage = "error_message"
+        case receivedBytes = "received_bytes"
+        case expectedByteSize = "expected_byte_size"
+        case createdAt = "created_at"
+        case metadataJson = "metadata_json"
+    }
+
+    mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
+    }
+}
+
 // MARK: - Database Manager
 
 actor DatabaseManager {
@@ -225,6 +273,24 @@ actor DatabaseManager {
                 t.column("metadata_json", .text).notNull()
                 t.column("last_error", .text)
             }
+        }
+
+        migrator.registerMigration("v2_upload_failure_logs") { db in
+            try db.create(table: "upload_failure_logs") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("upload_id", .text).notNull()
+                t.column("device_id", .text).notNull()
+                t.column("asset_local_id", .text).notNull()
+                t.column("status", .text).notNull()
+                t.column("error_code", .text).notNull()
+                t.column("error_message", .text).notNull()
+                t.column("received_bytes", .integer).notNull()
+                t.column("expected_byte_size", .integer).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.column("metadata_json", .text).notNull()
+            }
+
+            try db.create(index: "idx_upload_failure_logs_created_at", on: "upload_failure_logs", columns: ["created_at"])
         }
 
         try migrator.migrate(queue)
@@ -353,6 +419,12 @@ actor DatabaseManager {
         }
     }
 
+    func insertUploadFailureLog(_ record: UploadFailureLogRecord) throws {
+        try queue.write { db in
+            try record.insert(db)
+        }
+    }
+
     func updateUploadProgress(uploadId: String, receivedBytes: Int64, status: String) throws {
         let extended = Date().addingTimeInterval(24 * 3600)
         try queue.write { db in
@@ -397,7 +469,13 @@ actor DatabaseManager {
 
     func fetchAllSessions() throws -> [UploadSessionRecord] {
         try queue.read { db in
-            try UploadSessionRecord.order(Column("updated_at").desc).fetchAll(db)
+            try UploadSessionRecord
+                .filter(
+                    sql: "status IN (?, ?, ?)",
+                    arguments: ["initialized", "receiving", "paused"]
+                )
+                .order(Column("updated_at").desc)
+                .fetchAll(db)
         }
     }
 }

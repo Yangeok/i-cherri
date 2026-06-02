@@ -365,6 +365,15 @@ final class BackupDashboardViewModel: ObservableObject {
                     scanner: scanner
                 )
 
+                await progressCoordinator.updateSnapshot(
+                    filename: "Checking existing backups...",
+                    completed: 0,
+                    success: 0,
+                    duplicates: 0,
+                    failed: 0,
+                    bytesPerSecond: 0
+                )
+
                 let batchResponse = try await backupClient.checkBatch(candidates: scannedAssets)
                 let assetIndex = Dictionary(uniqueKeysWithValues: scannedAssets.map { ($0.assetLocalID, $0) })
 
@@ -441,6 +450,7 @@ final class BackupDashboardViewModel: ObservableObject {
                 print("[Backup] Backup run failed: \(error)")
                 await MainActor.run {
                     self.backupStatusMessage = "Backup failed: \(self.describeBackupError(error))"
+                    self.activeBackupProgressViewModel = nil
                 }
             }
         }
