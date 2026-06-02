@@ -5,192 +5,69 @@
 # i-cherri
 
 <p align="center">
-  <a href="README.md">English</a> | 
+  <a href="README.md">English</a> |
   <b>한국어</b>
 </p>
 
-**i-cherri**는 macOS(및 기타 OS) 로컬 LAN 환경에서 iPhone의 사진과 영상을 가장 안전하고 빠르고 스마트하게 백업하기 위한 솔루션입니다.  
-초기 대량 백업은 유선 연결로 빠르게, 이후 일상적인 데이터는 [Cherri](https://cherrilang.org/) 기반의 iOS 단축어(Shortcuts)를 통해 **iOS에서 Mac으로의 단방향 증분 백업**을 수행합니다.
+**i-cherri**는 iPhone과 Mac 사이에서 동작하는 Swift 네이티브 로컬 네트워크 사진 백업 앱입니다.
+iPhone 앱이 사진 보관함을 스캔하고 Bonjour로 Mac 리시버를 찾은 뒤, 재개 가능한 청크 업로드로 macOS 앱에 미디어를 전송합니다.
 
 ---
 
-## 🍒 핵심 특징
+## 아키텍처
 
-- **단방향 증분 백업**: iPhone의 새로운 미디어만 서버로 전송하며, 서버의 변경사항이 iPhone에 영향을 주지 않는 안전한 구조입니다.
-- **멀티 플랫폼 서버**: 서버 엔진은 Go로 작성되어 macOS뿐만 아니라 Linux, Windows에서도 실행 가능합니다. (현재 가이드는 macOS 기준)
-- **초고속 초기 백업**: iPhone을 Mac에 유선 연결하여 직접 복사한 뒤 SQLite 인덱싱(`--reindex`)을 통해 즉시 동기화 상태를 맞춥니다.
-- **스마트 증분 동기화**: Cherri로 작성된 iOS 단축어가 최근 3일간의 미디어를 분석, 서버와 통신하여 없는 파일만 골라 업로드합니다.
-- **데이터 무결성**: SHA-256 해시 기반의 중복 체크를 통해 동일한 파일이 중복 저장되는 것을 원천 차단합니다.
-- **경량 아키텍처**: Go로 작성된 단일 바이너리 서버와 SQLite를 사용하여 리소스를 최소화합니다.
-
----
-
-## 🔒 보안 전제 (필독)
-
-i-cherri는 단순함과 성능을 위해 별도의 인증 레이어를 포함하지 않습니다. 따라서 다음 보안 수칙을 반드시 준수해야 합니다.
-
-- **로컬 LAN 전용**: 신뢰할 수 있는 집/사무실 Wi-Fi 내부에서만 사용하세요.
-- **노출 금지**: 공용 인터넷, 포트 포워딩, Cloudflare Tunnel(cloudflared) 등을 통한 외부 노출은 절대 금지입니다.
-- **신뢰 환경**: 공용 Wi-Fi, 학교, 카페 네트워크에서의 실행을 지양하세요.
+- `apps/ios/`: SwiftUI 기반 iPhone 백업 클라이언트
+- `apps/mac/`: SwiftUI 기반 macOS 리시버 앱
+- `packages/ICherriProtocol`: 공용 DTO와 API 계약
+- `packages/ICherriCore`: 중복 제거, 해시, 백업 코어 로직
+- `packages/ICherriDesignSystem`: 공용 UI 컴포넌트
 
 ---
 
-## 🛠 구성 요소
+## 요구 사항
 
-- [main.go](main.go): 고성능 Go HTTP 서버 및 인덱싱 엔진
-- [iphone_daily_backup.cherri](iphone_daily_backup.cherri): Cherri 기반 iOS 증분 백업 소스
-- [com.local.i-cherri.plist.template](com.local.i-cherri.plist.template): macOS 전용 launchd 자동 실행 템플릿
-- [Makefile](Makefile): 빌드 및 관리를 위한 워크플로우 자동화
-
----
-
-## 📋 사전 요구 사항
-
-i-cherri를 빌드하고 실행하려면 다음 환경이 필요합니다.
-
-- **OS**: macOS (launchd 및 iOS Shortcut 연동 최적화)
-- **Go**: 1.20 버전 이상
-- **Cherri CLI**: iOS 단축어 소스(`.cherri`) 컴파일 및 서명을 위해 필요 ([설치 가이드](https://cherrilang.org/language/))
-- **Make**: 워크플로우 자동화를 위해 권장
+- Xcode 16+
+- 로컬 네트워크 접근이 가능한 macOS
+- 같은 LAN에 있는 iPhone
+- Make
 
 ---
 
-## 🚀 시작하기
-
-### 1. 초기 전체 백업 및 인덱싱
-
-1. iPhone을 Mac에 유선으로 연결합니다.
-2. 사진/영상을 Mac의 백업 폴더 (기본값: `~/Photos`)로 직접 복사합니다.
-3. 복사된 파일들을 연월별 폴더(`YYYY-MM`)로 자동 정리합니다:
-   ```bash
-   # init CLI 빌드
-   make init
-
-   # 복사한 파일들을 연월 폴더로 이동 및 정리
-   ./dist/init <백업된 폴더 경로>
-   ```
-   *참고: 파일은 반드시 `YYYY-MM` 폴더 구조로 정리되어야 서버가 인식합니다.*
-4. 인덱스를 생성합니다:
-   ```bash
-   make reindex
-   ```
-
-### 2. 서버 실행
-
-`Makefile`을 사용하여 간편하게 빌드하고 실행할 수 있습니다.
+## 개발
 
 ```bash
-# 전체 빌드 및 실행
-make all
-make run
+make mac-app
+make ios-app
 ```
 
-기본 서버 주소: `http://localhost:8787`
+자주 쓰는 명령:
+
+- `make mac-run`: macOS 리시버 앱 빌드 후 실행
+- `make mac-dev`: macOS 앱 실행 후 로그 스트림 연결
+- `make ios-run`: 연결된 iPhone에 빌드/설치/실행
+- `make ios-dev`: iPhone 앱 실행 후 콘솔 연결
 
 ---
 
-## 📱 iOS 단축어 설정
+## 현재 백업 흐름
 
-### 1. 기본 설정
-1. `iPhone Daily Backup.shortcut` (signed) 파일을 iPhone으로 가져옵니다.
-2. **서버 IP 설정**: 단축어 편집 모드에서 가장 상단에 있는 서버 주소 변수를 Mac의 실제 로컬 IP(예: `http://192.168.0.10:8787`)로 반드시 수정해야 합니다.
-
-### 2. 자동화(Automation) 설정 가이드
-매일 정해진 시간에 자동으로 백업되도록 설정하는 것을 권장합니다.
-1. iPhone에서 **단축어** 앱을 열고 하단의 **자동화** 탭을 선택합니다.
-2. 오른쪽 상단의 **+** 버튼을 눌러 새로운 자동화를 만듭니다.
-3. **특정 시간**을 선택합니다 (예: 오전 3:00, 충전 중일 때 실행되도록 설정 권장).
-4. 실행 조건을 **즉시 실행**으로 설정하고 '실행 시 알림'을 끕니다. (중요: 그래야 자는 동안 자동으로 진행됩니다.)
-5. 다음 화면에서 **나의 단축어** 중 `iPhone Daily Backup`을 선택합니다.
-6. 이제 매일 설정한 시간에 Mac으로 사진이 자동 백업됩니다.
+1. macOS 리시버 앱 실행
+2. iPhone 앱 실행 후 사진/로컬 네트워크 권한 허용
+3. iPhone과 Mac 페어링
+4. iPhone에서 백업 시작
+5. macOS 대시보드에서 active session과 백업 이력 확인
 
 ---
 
-## 📂 초기 백업을 위한 macOS 공유 설정
+## 보안
 
-유선 연결이 번거롭다면, 같은 Wi-Fi 환경에서 **macOS 공유 폴더**를 통해 초기 대량 백업 파일을 복사할 수 있습니다.
-
-### 1. Mac에서 공유 폴더 만들기
-1. `시스템 설정` > `일반` > `공유`로 이동합니다.
-2. `파일 공유`를 **켬**으로 설정하고 옆의 `i` 버튼을 누릅니다.
-3. `공유 폴더` 목록 아래의 `+` 버튼을 눌러 백업 폴더(예: `~/Photos`)를 추가합니다.
-4. 사용자에 대해 `읽기 및 쓰기` 권한이 있는지 확인합니다.
-
-### 2. iPhone에서 접속하기
-1. iPhone에서 **파일(Files)** 앱을 켭니다.
-2. 오른쪽 상단의 `...` 버튼을 누르고 `서버에 연결`을 선택합니다.
-3. Mac의 로컬 IP 주소를 입력합니다 (예: `smb://192.168.0.10`).
-4. Mac 계정 아이디와 비밀번호를 입력하여 접속합니다.
-5. 사진 앱에서 백업할 항목을 선택 후 `파일 앱에 저장` > Mac 공유 폴더를 선택하여 복사합니다.
+- 신뢰 가능한 로컬 네트워크에서만 사용
+- 리시버를 공용 인터넷에 노출하지 말 것
+- 페어링 데이터는 신뢰되지 않은 머신과 공유하지 말 것
 
 ---
 
-## 📂 저장소 구조 및 DB
+## 상태
 
-### 디렉토리 구조 예시
-```text
-~/Photos/
-├── 2026-04/
-├── 2026-05/
-└── .i-cherri.sqlite3
-```
-
-### SQLite 스키마
-서버는 각 파일의 SHA-256, 원본 이름, 생성일, 크기 등을 인덱싱하여 관리합니다.
-
-```sql
-CREATE TABLE files (
-  sha256 TEXT NOT NULL UNIQUE,
-  original_name TEXT,
-  saved_path TEXT NOT NULL,
-  created_at TEXT,
-  file_size INTEGER NOT NULL,
-  uploaded_at TEXT NOT NULL
-);
-```
-
----
-
-## 📋 관리 명령어 (Makefile)
-
-- `make all`: Go 서버 및 단축어 전체 빌드
-- `make go`: Go 서버 바이너리 빌드
-- `make init`: init CLI 빌드
-- `make shortcut`: Signed 단축어 빌드
-- `make reindex`: 사진 보관함 재인덱싱
-- `make run`: 서버 재빌드 및 백그라운드 실행
-- `make db-reset`: DB 초기화 및 전체 재인덱싱
-- `make clean`: 빌드 결과물 삭제
-
----
-
-## 🗺️ 로드맵 및 마일스톤
-
-i-cherri의 발전을 위한 마일스톤 계획입니다.
-
-| 마일스톤 | 대상 및 주요 기능 | 기대 효과 | 우선순위 / 난이도 | 관련 컴포넌트 |
-| :--- | :--- | :--- | :---: | :--- |
-| **M1: 성능 및 메타데이터** | <ul><li>`/check-batch` API 추가</li><li>서버 측 EXIF 자동 파싱</li><li>대용량 스트리밍 업로드</li></ul> | 단축어 실행 속도 획기적 개선 (10배+), 정확한 원본 촬영일 관리 | **높음** / 보통 | Go Server, Cherri Shortcut |
-| **M2: 다중 기기 & 무결성** | <ul><li>기기 식별 및 분리 저장</li><li>Live Photo 이미지-비디오 매칭</li><li>Bit-rot 감지 해시 검증</li></ul> | 여러 기기 백업 혼선 방지, 라이브 포토 통합 관리, 저장 안정성 | **보통** / 보통 | Go Server, SQLite DB, Cherri |
-| **M3: macOS 시스템 통합** | <ul><li>macOS Menu Bar App 개발</li><li>로컬 IP 자동 노출 기능</li><li>`launchd` 자동 설치 CLI</li></ul> | 단축어 IP 설정 편의성 개선, 서버 상태 상시 확인 및 시작/종료 관리 | **보통** / 보통 | Go Server, macOS UI (systray) |
-| **M4: 웹 대시보드 & UI** | <ul><li>임베디드 대시보드 UI</li><li>미디어 타임라인 그리드 뷰</li><li>썸네일 캐싱 및 HEIC 변환</li></ul> | 미디어 보관함 시각화, 편리한 웹 브라우징, 빠른 로딩 속도 | **낮음** / 높음 | Go Server (embed), Frontend (HTML/JS) |
-
-### 💡 M1 하이브리드 대용량 업로드 아키텍처 상세
-iOS 단축어의 HTTP POST 한계(메모리 초과 OOM)를 극복하기 위해 M1에서는 다음과 같은 하이브리드 전송 구조를 구현합니다:
-
-1. **사전 검증 (Check First)**: 단축어는 미디어를 전송하기 전, 파일 목록의 메타데이터(파일명, 촬영일)를 모아 Go 서버의 `/check-batch` API로 1회 일괄 조회하여 이미 백업된 미디어를 필터링합니다.
-2. **저용량 업로드 (HTTP POST)**: 100MB 이하의 저용량 사진 및 비디오는 기존처럼 단축어 내에서 즉시 HTTP POST로 `/upload`에 전송합니다.
-3. **대용량 업로드 (SMB + Go 후처리)**: 100MB 초과 대용량 미디어는 단축어가 HTTP로 보내지 않고, iOS의 `파일 저장` 액션을 사용해 로컬 네트워크로 연결된 서버의 임시 대기 폴더(`.tmp/incoming/`)로 복사합니다. (iOS 파일 앱 데몬이 메모리를 효율적으로 분할 적재하므로 OOM이 나지 않습니다.)
-4. **마이그레이션 및 인덱싱**: 복사가 완료되면 단축어가 Go 서버에 완료 트리거를 쏘거나, 서버가 임시 폴더의 변경을 자동 감지합니다. Go 서버는 유입된 임시 파일의 SHA-256 해시를 검증하고, 중복이 없는 경우에만 최종 `YYYY-MM` 디렉토리로 안전하게 파일 시스템 이동(Rename) 및 SQLite DB 인덱싱을 수행합니다. 중복일 경우 임시 파일을 즉시 파기합니다.
-
----
-
-## 💬 API Reference
-
-- `GET /health`: 서버 상태 확인
-- `POST /check`: 메타데이터 기반 중복 여부 확인
-- `POST /upload`: 실제 미디어 파일 업로드 (SHA-256 중복 체크 포함)
-
----
-
-**i-cherri**와 함께 소중한 추억을 가장 로컬하고 안전하게 보관하세요. 🍒
+이 저장소는 예전 Go 서버 + Shortcut 기반 백업 흐름에서 벗어났다.
+현재 개발 대상은 Swift 네이티브 iPhone/macOS 앱뿐이다.

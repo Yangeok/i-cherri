@@ -7,6 +7,7 @@ import Inject
 struct DashboardView: View {
     @ObserveInjection var inject
     @StateObject private var viewModel = DashboardViewModel()
+    @State private var devicePendingDeletion: PairedDeviceRecord?
 
     var body: some View {
         NavigationSplitView {
@@ -27,20 +28,20 @@ struct DashboardView: View {
         .alert(
             "Delete Paired Device?",
             isPresented: Binding(
-                get: { viewModel.devicePendingDeletion != nil },
+                get: { devicePendingDeletion != nil },
                 set: { isPresented in
                     if !isPresented {
-                        viewModel.cancelDeleteDevice()
+                        devicePendingDeletion = nil
                     }
                 }
             ),
-            presenting: viewModel.devicePendingDeletion
+            presenting: devicePendingDeletion
         ) { device in
             Button("Delete", role: .destructive) {
                 Task { await viewModel.confirmDeleteDevice(device) }
             }
             Button("Cancel", role: .cancel) {
-                viewModel.cancelDeleteDevice()
+                devicePendingDeletion = nil
             }
         } message: { device in
             Text("This removes \(device.deviceName), its backup history, active sessions, and failure logs from this Mac.")
@@ -57,7 +58,7 @@ struct DashboardView: View {
                         .tag(device.deviceId)
                         .contextMenu {
                             Button("Delete Device", role: .destructive) {
-                                viewModel.requestDeleteDevice(device)
+                                devicePendingDeletion = device
                             }
                         }
                 }
@@ -128,7 +129,7 @@ struct DashboardView: View {
             HStack {
                 Spacer()
                 Button(role: .destructive) {
-                    viewModel.requestDeleteDevice(device)
+                    devicePendingDeletion = device
                 } label: {
                     Label("Delete Device", systemImage: "trash")
                 }
@@ -224,7 +225,6 @@ final class DashboardViewModel: ObservableObject {
     @Published var allAssets: [BackupAssetRecord] = []
     @Published var selectedDevice: String?
     @Published var backupFolderPath: String?
-    @Published var devicePendingDeletion: PairedDeviceRecord?
 
     var selectedDeviceInfo: PairedDeviceRecord? {
         pairedDevices.first { $0.deviceId == selectedDevice }
@@ -296,17 +296,7 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    func requestDeleteDevice(_ device: PairedDeviceRecord) {
-        devicePendingDeletion = device
-    }
-
-    func cancelDeleteDevice() {
-        devicePendingDeletion = nil
-    }
-
     func confirmDeleteDevice(_ device: PairedDeviceRecord) async {
-        defer { devicePendingDeletion = nil }
-
         do {
             let tempPaths = try await DatabaseManager.shared.deletePairedDevice(deviceId: device.deviceId)
             let keychain = MacKeychainStore()
