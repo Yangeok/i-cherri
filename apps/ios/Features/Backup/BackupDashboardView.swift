@@ -9,7 +9,7 @@ public struct BackupDashboardView: View {
     @ObserveInjection var inject
     @StateObject private var viewModel = BackupDashboardViewModel()
     @State private var isTargetPickerPresented = false
-    @State private var backupSheetDetent: PresentationDetent = .height(260)
+    @State private var backupSheetDetent: PresentationDetent = .large
 
     public init() {}
 
@@ -49,6 +49,9 @@ public struct BackupDashboardView: View {
                 .presentationDetents([.height(260), .large], selection: $backupSheetDetent)
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled(viewModel.isBackupSheetLocked)
+                .onAppear {
+                    backupSheetDetent = .large
+                }
             }
         }
         .confirmationDialog(

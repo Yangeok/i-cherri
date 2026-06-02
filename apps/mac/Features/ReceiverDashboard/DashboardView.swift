@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import QuickLook
 import QuickLookThumbnailing
 import ICherriDesignSystem
 import ICherriProtocol
@@ -10,6 +11,7 @@ struct DashboardView: View {
     @ObserveInjection var inject
     @StateObject private var viewModel = DashboardViewModel()
     @State private var devicePendingDeletion: PairedDeviceRecord?
+    @State private var previewURL: URL?
 
     var body: some View {
         NavigationSplitView {
@@ -30,6 +32,7 @@ struct DashboardView: View {
         .onReceive(NotificationCenter.default.publisher(for: .receiverDataDidChange)) { _ in
             Task { await viewModel.load() }
         }
+        .quickLookPreview($previewURL)
         .alert(
             "Delete Paired Device?",
             isPresented: Binding(
@@ -169,10 +172,7 @@ struct DashboardView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(Array(viewModel.visibleAssets.enumerated()), id: \.element.backupId) { index, asset in
-                            assetHistoryRow(asset)
-                                .onAppear {
-                                    Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
-                                }
+                            assetHistoryListItem(asset, index: index)
                         }
 
                         if viewModel.isLoadingAssetPage {
@@ -308,6 +308,27 @@ struct DashboardView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
+    private func assetHistoryListItem(_ asset: BackupAssetRecord, index: Int) -> some View {
+        assetHistoryRow(asset)
+            .onTapGesture(count: 2) {
+                previewAsset(asset)
+            }
+            .contextMenu {
+                Button("Preview") {
+                    previewAsset(asset)
+                }
+                Button("Open") {
+                    openAsset(asset)
+                }
+                Button("Reveal in Finder") {
+                    revealAsset(asset)
+                }
+            }
+            .onAppear {
+                Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
+            }
+    }
+
     private func assetHistoryDate(_ asset: BackupAssetRecord) -> String {
         (asset.completedAt ?? asset.firstSeenAt).formatted(date: .abbreviated, time: .shortened)
     }
@@ -345,6 +366,27 @@ struct DashboardView: View {
         default:
             return .secondary
         }
+    }
+
+    private func assetFileURL(_ asset: BackupAssetRecord) -> URL? {
+        guard !asset.finalPath.isEmpty else { return nil }
+        let url = URL(fileURLWithPath: asset.finalPath)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
+    private func previewAsset(_ asset: BackupAssetRecord) {
+        previewURL = assetFileURL(asset)
+    }
+
+    private func openAsset(_ asset: BackupAssetRecord) {
+        guard let url = assetFileURL(asset) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func revealAsset(_ asset: BackupAssetRecord) {
+        guard let url = assetFileURL(asset) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     private func statusPill(_ status: String) -> some View {
@@ -583,18 +625,23 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         let fileURL = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
 
+        if let directImage = NSImage(contentsOf: fileURL) {
+            image = directImage
+            return
+        }
+
         let request = QLThumbnailGenerator.Request(
             fileAt: fileURL,
             size: CGSize(width: 112, height: 112),
             scale: NSScreen.main?.backingScaleFactor ?? 2,
-            representationTypes: .thumbnail
+            representationTypes: .all
         )
 
         do {
             let thumbnail = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
             image = thumbnail.nsImage
         } catch {
-            image = NSImage(contentsOf: fileURL)
+            image = nil
         }
     }
 }
