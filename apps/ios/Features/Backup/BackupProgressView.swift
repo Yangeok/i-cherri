@@ -1,4 +1,6 @@
 import SwiftUI
+import Photos
+import UIKit
 import ICherriDesignSystem
 import Inject
 
@@ -16,11 +18,11 @@ public struct BackupProgressView: View {
             backgroundGradient
             VStack(spacing: 32) {
                 headerSection
-                progressSection
+                statsSection
                 if !viewModel.activeUploads.isEmpty {
                     activeUploadsSection
                 }
-                statsSection
+                progressSection
                 Spacer()
                 cancelButton
             }
@@ -114,24 +116,28 @@ public struct BackupProgressView: View {
             }
 
             ForEach(viewModel.activeUploads) { upload in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(upload.filename)
-                            .font(.subheadline)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer()
-                        Text(upload.formattedSpeed)
+                HStack(alignment: .top, spacing: 12) {
+                    ActiveUploadThumbnailView(assetLocalID: upload.assetLocalID)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(upload.filename)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            Text(upload.formattedSpeed)
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ProgressView(value: upload.progress)
+                            .tint(.accentColor)
+
+                        Text(upload.formattedTransfer)
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-
-                    ProgressView(value: upload.progress)
-                        .tint(.accentColor)
-
-                    Text(upload.formattedTransfer)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
                 }
                 .padding(12)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -252,6 +258,7 @@ public final class BackupProgressViewModel: ObservableObject {
 
 public struct ActiveUploadProgressItem: Identifiable, Equatable {
     public let id: String
+    public let assetLocalID: String
     public let filename: String
     public let sentBytes: Int64
     public let totalBytes: Int64
@@ -273,5 +280,75 @@ public struct ActiveUploadProgressItem: Identifiable, Equatable {
         if bytesPerSecond >= 1_000_000 { return String(format: "%.1f MB/s", bytesPerSecond / 1_000_000) }
         if bytesPerSecond >= 1_000 { return String(format: "%.0f KB/s", bytesPerSecond / 1_000) }
         return String(format: "%.0f B/s", bytesPerSecond)
+    }
+}
+
+private struct ActiveUploadThumbnailView: View {
+    let assetLocalID: String
+    @StateObject private var loader: AssetThumbnailLoader
+
+    init(assetLocalID: String) {
+        self.assetLocalID = assetLocalID
+        _loader = StateObject(wrappedValue: AssetThumbnailLoader(assetLocalID: assetLocalID))
+    }
+
+    var body: some View {
+        Group {
+            if let image = loader.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.secondary.opacity(0.18))
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
+            }
+        }
+        .frame(width: 52, height: 52)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .task {
+            await loader.loadIfNeeded()
+        }
+    }
+}
+
+@MainActor
+private final class AssetThumbnailLoader: ObservableObject {
+    @Published var image: UIImage?
+
+    private let assetLocalID: String
+    private var hasLoaded = false
+
+    init(assetLocalID: String) {
+        self.assetLocalID = assetLocalID
+    }
+
+    func loadIfNeeded() async {
+        guard !hasLoaded else { return }
+        hasLoaded = true
+
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: [assetLocalID], options: nil)
+        guard let asset = result.firstObject else { return }
+
+        let targetSize = CGSize(width: 104, height: 104)
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .fastFormat
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = true
+
+        await withCheckedContinuation { continuation in
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: targetSize,
+                contentMode: .aspectFill,
+                options: options
+            ) { [weak self] image, _ in
+                self?.image = image
+                continuation.resume()
+            }
+        }
     }
 }

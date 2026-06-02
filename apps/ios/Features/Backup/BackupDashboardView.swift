@@ -717,6 +717,7 @@ private final class BackupUploadProgressCoordinator {
             .map { assetLocalID, state in
                 ActiveUploadProgressItem(
                     id: assetLocalID,
+                    assetLocalID: assetLocalID,
                     filename: state.filename,
                     sentBytes: state.sentBytes,
                     totalBytes: state.totalBytes,

@@ -66,6 +66,7 @@ struct DashboardView: View {
             Section("Active Uploads") {
                 ForEach(viewModel.activeUploads) { upload in
                     activeUploadRow(upload)
+                        .allowsHitTesting(false)
                 }
                 if viewModel.activeUploads.isEmpty {
                     Text("No active uploads")
