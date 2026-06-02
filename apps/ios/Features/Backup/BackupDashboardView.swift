@@ -9,7 +9,7 @@ public struct BackupDashboardView: View {
     @ObserveInjection var inject
     @StateObject private var viewModel = BackupDashboardViewModel()
     @State private var isTargetPickerPresented = false
-    @State private var backupSheetDetent: PresentationDetent = .large
+    @State private var backupSheetDetent: PresentationDetent = .height(260)
 
     public init() {}
 
@@ -36,7 +36,7 @@ public struct BackupDashboardView: View {
             isPresented: Binding(
                 get: { viewModel.activeBackupProgressViewModel != nil },
                 set: { isPresented in
-                    if !isPresented {
+                    if !isPresented && !viewModel.isBackupSheetLocked {
                         viewModel.dismissBackupProgress()
                     }
                 }
@@ -46,8 +46,9 @@ public struct BackupDashboardView: View {
                 NavigationStack {
                     BackupProgressView(viewModel: progressViewModel)
                 }
-                .presentationDetents([.medium, .large], selection: $backupSheetDetent)
+                .presentationDetents([.height(260), .large], selection: $backupSheetDetent)
                 .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(viewModel.isBackupSheetLocked)
             }
         }
         .confirmationDialog(
@@ -264,6 +265,11 @@ final class BackupDashboardViewModel: ObservableObject {
     private let trustTokenKey = "iCherriTrustToken"
     private let receiverURLKey = "iCherriReceiverURL"
     private let receiverNameKey = "iCherriReceiverName"
+
+    var isBackupSheetLocked: Bool {
+        guard let activeBackupProgressViewModel else { return false }
+        return isBackingUp && !activeBackupProgressViewModel.isComplete
+    }
 
     var availableSwitchTargets: [DiscoveredReceiver] {
         discoveredReceivers.filter { receiver in
