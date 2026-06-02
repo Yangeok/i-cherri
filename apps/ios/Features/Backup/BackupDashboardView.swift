@@ -319,8 +319,8 @@ final class BackupDashboardViewModel: ObservableObject {
             return
         }
         guard
-            let receiverURLString = UserDefaults.standard.string(forKey: receiverURLKey),
-            let receiverURL = URL(string: receiverURLString)
+            let trustToken = UserDefaults.standard.string(forKey: trustTokenKey),
+            !trustToken.isEmpty
         else {
             backupStatusMessage = "Connect to a Mac receiver first."
             return
@@ -355,8 +355,9 @@ final class BackupDashboardViewModel: ObservableObject {
                     return
                 }
 
-                let backupClient = BackupClient(receiverBaseURL: receiverURL, device: device)
-                let chunkSender = ChunkUploadSender(receiverBaseURL: receiverURL, device: device)
+                let receiverURL = try await self.resolveReceiverURLForBackup()
+                let backupClient = BackupClient(receiverBaseURL: receiverURL, device: device, trustToken: trustToken)
+                let chunkSender = ChunkUploadSender(receiverBaseURL: receiverURL, device: device, trustToken: trustToken)
                 let progressCoordinator = BackupUploadProgressCoordinator(viewModel: progressViewModel)
                 await chunkSender.setProgressDelegate(progressCoordinator)
                 let uploadManager = ResumableUploadManager(
@@ -483,9 +484,7 @@ final class BackupDashboardViewModel: ObservableObject {
         let defaults = UserDefaults.standard
         guard
             let trustToken = defaults.string(forKey: trustTokenKey),
-            !trustToken.isEmpty,
-            let receiverURL = defaults.string(forKey: receiverURLKey),
-            !receiverURL.isEmpty
+            !trustToken.isEmpty
         else {
             pairedReceiver = nil
             pairedReceiverName = nil
@@ -494,7 +493,7 @@ final class BackupDashboardViewModel: ObservableObject {
         }
 
         pairedReceiverName = defaults.string(forKey: receiverNameKey)
-        isPaired = true
+        isPaired = pairedReceiverName != nil
         pairingStatusMessage = pairedReceiverName.map { "Connected to \($0)." }
     }
 
@@ -518,6 +517,35 @@ final class BackupDashboardViewModel: ObservableObject {
             platform: "iOS",
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         )
+    }
+
+    private func resolveReceiverURLForBackup() async throws -> URL {
+        if let pairedReceiver {
+            let resolvedURL = try await resolveEndpoint(pairedReceiver.endpoint)
+            UserDefaults.standard.set(resolvedURL.absoluteString, forKey: receiverURLKey)
+            return resolvedURL
+        }
+
+        if let pairedReceiverName,
+           let discoveredReceiver = discoveredReceivers.first(where: { $0.name == pairedReceiverName }) {
+            pairedReceiver = discoveredReceiver
+            let resolvedURL = try await resolveEndpoint(discoveredReceiver.endpoint)
+            UserDefaults.standard.set(resolvedURL.absoluteString, forKey: receiverURLKey)
+            return resolvedURL
+        }
+
+        if let receiverURLString = UserDefaults.standard.string(forKey: receiverURLKey),
+           let receiverURL = URL(string: receiverURLString),
+           !isLinkLocalReceiverURL(receiverURL) {
+            return receiverURL
+        }
+
+        throw URLError(.cannotFindHost)
+    }
+
+    private func isLinkLocalReceiverURL(_ url: URL) -> Bool {
+        guard let host = url.host()?.lowercased() else { return false }
+        return host.hasPrefix("fe80:")
     }
     
     private func resolveEndpoint(_ endpoint: NWEndpoint) async throws -> URL {

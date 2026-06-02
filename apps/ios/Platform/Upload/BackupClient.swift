@@ -5,13 +5,15 @@ import ICherriProtocol
 public actor BackupClient {
     private let receiverBaseURL: URL
     private let device: DeviceInfo
+    private let trustToken: String?
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
-    public init(receiverBaseURL: URL, device: DeviceInfo) {
+    public init(receiverBaseURL: URL, device: DeviceInfo, trustToken: String? = nil) {
         self.receiverBaseURL = receiverBaseURL
         self.device = device
+        self.trustToken = trustToken
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         self.session = URLSession(configuration: config)
@@ -81,6 +83,9 @@ public actor BackupClient {
 
     private func attachAuthHeaders(_ request: inout URLRequest) {
         request.setValue(device.deviceID, forHTTPHeaderField: "X-iCherri-Device-ID")
+        if let trustToken, !trustToken.isEmpty {
+            request.setValue(trustToken, forHTTPHeaderField: "X-iCherri-Token")
+        }
     }
 }
 

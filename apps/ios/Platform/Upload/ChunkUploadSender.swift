@@ -5,13 +5,15 @@ import ICherriProtocol
 public actor ChunkUploadSender {
     private let receiverBaseURL: URL
     private let device: DeviceInfo
+    private let trustToken: String?
     private let session: URLSession
 
     public weak var progressDelegate: ChunkUploadProgressDelegate?
 
-    public init(receiverBaseURL: URL, device: DeviceInfo) {
+    public init(receiverBaseURL: URL, device: DeviceInfo, trustToken: String? = nil) {
         self.receiverBaseURL = receiverBaseURL
         self.device = device
+        self.trustToken = trustToken
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 120
         self.session = URLSession(configuration: config)
@@ -90,6 +92,9 @@ public actor ChunkUploadSender {
         req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         req.setValue("bytes \(offset)-\(offset + Int64(chunk.count) - 1)/\(total)", forHTTPHeaderField: "Content-Range")
         req.setValue(device.deviceID, forHTTPHeaderField: "X-iCherri-Device-ID")
+        if let trustToken, !trustToken.isEmpty {
+            req.setValue(trustToken, forHTTPHeaderField: "X-iCherri-Token")
+        }
         req.httpBody = chunk
 
         let (_, response) = try await session.data(for: req)
