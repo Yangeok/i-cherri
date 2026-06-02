@@ -16,18 +16,26 @@ public struct BackupProgressView: View {
     public var body: some View {
         ZStack {
             backgroundGradient
-            VStack(spacing: 32) {
-                headerSection
-                statsSection
-                if !viewModel.activeUploads.isEmpty {
-                    activeUploadsSection
+            ScrollView {
+                VStack(spacing: 24) {
+                    headerSection
+                    if let errorMessage = viewModel.errorMessage {
+                        errorSection(errorMessage)
+                    }
+                    statsSection
+                    if !viewModel.activeUploads.isEmpty {
+                        activeUploadsSection
+                    }
+                    if !viewModel.failedUploads.isEmpty {
+                        failedUploadsSection
+                    }
+                    progressSection
+                    cancelButton
                 }
-                progressSection
-                Spacer()
-                cancelButton
+                .padding(.horizontal, 24)
+                .padding(.top, 32)
+                .padding(.bottom, 24)
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 40)
         }
         .navigationBarBackButtonHidden(true)
         .enableInjection()
@@ -38,17 +46,17 @@ public struct BackupProgressView: View {
     private var headerSection: some View {
         VStack(spacing: 8) {
             if #available(iOS 17.0, *) {
-                Image(systemName: viewModel.isComplete ? "checkmark.circle.fill" : "arrow.up.to.line.compact")
+                Image(systemName: viewModel.headerSymbolName)
                     .font(.system(size: 48))
-                    .foregroundStyle(viewModel.isComplete ? .green : .accentColor)
+                    .foregroundStyle(viewModel.headerSymbolColor)
                     .symbolEffect(.bounce, value: viewModel.currentFilename)
             } else {
-                Image(systemName: viewModel.isComplete ? "checkmark.circle.fill" : "arrow.up.to.line.compact")
+                Image(systemName: viewModel.headerSymbolName)
                     .font(.system(size: 48))
-                    .foregroundStyle(viewModel.isComplete ? .green : .accentColor)
+                    .foregroundStyle(viewModel.headerSymbolColor)
             }
 
-            Text(viewModel.isComplete ? "Backup Complete" : "Backing Up…")
+            Text(viewModel.headerTitle)
                 .font(.system(.title2, design: .rounded, weight: .semibold))
 
             if !viewModel.isComplete, let filename = viewModel.currentFilename {
@@ -61,6 +69,19 @@ public struct BackupProgressView: View {
                     .animation(.easeInOut(duration: 0.3), value: filename)
             }
         }
+    }
+
+    private func errorSection(_ errorMessage: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            Text(errorMessage)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     // MARK: - Progress
@@ -145,11 +166,39 @@ public struct BackupProgressView: View {
         }
     }
 
+    private var failedUploadsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Failed Uploads")
+                    .font(.headline)
+                Spacer()
+                Text("\(viewModel.failedUploads.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(viewModel.failedUploads) { failedUpload in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(failedUpload.filename)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(failedUpload.reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+    }
+
     // MARK: - Cancel
 
     private var cancelButton: some View {
         Group {
-            if !viewModel.isComplete {
+            if !viewModel.isComplete && viewModel.errorMessage == nil {
                 Button(role: .destructive) {
                     viewModel.cancel()
                 } label: {
@@ -186,7 +235,9 @@ public final class BackupProgressViewModel: ObservableObject {
     @Published public var formattedTransfer: String = "—"
     @Published public var activeUploadCount: Int = 0
     @Published public var activeUploads: [ActiveUploadProgressItem] = []
+    @Published public var failedUploads: [FailedUploadProgressItem] = []
     @Published public var isComplete: Bool = false
+    @Published public var errorMessage: String?
 
     private var sentBytes: Int64 = 0
     private var totalBytes: Int64 = 0
@@ -211,7 +262,8 @@ public final class BackupProgressViewModel: ObservableObject {
         sentBytes: Int64? = nil,
         totalBytes: Int64? = nil,
         activeUploads: Int? = nil,
-        activeUploadItems: [ActiveUploadProgressItem]? = nil
+        activeUploadItems: [ActiveUploadProgressItem]? = nil,
+        failedUploadItems: [FailedUploadProgressItem]? = nil
     ) {
         currentFilename = filename
         completedCount = completed
@@ -230,11 +282,38 @@ public final class BackupProgressViewModel: ObservableObject {
         if let activeUploadItems {
             self.activeUploads = activeUploadItems
         }
+        if let failedUploadItems {
+            failedUploads = failedUploadItems
+        }
 
         progress = totalCount > 0 ? Double(completed) / Double(totalCount) : 0
         formattedSpeed = formatSpeed(bytesPerSecond)
         formattedTransfer = formatTransfer(sentBytes: self.sentBytes, totalBytes: self.totalBytes)
         if completed >= totalCount { isComplete = true }
+    }
+
+    public func markRunFailed(_ message: String) {
+        errorMessage = message
+        isComplete = true
+        formattedSpeed = "—"
+    }
+
+    public var headerTitle: String {
+        if errorMessage != nil { return "Backup Failed" }
+        if isComplete { return "Backup Complete" }
+        return "Backing Up…"
+    }
+
+    public var headerSymbolName: String {
+        if errorMessage != nil { return "exclamationmark.triangle.fill" }
+        if isComplete { return "checkmark.circle.fill" }
+        return "arrow.up.to.line.compact"
+    }
+
+    public var headerSymbolColor: Color {
+        if errorMessage != nil { return .red }
+        if isComplete { return .green }
+        return .accentColor
     }
 
     public func cancel() {
@@ -281,6 +360,12 @@ public struct ActiveUploadProgressItem: Identifiable, Equatable {
         if bytesPerSecond >= 1_000 { return String(format: "%.0f KB/s", bytesPerSecond / 1_000) }
         return String(format: "%.0f B/s", bytesPerSecond)
     }
+}
+
+public struct FailedUploadProgressItem: Identifiable, Equatable {
+    public let id: String
+    public let filename: String
+    public let reason: String
 }
 
 private struct ActiveUploadThumbnailView: View {

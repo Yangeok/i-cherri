@@ -8,6 +8,8 @@ import Inject
 public struct BackupDashboardView: View {
     @ObserveInjection var inject
     @StateObject private var viewModel = BackupDashboardViewModel()
+    @State private var isTargetPickerPresented = false
+    @State private var backupSheetDetent: PresentationDetent = .large
 
     public init() {}
 
@@ -44,7 +46,23 @@ public struct BackupDashboardView: View {
                 NavigationStack {
                     BackupProgressView(viewModel: progressViewModel)
                 }
+                .presentationDetents([.medium, .large], selection: $backupSheetDetent)
+                .presentationDragIndicator(.visible)
             }
+        }
+        .confirmationDialog(
+            "Choose Backup Target",
+            isPresented: $isTargetPickerPresented,
+            titleVisibility: .visible
+        ) {
+            ForEach(viewModel.availableSwitchTargets) { receiver in
+                Button(receiver.name) {
+                    Task { await viewModel.pair(with: receiver) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Pick a different Mac receiver for the next backup.")
         }
         .enableInjection()
     }
@@ -86,6 +104,10 @@ public struct BackupDashboardView: View {
                                 .font(.subheadline.weight(.semibold))
                         }
                         Spacer()
+                        Button("Change") { isTargetPickerPresented = true }
+                            .font(.caption)
+                            .buttonStyle(.bordered)
+                            .disabled(viewModel.isPairing || viewModel.isBackingUp || viewModel.availableSwitchTargets.isEmpty)
                         Button("Forget") { viewModel.clearPairedReceiver() }
                             .font(.caption)
                             .buttonStyle(.bordered)
@@ -242,6 +264,15 @@ final class BackupDashboardViewModel: ObservableObject {
     private let trustTokenKey = "iCherriTrustToken"
     private let receiverURLKey = "iCherriReceiverURL"
     private let receiverNameKey = "iCherriReceiverName"
+
+    var availableSwitchTargets: [DiscoveredReceiver] {
+        discoveredReceivers.filter { receiver in
+            guard let currentID = pairedReceiver?.id else {
+                return pairedReceiverName != receiver.name
+            }
+            return receiver.id != currentID
+        }
+    }
 
     func onAppear() async {
         updatePhotoPermission()
@@ -416,16 +447,31 @@ final class BackupDashboardViewModel: ObservableObject {
                 let duplicates = batchResponse.alreadyBackedUp.count + batchResponse.duplicates.count
                 var failed = batchResponse.unsupported.count
                 var pendingAssets: [AssetMetadata] = []
+                var initialFailures = batchResponse.unsupported.map { assetLocalID in
+                    FailedUploadProgressItem(
+                        id: "unsupported-\(assetLocalID)",
+                        filename: assetIndex[assetLocalID]?.originalFilename ?? assetLocalID,
+                        reason: "Unsupported media type."
+                    )
+                }
 
                 for requirement in batchResponse.requiredUploads {
                     guard let metadata = assetIndex[requirement.assetLocalID] else {
                         failed += 1
                         completed += 1
+                        initialFailures.append(
+                            FailedUploadProgressItem(
+                                id: requirement.assetLocalID,
+                                filename: requirement.assetLocalID,
+                                reason: "Asset metadata could not be resolved before upload."
+                            )
+                        )
                         continue
                     }
                     pendingAssets.append(metadata)
                 }
 
+                progressCoordinator.setInitialFailures(initialFailures)
                 progressCoordinator.updateSnapshot(
                     filename: "Preparing uploads...",
                     completed: completed,
@@ -478,7 +524,11 @@ final class BackupDashboardViewModel: ObservableObject {
                                 return .success(assetLocalID: metadata.assetLocalID, filename: metadata.originalFilename)
                             } catch {
                                 print("[Backup] Failed to upload \(metadata.originalFilename): \(error)")
-                                return .failure(assetLocalID: metadata.assetLocalID, filename: metadata.originalFilename)
+                                return .failure(
+                                    assetLocalID: metadata.assetLocalID,
+                                    filename: metadata.originalFilename,
+                                    reason: backupFailureReason(error)
+                                )
                             }
                         }
                     }
@@ -503,7 +553,7 @@ final class BackupDashboardViewModel: ObservableObject {
                                 duplicates: duplicates,
                                 failed: failed
                             )
-                        case .failure(let assetLocalID, let filename):
+                        case .failure(let assetLocalID, let filename, let reason):
                             failed += 1
                             completed += 1
                             progressCoordinator.finishAsset(
@@ -513,6 +563,11 @@ final class BackupDashboardViewModel: ObservableObject {
                                 success: success,
                                 duplicates: duplicates,
                                 failed: failed
+                            )
+                            progressCoordinator.recordFailure(
+                                assetLocalID: assetLocalID,
+                                filename: filename,
+                                reason: reason
                             )
                         }
 
@@ -531,8 +586,9 @@ final class BackupDashboardViewModel: ObservableObject {
             } catch {
                 print("[Backup] Backup run failed: \(error)")
                 await MainActor.run {
-                    self.backupStatusMessage = "Backup failed: \(self.describeBackupError(error))"
-                    self.activeBackupProgressViewModel = nil
+                    let message = backupFailureReason(error)
+                    self.backupStatusMessage = "Backup failed: \(message)"
+                    progressViewModel.markRunFailed(message)
                 }
             }
         }
@@ -579,16 +635,7 @@ final class BackupDashboardViewModel: ObservableObject {
     }
 
     private func describeBackupError(_ error: Error) -> String {
-        if let backupError = error as? BackupClientError {
-            switch backupError {
-            case .httpError(let statusCode, let data):
-                let body = String(data: data, encoding: .utf8) ?? "No response body"
-                return "HTTP \(statusCode): \(body)"
-            case .invalidResponse:
-                return "Invalid server response."
-            }
-        }
-        return error.localizedDescription
+        backupFailureReason(error)
     }
     
     private func currentDeviceInfo() -> DeviceInfo {
@@ -668,6 +715,38 @@ final class BackupDashboardViewModel: ObservableObject {
     }
 }
 
+private func backupFailureReason(_ error: Error) -> String {
+    if let backupError = error as? BackupClientError {
+        switch backupError {
+        case .httpError(let statusCode, let data):
+            let body = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let body, !body.isEmpty {
+                return "HTTP \(statusCode): \(body)"
+            }
+            return "HTTP \(statusCode)."
+        case .invalidResponse:
+            return "Invalid server response."
+        }
+    }
+    if let chunkError = error as? ChunkUploadError {
+        switch chunkError {
+        case .serverError(let statusCode):
+            return "Chunk upload failed with HTTP \(statusCode)."
+        case .streamError:
+            return "Media stream could not be read."
+        }
+    }
+    if let resumableError = error as? ResumableUploadError {
+        switch resumableError {
+        case .commitFailed(let status):
+            return "Commit failed: \(status)."
+        case .sessionExpired:
+            return "Upload session expired."
+        }
+    }
+    return error.localizedDescription
+}
+
 @MainActor
 private final class BackupUploadProgressCoordinator {
     private struct ActiveUploadState {
@@ -686,6 +765,7 @@ private final class BackupUploadProgressCoordinator {
     private var duplicates: Int = 0
     private var failed: Int = 0
     private var activeUploads: [String: ActiveUploadState] = [:]
+    private var failedUploads: [FailedUploadProgressItem] = []
 
     init(viewModel: BackupProgressViewModel) {
         self.viewModel = viewModel
@@ -711,6 +791,11 @@ private final class BackupUploadProgressCoordinator {
         self.duplicates = duplicates
         self.failed = failed
         pushUpdate(bytesPerSecond: bytesPerSecond)
+    }
+
+    func setInitialFailures(_ failures: [FailedUploadProgressItem]) {
+        failedUploads = failures
+        pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
     }
 
     func didSendBytes(assetLocalID: String, filename: String, totalSent: Int64, totalExpected: Int64, bytesPerSecond: Double) {
@@ -741,6 +826,19 @@ private final class BackupUploadProgressCoordinator {
         self.success = success
         self.duplicates = duplicates
         self.failed = failed
+        pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
+    }
+
+    func recordFailure(assetLocalID: String, filename: String, reason: String) {
+        failedUploads.removeAll { $0.id == assetLocalID || $0.id == "unsupported-\(assetLocalID)" }
+        failedUploads.append(
+            FailedUploadProgressItem(
+                id: assetLocalID,
+                filename: filename,
+                reason: reason
+            )
+        )
+        failedUploads.sort { $0.filename.localizedStandardCompare($1.filename) == .orderedAscending }
         pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
     }
 
@@ -781,14 +879,15 @@ private final class BackupUploadProgressCoordinator {
             sentBytes: archivedSentBytes + activeBytesSent,
             totalBytes: archivedTotalBytes + activeBytesTotal,
             activeUploads: activeUploads.count,
-            activeUploadItems: activeUploadItems
+            activeUploadItems: activeUploadItems,
+            failedUploadItems: failedUploads
         )
     }
 }
 
 private enum UploadTaskOutcome: Sendable {
     case success(assetLocalID: String, filename: String)
-    case failure(assetLocalID: String, filename: String)
+    case failure(assetLocalID: String, filename: String, reason: String)
 }
 
 @MainActor
