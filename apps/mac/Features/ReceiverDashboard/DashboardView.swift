@@ -19,6 +19,9 @@ struct DashboardView: View {
         .enableInjection()
         .toolbar { toolbarContent }
         .task { await viewModel.load() }
+        .onChange(of: viewModel.selectedDevice) { _, _ in
+            Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .changeBackupFolder)) { _ in
             viewModel.selectBackupFolder()
         }
@@ -133,7 +136,7 @@ struct DashboardView: View {
                 GlowBadge(label: "Failed", value: "\(viewModel.failedCount(for: device.deviceId))", color: .red)
             }
 
-            Table(viewModel.assets(for: device.deviceId)) {
+            Table(viewModel.visibleAssets) {
                 TableColumn("Filename", value: \.originalFilename)
                 TableColumn("Type", value: \.mediaType)
                 TableColumn("Size") { asset in
@@ -142,6 +145,17 @@ struct DashboardView: View {
                 TableColumn("Status", value: \.status)
                 TableColumn("Date") { asset in
                     Text(asset.completedAt?.formatted(date: .abbreviated, time: .shortened) ?? "—")
+                }
+            }
+
+            if viewModel.hasMoreVisibleAssets {
+                HStack {
+                    Spacer()
+                    Button("Load More") {
+                        Task { await viewModel.loadSelectedDeviceAssets(reset: false) }
+                    }
+                    .buttonStyle(.bordered)
+                    Spacer()
                 }
             }
         }
@@ -212,11 +226,17 @@ struct DashboardView: View {
 
 @MainActor
 final class DashboardViewModel: ObservableObject {
+    private static let assetPageSize = 200
+
     @Published var pairedDevices: [PairedDeviceRecord] = []
     @Published var activeUploads: [DashboardActiveUpload] = []
     @Published var allAssets: [BackupAssetRecord] = []
+    @Published var visibleAssets: [BackupAssetRecord] = []
+    @Published var hasMoreVisibleAssets = false
     @Published var selectedDevice: String?
     @Published var backupFolderPath: String?
+
+    private var assetPageOffset = 0
 
     var selectedDeviceInfo: PairedDeviceRecord? {
         pairedDevices.first { $0.deviceId == selectedDevice }
@@ -259,8 +279,39 @@ final class DashboardViewModel: ObservableObject {
             } else {
                 self.selectedDevice = devices.first?.deviceId
             }
+
+            await loadSelectedDeviceAssets(reset: true)
         } catch {
             print("[DashboardViewModel] Load failed: \(error)")
+        }
+    }
+
+    func loadSelectedDeviceAssets(reset: Bool) async {
+        guard let deviceId = selectedDevice else {
+            visibleAssets = []
+            hasMoreVisibleAssets = false
+            assetPageOffset = 0
+            return
+        }
+
+        do {
+            let offset = reset ? 0 : assetPageOffset
+            let page = try await DatabaseManager.shared.fetchAssets(
+                deviceId: deviceId,
+                limit: Self.assetPageSize,
+                offset: offset
+            )
+
+            if reset {
+                visibleAssets = page
+            } else {
+                visibleAssets.append(contentsOf: page)
+            }
+
+            assetPageOffset = offset + page.count
+            hasMoreVisibleAssets = page.count == Self.assetPageSize
+        } catch {
+            print("[DashboardViewModel] Asset page load failed: \(error)")
         }
     }
 

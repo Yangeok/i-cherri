@@ -482,6 +482,16 @@ actor DatabaseManager {
         }
     }
 
+    func fetchAssets(deviceId: String, limit: Int, offset: Int) throws -> [BackupAssetRecord] {
+        try queue.read { db in
+            try BackupAssetRecord
+                .filter(Column("device_id") == deviceId && Column("status") == "completed")
+                .order(Column("completed_at").desc)
+                .limit(limit, offset: offset)
+                .fetchAll(db)
+        }
+    }
+
     func fetchAllSessions() throws -> [UploadSessionRecord] {
         try queue.read { db in
             try UploadSessionRecord
