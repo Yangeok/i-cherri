@@ -126,15 +126,6 @@ struct DashboardView: View {
             }
             .padding(.bottom, 4)
 
-            HStack {
-                Spacer()
-                Button(role: .destructive) {
-                    devicePendingDeletion = device
-                } label: {
-                    Label("Delete Device", systemImage: "trash")
-                }
-            }
-
             HStack(spacing: 16) {
                 GlowBadge(label: "Backed Up", value: "\(viewModel.assetCount(for: device.deviceId))", color: .green)
                 GlowBadge(label: "Duplicates", value: "\(viewModel.duplicateCount(for: device.deviceId))", color: .orange)
