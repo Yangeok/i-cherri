@@ -225,11 +225,7 @@ public final class BackupProgressViewModel: ObservableObject {
             self.activeUploads = activeUploadItems
         }
 
-        if self.totalBytes > 0 {
-            progress = min(Double(self.sentBytes) / Double(self.totalBytes), 1)
-        } else {
-            progress = totalCount > 0 ? Double(completed) / Double(totalCount) : 0
-        }
+        progress = totalCount > 0 ? Double(completed) / Double(totalCount) : 0
         formattedSpeed = formatSpeed(bytesPerSecond)
         formattedTransfer = formatTransfer(sentBytes: self.sentBytes, totalBytes: self.totalBytes)
         if completed >= totalCount { isComplete = true }
@@ -246,7 +242,7 @@ public final class BackupProgressViewModel: ObservableObject {
     }
 
     private func formatTransfer(sentBytes: Int64, totalBytes: Int64) -> String {
-        guard totalBytes > 0 else { return "Waiting for first transfer…" }
+        guard totalBytes > 0 else { return "0 B / —" }
 
         let sent = ByteCountFormatter.string(fromByteCount: sentBytes, countStyle: .file)
         let total = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
@@ -267,6 +263,7 @@ public struct ActiveUploadProgressItem: Identifiable, Equatable {
     }
 
     public var formattedTransfer: String {
+        guard totalBytes > 0 else { return "0 B / —" }
         let sent = ByteCountFormatter.string(fromByteCount: sentBytes, countStyle: .file)
         let total = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
         return "\(sent) / \(total)"

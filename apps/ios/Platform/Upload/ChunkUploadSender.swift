@@ -34,6 +34,8 @@ public actor ChunkUploadSender {
         var offset = startingOffset
         var chunkIndex = Int(offset / Int64(chunkSize))
 
+        await progressDelegate?.didSendBytes(0, totalSent: offset, totalExpected: totalSize)
+
         while offset < totalSize {
             let end = min(offset + Int64(chunkSize), totalSize)
             let chunk = data[Int(offset)..<Int(end)]
@@ -71,6 +73,8 @@ public actor ChunkUploadSender {
         var chunkIndex = Int(offset / Int64(chunkSize))
         let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: chunkSize)
         defer { buffer.deallocate() }
+
+        await progressDelegate?.didSendBytes(0, totalSent: offset, totalExpected: totalSize)
 
         while stream.hasBytesAvailable {
             let n = stream.read(buffer, maxLength: chunkSize)
