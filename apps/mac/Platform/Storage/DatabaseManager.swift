@@ -419,6 +419,21 @@ actor DatabaseManager {
         }
     }
 
+    func fetchActiveUploadSession(deviceId: String, assetLocalId: String, expectedByteSize: Int64) throws -> UploadSessionRecord? {
+        try queue.read { db in
+            try UploadSessionRecord
+                .filter(Column("device_id") == deviceId)
+                .filter(Column("asset_local_id") == assetLocalId)
+                .filter(Column("expected_byte_size") == expectedByteSize)
+                .filter(
+                    sql: "status IN (?, ?, ?)",
+                    arguments: ["initialized", "receiving", "paused"]
+                )
+                .order(Column("updated_at").desc)
+                .fetchOne(db)
+        }
+    }
+
     func insertUploadFailureLog(_ record: UploadFailureLogRecord) throws {
         try queue.write { db in
             try record.insert(db)

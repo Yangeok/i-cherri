@@ -66,6 +66,29 @@ actor SessionManager {
         )
     }
 
+    func fetchReusableSession(deviceID: String, assetLocalID: String, expectedByteSize: Int64) async throws -> SessionInfo? {
+        guard let record = try await dbManager.fetchActiveUploadSession(
+            deviceId: deviceID,
+            assetLocalId: assetLocalID,
+            expectedByteSize: expectedByteSize
+        ) else {
+            return nil
+        }
+
+        return SessionInfo(
+            uploadID: record.uploadId,
+            deviceID: record.deviceId,
+            assetLocalID: record.assetLocalId,
+            tempPath: record.tempPath,
+            expectedByteSize: record.expectedByteSize,
+            receivedBytes: record.receivedBytes,
+            chunkSize: record.chunkSize,
+            status: record.status,
+            expiresAt: record.expiresAt,
+            metadataJson: record.metadataJson
+        )
+    }
+
     func updateProgress(uploadID: String, receivedBytes: Int64, status: String) async throws {
         try await dbManager.updateUploadProgress(uploadId: uploadID, receivedBytes: receivedBytes, status: status)
     }

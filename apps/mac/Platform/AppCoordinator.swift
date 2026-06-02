@@ -20,9 +20,7 @@ final class AppCoordinator: NSObject, ObservableObject {
     private var sessionManager: SessionManager?
     private var commitProcessor: FileCommitProcessor?
     
-    private var checkBatchHandler: CheckBatchHandler?
-    private var uploadHandler: UploadHandler?
-    private var uploadStatusHandler: UploadStatusHandler?
+    private var routeService: ReceiverRouteService?
     
     private override init() {
         // Resolve default path inside App Sandbox container (Documents)
@@ -77,13 +75,21 @@ final class AppCoordinator: NSObject, ObservableObject {
             
             // Handlers
             let queryProcessor = CheckBatchProcessor(index: DatabaseManager.shared)
-            self.checkBatchHandler = CheckBatchHandler(processor: queryProcessor)
-            self.uploadHandler = UploadHandler(sessionManager: manager, incomingDir: tmpDir)
-            self.uploadStatusHandler = UploadStatusHandler(sessionManager: manager)
+            let checkBatchHandler = CheckBatchHandler(processor: queryProcessor)
+            let uploadHandler = UploadHandler(sessionManager: manager, incomingDir: tmpDir)
+            let uploadStatusHandler = UploadStatusHandler(sessionManager: manager)
+            let routeService = ReceiverRouteService(
+                checkBatchHandler: checkBatchHandler,
+                uploadHandler: uploadHandler,
+                uploadStatusHandler: uploadStatusHandler,
+                sessionManager: manager,
+                commitProcessor: processor
+            )
+            self.routeService = routeService
 
             // HTTP Server
             let srv = ReceiverHTTPServer(port: port)
-            await srv.setRouteHandler(self)
+            await srv.setRouteHandler(routeService)
             try await srv.start()
             self.server = srv
             self.isServerRunning = true
@@ -175,48 +181,58 @@ final class AppCoordinator: NSObject, ObservableObject {
     }
 }
 
-extension AppCoordinator: ReceiverRouteHandler {
+private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Sendable {
+    private let checkBatchHandler: CheckBatchHandler
+    private let uploadHandler: UploadHandler
+    private let uploadStatusHandler: UploadStatusHandler
+    private let sessionManager: SessionManager
+    private let commitProcessor: FileCommitProcessor
+
+    init(
+        checkBatchHandler: CheckBatchHandler,
+        uploadHandler: UploadHandler,
+        uploadStatusHandler: UploadStatusHandler,
+        sessionManager: SessionManager,
+        commitProcessor: FileCommitProcessor
+    ) {
+        self.checkBatchHandler = checkBatchHandler
+        self.uploadHandler = uploadHandler
+        self.uploadStatusHandler = uploadStatusHandler
+        self.sessionManager = sessionManager
+        self.commitProcessor = commitProcessor
+    }
+
     func handle(_ request: HTTPRequest) async -> HTTPResponse {
         let path = request.path
         let method = request.method
-        
-        print("[AppCoordinator] HTTP Request: \(method) \(path)")
-        
+
+        print("[ReceiverRouteService] HTTP Request: \(method) \(path)")
+
         if method == "POST" && path == "/backup/check-batch" {
-            if let handler = checkBatchHandler {
-                return await handler.handle(request)
-            }
+            return await checkBatchHandler.handle(request)
         }
-        
+
         if method == "POST" && path == "/uploads/init" {
-            if let handler = uploadHandler {
-                return await handler.handleInit(request)
-            }
+            return await uploadHandler.handleInit(request)
         }
-        
-        // GET /uploads/{id}/status
+
         if method == "GET" && path.hasPrefix("/uploads/") && path.hasSuffix("/status") {
             let components = path.split(separator: "/")
             if components.count == 3 {
                 let uploadID = String(components[1])
-                if let handler = uploadStatusHandler {
-                    return await handler.handle(request, uploadID: uploadID)
-                }
+                return await uploadStatusHandler.handle(request, uploadID: uploadID)
             }
         }
-        
-        // PUT /uploads/{id}/chunks/{index}
+
         if method == "PUT" && path.hasPrefix("/uploads/") && path.contains("/chunks/") {
             let components = path.split(separator: "/")
-            if components.count == 4 {
+            if components.count == 4,
+               let chunkIndex = Int(components[3]) {
                 let uploadID = String(components[1])
-                if let chunkIndex = Int(components[3]), let handler = uploadHandler {
-                    return await handler.handleChunk(request, uploadID: uploadID, chunkIndex: chunkIndex)
-                }
+                return await uploadHandler.handleChunk(request, uploadID: uploadID, chunkIndex: chunkIndex)
             }
         }
-        
-        // POST /uploads/{id}/commit
+
         if method == "POST" && path.hasPrefix("/uploads/") && path.hasSuffix("/commit") {
             let components = path.split(separator: "/")
             if components.count == 3 {
@@ -224,15 +240,14 @@ extension AppCoordinator: ReceiverRouteHandler {
                 return await handleCommitRequest(request, uploadID: uploadID)
             }
         }
-        
-        // POST /pair
+
         if method == "POST" && path == "/pair" {
             return await handlePairRequest(request)
         }
-        
+
         return .notFound
     }
-    
+
     private func handlePairRequest(_ request: HTTPRequest) async -> HTTPResponse {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -255,7 +270,7 @@ extension AppCoordinator: ReceiverRouteHandler {
         
         do {
             try await DatabaseManager.shared.upsertDevice(record)
-            print("[AppCoordinator] Device paired: \(body.deviceName) (\(body.deviceID))")
+            print("[ReceiverRouteService] Device paired: \(body.deviceName) (\(body.deviceID))")
             await MainActor.run {
                 NotificationCenter.default.post(name: .receiverDataDidChange, object: nil)
             }
@@ -268,10 +283,6 @@ extension AppCoordinator: ReceiverRouteHandler {
     }
     
     private func handleCommitRequest(_ request: HTTPRequest, uploadID: String) async -> HTTPResponse {
-        guard let sessionManager = self.sessionManager, let commitProcessor = self.commitProcessor else {
-            return .error(code: "internal_error", message: "Server not initialized", status: 500)
-        }
-        
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         

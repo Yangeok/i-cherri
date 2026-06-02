@@ -74,6 +74,18 @@ public struct BackupProgressView: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
+
+            HStack {
+                Text(viewModel.formattedTransfer)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if viewModel.activeUploadCount > 0 {
+                    Text("\(viewModel.activeUploadCount) active")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
@@ -125,7 +137,12 @@ public final class BackupProgressViewModel: ObservableObject {
     @Published public var failedCount: Int = 0
     @Published public var currentFilename: String?
     @Published public var formattedSpeed: String = "—"
+    @Published public var formattedTransfer: String = "—"
+    @Published public var activeUploadCount: Int = 0
     @Published public var isComplete: Bool = false
+
+    private var sentBytes: Int64 = 0
+    private var totalBytes: Int64 = 0
 
     private var cancellationToken: Task<Void, Never>?
 
@@ -137,14 +154,39 @@ public final class BackupProgressViewModel: ObservableObject {
         cancellationToken = task
     }
 
-    public func update(filename: String, completed: Int, success: Int, duplicates: Int, failed: Int, bytesPerSecond: Double) {
+    public func update(
+        filename: String,
+        completed: Int,
+        success: Int,
+        duplicates: Int,
+        failed: Int,
+        bytesPerSecond: Double,
+        sentBytes: Int64? = nil,
+        totalBytes: Int64? = nil,
+        activeUploads: Int? = nil
+    ) {
         currentFilename = filename
         completedCount = completed
         successCount = success
         duplicateCount = duplicates
         failedCount = failed
-        progress = totalCount > 0 ? Double(completed) / Double(totalCount) : 0
+        if let sentBytes {
+            self.sentBytes = sentBytes
+        }
+        if let totalBytes {
+            self.totalBytes = totalBytes
+        }
+        if let activeUploads {
+            self.activeUploadCount = activeUploads
+        }
+
+        if self.totalBytes > 0 {
+            progress = min(Double(self.sentBytes) / Double(self.totalBytes), 1)
+        } else {
+            progress = totalCount > 0 ? Double(completed) / Double(totalCount) : 0
+        }
         formattedSpeed = formatSpeed(bytesPerSecond)
+        formattedTransfer = formatTransfer(sentBytes: self.sentBytes, totalBytes: self.totalBytes)
         if completed >= totalCount { isComplete = true }
     }
 
@@ -156,5 +198,13 @@ public final class BackupProgressViewModel: ObservableObject {
         if bps >= 1_000_000 { return String(format: "%.1f MB/s", bps / 1_000_000) }
         if bps >= 1_000 { return String(format: "%.0f KB/s", bps / 1_000) }
         return String(format: "%.0f B/s", bps)
+    }
+
+    private func formatTransfer(sentBytes: Int64, totalBytes: Int64) -> String {
+        guard totalBytes > 0 else { return "Waiting for first transfer…" }
+
+        let sent = ByteCountFormatter.string(fromByteCount: sentBytes, countStyle: .file)
+        let total = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+        return "\(sent) / \(total)"
     }
 }

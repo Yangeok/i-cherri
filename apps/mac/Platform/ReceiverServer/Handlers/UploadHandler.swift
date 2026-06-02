@@ -2,28 +2,40 @@ import Foundation
 import ICherriProtocol
 
 // Handles POST /uploads/init and PUT /uploads/{id}/chunks/{index}
-final class UploadHandler {
+struct UploadHandler: Sendable {
     private let sessionManager: SessionManager
     private let incomingDir: URL
-    private let decoder: JSONDecoder
-    private let encoder: JSONEncoder
 
     init(sessionManager: SessionManager, incomingDir: URL) {
         self.sessionManager = sessionManager
         self.incomingDir = incomingDir
-        self.decoder = JSONDecoder()
-        self.decoder.dateDecodingStrategy = .iso8601
-        self.encoder = JSONEncoder()
-        self.encoder.dateEncodingStrategy = .iso8601
     }
 
     // POST /uploads/init
     func handleInit(_ request: HTTPRequest) async -> HTTPResponse {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
         guard let body = try? decoder.decode(UploadInitRequest.self, from: request.body) else {
             return .error(code: "invalid_body", message: "Failed to parse UploadInitRequest")
         }
 
         do {
+            if let existingSession = try await sessionManager.fetchReusableSession(
+                deviceID: body.device.deviceID,
+                assetLocalID: body.asset.assetLocalID,
+                expectedByteSize: body.expectedByteSize
+            ) {
+                let response = UploadInitResponse(
+                    uploadID: existingSession.uploadID,
+                    accepted: true,
+                    chunkSize: existingSession.chunkSize,
+                    receivedBytes: existingSession.receivedBytes,
+                    expiresAt: existingSession.expiresAt
+                )
+                return (try? HTTPResponse.json(response, status: 200)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
+            }
+
             let uploadID = UUID().uuidString
             let tempPath = incomingDir.appendingPathComponent(uploadID + ".tmp")
             let expiresAt = Date().addingTimeInterval(24 * 3600)

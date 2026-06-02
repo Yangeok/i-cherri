@@ -3,20 +3,17 @@ import ICherriProtocol
 import ICherriCore
 
 // Handles POST /backup/check-batch
-final class CheckBatchHandler {
+struct CheckBatchHandler: Sendable {
     private let processor: CheckBatchProcessor
-    private let decoder: JSONDecoder
-    private let encoder: JSONEncoder
 
     init(processor: CheckBatchProcessor) {
         self.processor = processor
-        self.decoder = JSONDecoder()
-        self.decoder.dateDecodingStrategy = .iso8601
-        self.encoder = JSONEncoder()
-        self.encoder.dateEncodingStrategy = .iso8601
     }
 
     func handle(_ request: HTTPRequest) async -> HTTPResponse {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
         guard let body = try? decoder.decode(CheckBatchRequest.self, from: request.body) else {
             return .error(code: "invalid_body", message: "Failed to parse CheckBatchRequest")
         }

@@ -197,6 +197,8 @@ enum PermissionStatus { case granted, denied, unknown }
 
 @MainActor
 final class BackupDashboardViewModel: ObservableObject {
+    private static let maxConcurrentUploads = 2
+
     @Published var photoPermissionStatus: PermissionStatus = .unknown
     @Published var localNetworkStatus: PermissionStatus = .unknown
     @Published var discoveredReceivers: [DiscoveredReceiver] = []
@@ -355,18 +357,9 @@ final class BackupDashboardViewModel: ObservableObject {
                     return
                 }
 
-                let receiverURL = try await self.resolveReceiverURLForBackup()
-                let backupClient = BackupClient(receiverBaseURL: receiverURL, device: device, trustToken: trustToken)
-                let chunkSender = ChunkUploadSender(receiverBaseURL: receiverURL, device: device, trustToken: trustToken)
                 let progressCoordinator = BackupUploadProgressCoordinator(viewModel: progressViewModel)
-                await chunkSender.setProgressDelegate(progressCoordinator)
-                let uploadManager = ResumableUploadManager(
-                    backupClient: backupClient,
-                    chunkSender: chunkSender,
-                    scanner: scanner
-                )
 
-                await progressCoordinator.updateSnapshot(
+                progressCoordinator.updateSnapshot(
                     filename: "Checking existing backups...",
                     completed: 0,
                     success: 0,
@@ -375,15 +368,27 @@ final class BackupDashboardViewModel: ObservableObject {
                     bytesPerSecond: 0
                 )
 
+                let receiverURL = try await self.resolveReceiverURLForBackup()
+                let backupClient = BackupClient(receiverBaseURL: receiverURL, device: device, trustToken: trustToken)
                 let batchResponse = try await backupClient.checkBatch(candidates: scannedAssets)
                 let assetIndex = Dictionary(uniqueKeysWithValues: scannedAssets.map { ($0.assetLocalID, $0) })
 
                 var completed = batchResponse.alreadyBackedUp.count + batchResponse.duplicates.count + batchResponse.unsupported.count
                 var success = 0
-                var duplicates = batchResponse.alreadyBackedUp.count + batchResponse.duplicates.count
+                let duplicates = batchResponse.alreadyBackedUp.count + batchResponse.duplicates.count
                 var failed = batchResponse.unsupported.count
+                var pendingAssets: [AssetMetadata] = []
 
-                await progressCoordinator.updateSnapshot(
+                for requirement in batchResponse.requiredUploads {
+                    guard let metadata = assetIndex[requirement.assetLocalID] else {
+                        failed += 1
+                        completed += 1
+                        continue
+                    }
+                    pendingAssets.append(metadata)
+                }
+
+                progressCoordinator.updateSnapshot(
                     filename: "Preparing uploads...",
                     completed: completed,
                     success: success,
@@ -392,51 +397,89 @@ final class BackupDashboardViewModel: ObservableObject {
                     bytesPerSecond: 0
                 )
 
-                for requirement in batchResponse.requiredUploads {
-                    try Task.checkCancellation()
+                try await withThrowingTaskGroup(of: UploadTaskOutcome.self) { group in
+                    var nextIndex = 0
 
-                    guard let metadata = assetIndex[requirement.assetLocalID] else {
-                        failed += 1
-                        completed += 1
-                        await progressCoordinator.updateSnapshot(
-                            filename: "Missing asset metadata",
-                            completed: completed,
-                            success: success,
-                            duplicates: duplicates,
-                            failed: failed,
-                            bytesPerSecond: 0
-                        )
-                        continue
+                    func enqueueNextUpload() {
+                        guard nextIndex < pendingAssets.count else { return }
+                        let metadata = pendingAssets[nextIndex]
+                        nextIndex += 1
+
+                        group.addTask {
+                            let taskBackupClient = BackupClient(
+                                receiverBaseURL: receiverURL,
+                                device: device,
+                                trustToken: trustToken
+                            )
+                            let taskChunkSender = ChunkUploadSender(
+                                receiverBaseURL: receiverURL,
+                                device: device,
+                                trustToken: trustToken
+                            )
+                            let taskProgress = await AssetUploadProgressReporter(
+                                assetLocalID: metadata.assetLocalID,
+                                filename: metadata.originalFilename,
+                                coordinator: progressCoordinator
+                            )
+                            await taskChunkSender.setProgressDelegate(taskProgress)
+                            let taskScanner = PhotoLibraryScanner()
+
+                            let uploadManager = ResumableUploadManager(
+                                backupClient: taskBackupClient,
+                                chunkSender: taskChunkSender,
+                                scanner: taskScanner
+                            )
+
+                            await progressCoordinator.beginAsset(assetLocalID: metadata.assetLocalID, filename: metadata.originalFilename)
+
+                            do {
+                                _ = try await uploadManager.upload(
+                                    assetLocalID: metadata.assetLocalID,
+                                    metadata: metadata
+                                )
+                                return .success(assetLocalID: metadata.assetLocalID, filename: metadata.originalFilename)
+                            } catch {
+                                print("[Backup] Failed to upload \(metadata.originalFilename): \(error)")
+                                return .failure(assetLocalID: metadata.assetLocalID, filename: metadata.originalFilename)
+                            }
+                        }
                     }
 
-                    await progressCoordinator.beginAsset(
-                        filename: metadata.originalFilename,
-                        completed: completed,
-                        success: success,
-                        duplicates: duplicates,
-                        failed: failed
-                    )
-
-                    do {
-                        _ = try await uploadManager.upload(
-                            assetLocalID: metadata.assetLocalID,
-                            metadata: metadata
-                        )
-                        success += 1
-                    } catch {
-                        failed += 1
-                        print("[Backup] Failed to upload \(metadata.originalFilename): \(error)")
+                    let initialConcurrency = min(Self.maxConcurrentUploads, pendingAssets.count)
+                    for _ in 0..<initialConcurrency {
+                        enqueueNextUpload()
                     }
 
-                    completed += 1
-                    await progressCoordinator.updateSnapshot(
-                        filename: metadata.originalFilename,
-                        completed: completed,
-                        success: success,
-                        duplicates: duplicates,
-                        failed: failed,
-                        bytesPerSecond: 0
-                    )
+                    while let outcome = try await group.next() {
+                        try Task.checkCancellation()
+
+                        switch outcome {
+                        case .success(let assetLocalID, let filename):
+                            success += 1
+                            completed += 1
+                            progressCoordinator.finishAsset(
+                                assetLocalID: assetLocalID,
+                                filename: filename,
+                                completed: completed,
+                                success: success,
+                                duplicates: duplicates,
+                                failed: failed
+                            )
+                        case .failure(let assetLocalID, let filename):
+                            failed += 1
+                            completed += 1
+                            progressCoordinator.finishAsset(
+                                assetLocalID: assetLocalID,
+                                filename: filename,
+                                completed: completed,
+                                success: success,
+                                duplicates: duplicates,
+                                failed: failed
+                            )
+                        }
+
+                        enqueueNextUpload()
+                    }
                 }
 
                 await MainActor.run {
@@ -588,29 +631,32 @@ final class BackupDashboardViewModel: ObservableObject {
 }
 
 @MainActor
-private final class BackupUploadProgressCoordinator: ChunkUploadProgressDelegate {
+private final class BackupUploadProgressCoordinator {
+    private struct ActiveUploadState {
+        var filename: String
+        var sentBytes: Int64 = 0
+        var totalBytes: Int64 = 0
+        var bytesPerSecond: Double = 0
+    }
+
     private let viewModel: BackupProgressViewModel
     private var currentFilename: String = "Preparing uploads..."
+    private var archivedSentBytes: Int64 = 0
+    private var archivedTotalBytes: Int64 = 0
     private var completed: Int = 0
     private var success: Int = 0
     private var duplicates: Int = 0
     private var failed: Int = 0
-    private var assetStartDate = Date()
+    private var activeUploads: [String: ActiveUploadState] = [:]
 
     init(viewModel: BackupProgressViewModel) {
         self.viewModel = viewModel
     }
 
-    func beginAsset(filename: String, completed: Int, success: Int, duplicates: Int, failed: Int) {
-        assetStartDate = Date()
-        updateSnapshot(
-            filename: filename,
-            completed: completed,
-            success: success,
-            duplicates: duplicates,
-            failed: failed,
-            bytesPerSecond: 0
-        )
+    func beginAsset(assetLocalID: String, filename: String) {
+        currentFilename = filename
+        activeUploads[assetLocalID] = ActiveUploadState(filename: filename)
+        pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
     }
 
     func updateSnapshot(
@@ -626,25 +672,95 @@ private final class BackupUploadProgressCoordinator: ChunkUploadProgressDelegate
         self.success = success
         self.duplicates = duplicates
         self.failed = failed
-        viewModel.update(
+        pushUpdate(bytesPerSecond: bytesPerSecond)
+    }
+
+    func didSendBytes(assetLocalID: String, filename: String, totalSent: Int64, totalExpected: Int64, bytesPerSecond: Double) {
+        currentFilename = filename
+        activeUploads[assetLocalID] = ActiveUploadState(
             filename: filename,
+            sentBytes: totalSent,
+            totalBytes: totalExpected,
+            bytesPerSecond: bytesPerSecond
+        )
+        pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
+    }
+
+    func finishAsset(
+        assetLocalID: String,
+        filename: String,
+        completed: Int,
+        success: Int,
+        duplicates: Int,
+        failed: Int
+    ) {
+        currentFilename = filename
+        if let state = activeUploads.removeValue(forKey: assetLocalID) {
+            archivedSentBytes += max(state.sentBytes, state.totalBytes)
+            archivedTotalBytes += max(state.totalBytes, state.sentBytes)
+        }
+        self.completed = completed
+        self.success = success
+        self.duplicates = duplicates
+        self.failed = failed
+        pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
+    }
+
+    private var aggregateBytesPerSecond: Double {
+        activeUploads.values.reduce(0) { $0 + $1.bytesPerSecond }
+    }
+
+    private func pushUpdate(bytesPerSecond: Double) {
+        let activeBytesSent = activeUploads.values.reduce(Int64(0)) { $0 + $1.sentBytes }
+        let activeBytesTotal = activeUploads.values.reduce(Int64(0)) { $0 + $1.totalBytes }
+
+        let displayFilename: String
+        if activeUploads.count > 1 {
+            displayFilename = "\(currentFilename) + \(activeUploads.count - 1) more"
+        } else {
+            displayFilename = currentFilename
+        }
+
+        viewModel.update(
+            filename: displayFilename,
             completed: completed,
             success: success,
             duplicates: duplicates,
             failed: failed,
-            bytesPerSecond: bytesPerSecond
+            bytesPerSecond: bytesPerSecond,
+            sentBytes: archivedSentBytes + activeBytesSent,
+            totalBytes: archivedTotalBytes + activeBytesTotal,
+            activeUploads: activeUploads.count
         )
+    }
+}
+
+private enum UploadTaskOutcome: Sendable {
+    case success(assetLocalID: String, filename: String)
+    case failure(assetLocalID: String, filename: String)
+}
+
+@MainActor
+private final class AssetUploadProgressReporter: ChunkUploadProgressDelegate {
+    private let assetLocalID: String
+    private let filename: String
+    private let coordinator: BackupUploadProgressCoordinator
+    private var startedAt = Date()
+
+    init(assetLocalID: String, filename: String, coordinator: BackupUploadProgressCoordinator) {
+        self.assetLocalID = assetLocalID
+        self.filename = filename
+        self.coordinator = coordinator
     }
 
     func didSendBytes(_ bytes: Int64, totalSent: Int64, totalExpected: Int64) async {
-        let elapsed = max(Date().timeIntervalSince(assetStartDate), 0.001)
+        let elapsed = max(Date().timeIntervalSince(startedAt), 0.001)
         let bytesPerSecond = Double(totalSent) / elapsed
-        viewModel.update(
-            filename: currentFilename,
-            completed: completed,
-            success: success,
-            duplicates: duplicates,
-            failed: failed,
+        coordinator.didSendBytes(
+            assetLocalID: assetLocalID,
+            filename: filename,
+            totalSent: totalSent,
+            totalExpected: totalExpected,
             bytesPerSecond: bytesPerSecond
         )
     }

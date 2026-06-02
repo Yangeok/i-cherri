@@ -2,14 +2,11 @@ import Foundation
 import ICherriProtocol
 
 // Handles GET /uploads/{uploadId}/status for resumable upload session resumption.
-final class UploadStatusHandler {
+struct UploadStatusHandler: Sendable {
     private let sessionManager: SessionManager
-    private let encoder: JSONEncoder
 
     init(sessionManager: SessionManager) {
         self.sessionManager = sessionManager
-        self.encoder = JSONEncoder()
-        self.encoder.dateEncodingStrategy = .iso8601
     }
 
     func handle(_ request: HTTPRequest, uploadID: String) async -> HTTPResponse {
