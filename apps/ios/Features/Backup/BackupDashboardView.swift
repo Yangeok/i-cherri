@@ -713,6 +713,17 @@ private final class BackupUploadProgressCoordinator {
     private func pushUpdate(bytesPerSecond: Double) {
         let activeBytesSent = activeUploads.values.reduce(Int64(0)) { $0 + $1.sentBytes }
         let activeBytesTotal = activeUploads.values.reduce(Int64(0)) { $0 + $1.totalBytes }
+        let activeUploadItems = activeUploads
+            .map { assetLocalID, state in
+                ActiveUploadProgressItem(
+                    id: assetLocalID,
+                    filename: state.filename,
+                    sentBytes: state.sentBytes,
+                    totalBytes: state.totalBytes,
+                    bytesPerSecond: state.bytesPerSecond
+                )
+            }
+            .sorted { $0.filename.localizedStandardCompare($1.filename) == .orderedAscending }
 
         let displayFilename: String
         if activeUploads.count > 1 {
@@ -730,7 +741,8 @@ private final class BackupUploadProgressCoordinator {
             bytesPerSecond: bytesPerSecond,
             sentBytes: archivedSentBytes + activeBytesSent,
             totalBytes: archivedTotalBytes + activeBytesTotal,
-            activeUploads: activeUploads.count
+            activeUploads: activeUploads.count,
+            activeUploadItems: activeUploadItems
         )
     }
 }

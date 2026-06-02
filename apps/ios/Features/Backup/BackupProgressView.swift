@@ -17,6 +17,9 @@ public struct BackupProgressView: View {
             VStack(spacing: 32) {
                 headerSection
                 progressSection
+                if !viewModel.activeUploads.isEmpty {
+                    activeUploadsSection
+                }
                 statsSection
                 Spacer()
                 cancelButton
@@ -99,6 +102,43 @@ public struct BackupProgressView: View {
         }
     }
 
+    private var activeUploadsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Active Uploads")
+                    .font(.headline)
+                Spacer()
+                Text("\(viewModel.activeUploads.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(viewModel.activeUploads) { upload in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(upload.filename)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Text(upload.formattedSpeed)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ProgressView(value: upload.progress)
+                        .tint(.accentColor)
+
+                    Text(upload.formattedTransfer)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+    }
+
     // MARK: - Cancel
 
     private var cancelButton: some View {
@@ -139,6 +179,7 @@ public final class BackupProgressViewModel: ObservableObject {
     @Published public var formattedSpeed: String = "—"
     @Published public var formattedTransfer: String = "—"
     @Published public var activeUploadCount: Int = 0
+    @Published public var activeUploads: [ActiveUploadProgressItem] = []
     @Published public var isComplete: Bool = false
 
     private var sentBytes: Int64 = 0
@@ -163,7 +204,8 @@ public final class BackupProgressViewModel: ObservableObject {
         bytesPerSecond: Double,
         sentBytes: Int64? = nil,
         totalBytes: Int64? = nil,
-        activeUploads: Int? = nil
+        activeUploads: Int? = nil,
+        activeUploadItems: [ActiveUploadProgressItem]? = nil
     ) {
         currentFilename = filename
         completedCount = completed
@@ -178,6 +220,9 @@ public final class BackupProgressViewModel: ObservableObject {
         }
         if let activeUploads {
             self.activeUploadCount = activeUploads
+        }
+        if let activeUploadItems {
+            self.activeUploads = activeUploadItems
         }
 
         if self.totalBytes > 0 {
@@ -206,5 +251,30 @@ public final class BackupProgressViewModel: ObservableObject {
         let sent = ByteCountFormatter.string(fromByteCount: sentBytes, countStyle: .file)
         let total = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
         return "\(sent) / \(total)"
+    }
+}
+
+public struct ActiveUploadProgressItem: Identifiable, Equatable {
+    public let id: String
+    public let filename: String
+    public let sentBytes: Int64
+    public let totalBytes: Int64
+    public let bytesPerSecond: Double
+
+    public var progress: Double {
+        guard totalBytes > 0 else { return 0 }
+        return min(Double(sentBytes) / Double(totalBytes), 1)
+    }
+
+    public var formattedTransfer: String {
+        let sent = ByteCountFormatter.string(fromByteCount: sentBytes, countStyle: .file)
+        let total = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+        return "\(sent) / \(total)"
+    }
+
+    public var formattedSpeed: String {
+        if bytesPerSecond >= 1_000_000 { return String(format: "%.1f MB/s", bytesPerSecond / 1_000_000) }
+        if bytesPerSecond >= 1_000 { return String(format: "%.0f KB/s", bytesPerSecond / 1_000) }
+        return String(format: "%.0f B/s", bytesPerSecond)
     }
 }

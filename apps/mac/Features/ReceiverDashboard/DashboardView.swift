@@ -63,12 +63,12 @@ struct DashboardView: View {
                         }
                 }
             }
-            Section("Sessions") {
-                ForEach(viewModel.activeSessions, id: \.uploadID) { session in
-                    sessionRow(session)
+            Section("Active Uploads") {
+                ForEach(viewModel.activeUploads) { upload in
+                    activeUploadRow(upload)
                 }
-                if viewModel.activeSessions.isEmpty {
-                    Text("No active sessions")
+                if viewModel.activeUploads.isEmpty {
+                    Text("No active uploads")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -190,15 +190,15 @@ struct DashboardView: View {
         }
     }
 
-    private func sessionRow(_ session: SessionManager.SessionInfo) -> some View {
+    private func activeUploadRow(_ upload: DashboardActiveUpload) -> some View {
         HStack {
-            ProgressView(value: Double(session.receivedBytes), total: Double(session.expectedByteSize))
+            ProgressView(value: Double(upload.receivedBytes), total: Double(upload.expectedByteSize))
                 .frame(width: 40)
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.assetLocalID)
+                Text(upload.filename)
                     .font(.caption)
                     .lineLimit(1)
-                Text(ByteCountFormatter.string(fromByteCount: session.receivedBytes, countStyle: .file))
+                Text(upload.subtitle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -221,7 +221,7 @@ struct DashboardView: View {
 @MainActor
 final class DashboardViewModel: ObservableObject {
     @Published var pairedDevices: [PairedDeviceRecord] = []
-    @Published var activeSessions: [SessionManager.SessionInfo] = []
+    @Published var activeUploads: [DashboardActiveUpload] = []
     @Published var allAssets: [BackupAssetRecord] = []
     @Published var selectedDevice: String?
     @Published var backupFolderPath: String?
@@ -241,25 +241,24 @@ final class DashboardViewModel: ObservableObject {
             
             self.pairedDevices = devices
             self.allAssets = assets
-            self.activeSessions = sessions.map { r in
-                // Parse metadata to extract filename if needed, or use original filename
+            let deviceNames = Dictionary(uniqueKeysWithValues: devices.map { ($0.deviceId, $0.deviceName) })
+            self.activeUploads = sessions.map { r in
                 var filename = "Upload"
+                var assetCreatedAt: Date?
                 if let data = r.metadataJson.data(using: .utf8),
                    let metadata = try? JSONDecoder().decode(AssetMetadata.self, from: data) {
                     filename = metadata.originalFilename
+                    assetCreatedAt = metadata.creationDate
                 }
-                
-                return SessionManager.SessionInfo(
+
+                return DashboardActiveUpload(
                     uploadID: r.uploadId,
-                    deviceID: r.deviceId,
-                    assetLocalID: filename, // Show filename in the sessions view
-                    tempPath: r.tempPath,
+                    filename: filename,
+                    deviceName: deviceNames[r.deviceId] ?? r.deviceId,
+                    assetCreatedAt: assetCreatedAt,
                     expectedByteSize: r.expectedByteSize,
                     receivedBytes: r.receivedBytes,
-                    chunkSize: r.chunkSize,
-                    status: r.status,
-                    expiresAt: r.expiresAt,
-                    metadataJson: r.metadataJson
+                    status: r.status
                 )
             }
 
@@ -313,5 +312,28 @@ final class DashboardViewModel: ObservableObject {
         } catch {
             print("[DashboardViewModel] Delete device failed: \(error)")
         }
+    }
+}
+
+struct DashboardActiveUpload: Identifiable {
+    let uploadID: String
+    let filename: String
+    let deviceName: String
+    let assetCreatedAt: Date?
+    let expectedByteSize: Int64
+    let receivedBytes: Int64
+    let status: String
+
+    var id: String { uploadID }
+
+    var subtitle: String {
+        let createdLabel = assetCreatedAt?.formatted(date: .abbreviated, time: .omitted) ?? "Unknown date"
+        let receivedLabel = ByteCountFormatter.string(fromByteCount: receivedBytes, countStyle: .file)
+        let totalLabel = ByteCountFormatter.string(fromByteCount: expectedByteSize, countStyle: .file)
+        return "\(createdLabel) · \(deviceName) · \(receivedLabel) / \(totalLabel) · sess \(shortUploadID)"
+    }
+
+    private var shortUploadID: String {
+        String(uploadID.prefix(6)).uppercased()
     }
 }
