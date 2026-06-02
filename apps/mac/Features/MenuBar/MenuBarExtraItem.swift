@@ -1,5 +1,7 @@
 import SwiftUI
 import Inject
+import Combine
+import AppKit
 import ICherriProtocol
 
 // macOS menu bar status icon with quick-link popover showing receiver state.
@@ -20,10 +22,10 @@ public struct MenuBarExtraItem: Scene {
     private var menuBarLabel: some View {
         HStack(spacing: 4) {
             if #available(macOS 14.0, *) {
-                Image(systemName: state.isReceiving ? "externaldrive.fill.badge.icloud" : "externaldrive.fill")
+                Image(systemName: state.menuBarSymbolName)
                     .symbolEffect(.pulse, isActive: state.isReceiving)
             } else {
-                Image(systemName: state.isReceiving ? "externaldrive.fill.badge.icloud" : "externaldrive.fill")
+                Image(systemName: state.menuBarSymbolName)
             }
             if state.isReceiving {
                 Text("\(Int(state.receivingProgress * 100))%")
@@ -46,16 +48,16 @@ struct MenuBarPopoverContent: View {
             Divider()
             actionsSection
         }
-        .frame(width: 260)
+        .frame(width: 280)
         .padding(.vertical, 4)
         .enableInjection()
     }
 
     private var headerSection: some View {
         HStack(spacing: 10) {
-            Image(systemName: "externaldrive.fill")
+            Image(systemName: state.menuBarSymbolName)
                 .font(.title2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(state.statusColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text("iCherri Receiver")
                     .font(.headline)
@@ -73,25 +75,33 @@ struct MenuBarPopoverContent: View {
     }
 
     private var statusSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            if let headline = state.statusHeadline {
+                Text(headline)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+
+            if let deviceSummary = state.deviceSummary {
+                statusRow(icon: "iphone", text: deviceSummary)
+            }
+
+            if let uploadSummary = state.uploadSummary {
+                statusRow(icon: "arrow.up.circle", text: uploadSummary)
+            }
+
+            statusRow(icon: "folder", text: state.backupFolderPath)
+
             if state.isReceiving {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Receiving from \(state.connectedDeviceName ?? "iPhone")")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    ProgressView(value: state.receivingProgress)
-                        .tint(.accentColor)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-            } else {
-                Text("No active backup sessions")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
+                ProgressView(value: state.receivingProgress)
+                    .tint(.accentColor)
+                    .padding(.top, 2)
             }
         }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     private var actionsSection: some View {
@@ -99,13 +109,23 @@ struct MenuBarPopoverContent: View {
             MenuBarActionButton(title: "Open Dashboard", icon: "gauge") {
                 state.openDashboard()
             }
-            MenuBarActionButton(title: "Change Backup Folder", icon: "folder") {
-                state.changeBackupFolder()
+            MenuBarActionButton(title: "Reveal Backup Folder", icon: "folder") {
+                state.revealBackupFolder()
             }
             Divider()
             MenuBarActionButton(title: "Quit iCherri", icon: "power", role: .destructive) {
                 NSApplication.shared.terminate(nil)
             }
+        }
+    }
+
+    private func statusRow(icon: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: icon)
+                .frame(width: 12)
+            Text(text)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
         }
     }
 }
@@ -132,27 +152,140 @@ struct MenuBarActionButton: View {
 
 @MainActor
 final class MenuBarState: ObservableObject {
+    enum Status {
+        case offline
+        case ready
+        case receiving
+    }
+
+    @Published var status: Status = .offline
     @Published var isReceiving = false
     @Published var receivingProgress: Double = 0
     @Published var connectedDeviceName: String?
+    @Published var activeUploadCount = 0
+    @Published var activeDeviceCount = 0
+    @Published var backupFolderPath = AppCoordinator.shared.backupFolder.path
     @Published var isDashboardOpen = false
 
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        AppCoordinator.shared.$isServerRunning
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.reloadSnapshot()
+            }
+            .store(in: &cancellables)
+
+        AppCoordinator.shared.$backupFolder
+            .receive(on: RunLoop.main)
+            .sink { [weak self] folder in
+                self?.backupFolderPath = folder.path
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .receiverDataDidChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.reloadSnapshot()
+            }
+            .store(in: &cancellables)
+
+        reloadSnapshot()
+    }
+
     var statusDescription: String {
-        if isReceiving { return "Receiving backup…" }
-        return "Ready to receive"
+        switch status {
+        case .offline:
+            return "Receiver offline"
+        case .ready:
+            return "Ready to receive"
+        case .receiving:
+            return "Receiving backup…"
+        }
     }
 
     var statusColor: Color {
-        isReceiving ? .green : .secondary
+        switch status {
+        case .offline:
+            return .secondary
+        case .ready, .receiving:
+            return .green
+        }
+    }
+
+    var menuBarSymbolName: String {
+        switch status {
+        case .offline, .ready:
+            return "externaldrive.fill"
+        case .receiving:
+            return "externaldrive.fill.badge.icloud"
+        }
+    }
+
+    var statusHeadline: String? {
+        switch status {
+        case .offline:
+            return "Receiver is stopped"
+        case .ready:
+            return "Waiting for backup"
+        case .receiving:
+            return "Backup in progress"
+        }
+    }
+
+    var deviceSummary: String? {
+        if isReceiving {
+            if activeDeviceCount > 1 {
+                return "\(activeDeviceCount) devices connected"
+            }
+            return "Connected: \(connectedDeviceName ?? "iPhone")"
+        }
+
+        guard AppCoordinator.shared.isServerRunning else { return nil }
+        return "Receiver on port \(AppCoordinator.shared.port)"
+    }
+
+    var uploadSummary: String? {
+        guard isReceiving else { return nil }
+        return activeUploadCount == 1 ? "1 active upload" : "\(activeUploadCount) active uploads"
     }
 
     func openDashboard() {
-        // Posts notification to open main window
         NotificationCenter.default.post(name: .openDashboard, object: nil)
     }
 
-    func changeBackupFolder() {
-        NotificationCenter.default.post(name: .changeBackupFolder, object: nil)
+    func revealBackupFolder() {
+        NSWorkspace.shared.activateFileViewerSelecting([AppCoordinator.shared.backupFolder])
+    }
+
+    private func reloadSnapshot() {
+        backupFolderPath = AppCoordinator.shared.backupFolder.path
+
+        Task {
+            let sessions = (try? await DatabaseManager.shared.fetchAllSessions()) ?? []
+            let devices = (try? await DatabaseManager.shared.fetchAllDevices()) ?? []
+            let deviceNames = Dictionary(uniqueKeysWithValues: devices.map { ($0.deviceId, $0.deviceName) })
+            let activeDeviceIDs = Array(Set(sessions.map(\.deviceId))).sorted()
+            let totalExpected = sessions.reduce(Int64(0)) { $0 + max($1.expectedByteSize, 0) }
+            let totalReceived = sessions.reduce(Int64(0)) { $0 + max($1.receivedBytes, 0) }
+
+            await MainActor.run {
+                self.activeUploadCount = sessions.count
+                self.activeDeviceCount = activeDeviceIDs.count
+                self.connectedDeviceName = activeDeviceIDs.count == 1 ? deviceNames[activeDeviceIDs[0]] : nil
+                self.isReceiving = !sessions.isEmpty
+                self.receivingProgress = totalExpected > 0 ? min(max(Double(totalReceived) / Double(totalExpected), 0), 1) : 0
+
+                if self.isReceiving {
+                    self.status = .receiving
+                } else if AppCoordinator.shared.isServerRunning {
+                    self.status = .ready
+                } else {
+                    self.status = .offline
+                }
+            }
+        }
     }
 }
 
