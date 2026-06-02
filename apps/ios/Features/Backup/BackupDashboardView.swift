@@ -222,7 +222,7 @@ enum PermissionStatus { case granted, denied, unknown }
 
 @MainActor
 final class BackupDashboardViewModel: ObservableObject {
-    private static let maxConcurrentUploads = 2
+    private static let maxConcurrentUploads = 3
 
     @Published var photoPermissionStatus: PermissionStatus = .unknown
     @Published var localNetworkStatus: PermissionStatus = .unknown
