@@ -370,7 +370,12 @@ struct DashboardView: View {
 
     private func assetFileURL(_ asset: BackupAssetRecord) -> URL? {
         guard !asset.finalPath.isEmpty else { return nil }
-        let url = URL(fileURLWithPath: asset.finalPath)
+        let url: URL
+        if (asset.finalPath as NSString).isAbsolutePath {
+            url = URL(fileURLWithPath: asset.finalPath)
+        } else {
+            url = AppCoordinator.shared.backupFolder.appendingPathComponent(asset.finalPath)
+        }
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return url
     }
@@ -558,7 +563,15 @@ private struct AssetHistoryThumbnailView: View {
 
     init(asset: BackupAssetRecord) {
         self.asset = asset
-        _loader = StateObject(wrappedValue: AssetHistoryThumbnailLoader(path: asset.finalPath))
+        let resolvedPath: String
+        if (asset.finalPath as NSString).isAbsolutePath {
+            resolvedPath = asset.finalPath
+        } else {
+            resolvedPath = AppCoordinator.shared.backupFolder
+                .appendingPathComponent(asset.finalPath)
+                .path
+        }
+        _loader = StateObject(wrappedValue: AssetHistoryThumbnailLoader(path: resolvedPath))
     }
 
     var body: some View {
