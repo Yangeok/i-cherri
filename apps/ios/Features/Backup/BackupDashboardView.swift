@@ -331,7 +331,7 @@ final class BackupDashboardViewModel: ObservableObject {
 
         // Resolve endpoint and send pair request to Mac server
         do {
-            let baseURL = try await resolveEndpoint(receiver.endpoint)
+            let baseURL = try await Self.resolveEndpoint(receiver.endpoint)
             let device = currentDeviceInfo()
             let pairRequest = PairingStartRequest(device: device)
             
@@ -409,15 +409,43 @@ final class BackupDashboardViewModel: ObservableObject {
         isBackingUp = true
         backupStatusMessage = "Scanning photo library..."
         let device = currentDeviceInfo()
-        let scannedAssets = await scanner.scanAllAssets(deviceID: device.deviceID)
-        let progressViewModel = BackupProgressViewModel(totalCount: scannedAssets.count)
+        let progressViewModel = BackupProgressViewModel(totalCount: 0)
+        progressViewModel.update(
+            filename: "Scanning photo library...",
+            completed: 0,
+            success: 0,
+            duplicates: 0,
+            failed: 0,
+            bytesPerSecond: 0,
+            sentBytes: 0,
+            totalBytes: 0,
+            activeUploads: 0,
+            activeUploadItems: [],
+            failedUploadItems: []
+        )
         activeBackupProgressViewModel = progressViewModel
 
-        let backupTask = Task { [weak self] in
-            guard let self else { return }
-            defer { Task { @MainActor in self.isBackingUp = false } }
+        let pairedReceiverSnapshot = pairedReceiver
+        let pairedReceiverNameSnapshot = pairedReceiverName
+        let discoveredReceiversSnapshot = discoveredReceivers
+        let storedReceiverURLString = UserDefaults.standard.string(forKey: receiverURLKey)
+
+        let backupTask = Task.detached(priority: .userInitiated) { [maxConcurrentUploads = Self.maxConcurrentUploads] in
+            defer {
+                Task { @MainActor in
+                    self.isBackingUp = false
+                }
+            }
 
             do {
+                try Task.checkCancellation()
+
+                let scannedAssets = await PhotoLibraryScanner().scanAllAssets(deviceID: device.deviceID)
+
+                await MainActor.run {
+                    progressViewModel.setTotalCount(scannedAssets.count)
+                }
+
                 try Task.checkCancellation()
 
                 if scannedAssets.isEmpty {
@@ -435,9 +463,11 @@ final class BackupDashboardViewModel: ObservableObject {
                     return
                 }
 
-                let progressCoordinator = BackupUploadProgressCoordinator(viewModel: progressViewModel)
+                let progressCoordinator = await MainActor.run {
+                    BackupUploadProgressCoordinator(viewModel: progressViewModel)
+                }
 
-                progressCoordinator.updateSnapshot(
+                await progressCoordinator.updateSnapshot(
                     filename: "Checking existing backups...",
                     completed: 0,
                     success: 0,
@@ -446,7 +476,13 @@ final class BackupDashboardViewModel: ObservableObject {
                     bytesPerSecond: 0
                 )
 
-                let receiverURL = try await self.resolveReceiverURLForBackup()
+                let receiverURL = try await Self.resolveReceiverURLForBackup(
+                    pairedReceiver: pairedReceiverSnapshot,
+                    pairedReceiverName: pairedReceiverNameSnapshot,
+                    discoveredReceivers: discoveredReceiversSnapshot,
+                    storedReceiverURLString: storedReceiverURLString
+                )
+
                 let backupClient = BackupClient(receiverBaseURL: receiverURL, device: device, trustToken: trustToken)
                 let batchResponse = try await backupClient.checkBatch(candidates: scannedAssets)
                 let assetIndex = Dictionary(uniqueKeysWithValues: scannedAssets.map { ($0.assetLocalID, $0) })
@@ -480,8 +516,8 @@ final class BackupDashboardViewModel: ObservableObject {
                     pendingAssets.append(metadata)
                 }
 
-                progressCoordinator.setInitialFailures(initialFailures)
-                progressCoordinator.updateSnapshot(
+                await progressCoordinator.setInitialFailures(initialFailures)
+                await progressCoordinator.updateSnapshot(
                     filename: "Preparing uploads...",
                     completed: completed,
                     success: success,
@@ -515,15 +551,16 @@ final class BackupDashboardViewModel: ObservableObject {
                                 coordinator: progressCoordinator
                             )
                             await taskChunkSender.setProgressDelegate(taskProgress)
-                            let taskScanner = PhotoLibraryScanner()
-
                             let uploadManager = ResumableUploadManager(
                                 backupClient: taskBackupClient,
                                 chunkSender: taskChunkSender,
-                                scanner: taskScanner
+                                scanner: PhotoLibraryScanner()
                             )
 
-                            await progressCoordinator.beginAsset(assetLocalID: metadata.assetLocalID, filename: metadata.originalFilename)
+                            await progressCoordinator.beginAsset(
+                                assetLocalID: metadata.assetLocalID,
+                                filename: metadata.originalFilename
+                            )
 
                             do {
                                 _ = try await uploadManager.upload(
@@ -542,7 +579,7 @@ final class BackupDashboardViewModel: ObservableObject {
                         }
                     }
 
-                    let initialConcurrency = min(Self.maxConcurrentUploads, pendingAssets.count)
+                    let initialConcurrency = min(maxConcurrentUploads, pendingAssets.count)
                     for _ in 0..<initialConcurrency {
                         enqueueNextUpload()
                     }
@@ -554,7 +591,7 @@ final class BackupDashboardViewModel: ObservableObject {
                         case .success(let assetLocalID, let filename):
                             success += 1
                             completed += 1
-                            progressCoordinator.finishAsset(
+                            await progressCoordinator.finishAsset(
                                 assetLocalID: assetLocalID,
                                 filename: filename,
                                 completed: completed,
@@ -565,7 +602,7 @@ final class BackupDashboardViewModel: ObservableObject {
                         case .failure(let assetLocalID, let filename, let reason):
                             failed += 1
                             completed += 1
-                            progressCoordinator.finishAsset(
+                            await progressCoordinator.finishAsset(
                                 assetLocalID: assetLocalID,
                                 filename: filename,
                                 completed: completed,
@@ -573,7 +610,7 @@ final class BackupDashboardViewModel: ObservableObject {
                                 duplicates: duplicates,
                                 failed: failed
                             )
-                            progressCoordinator.recordFailure(
+                            await progressCoordinator.recordFailure(
                                 assetLocalID: assetLocalID,
                                 filename: filename,
                                 reason: reason
@@ -584,8 +621,11 @@ final class BackupDashboardViewModel: ObservableObject {
                     }
                 }
 
+                let finalSuccess = success
+                let finalDuplicates = duplicates
+                let finalFailed = failed
                 await MainActor.run {
-                    self.backupStatusMessage = "Backup complete. Uploaded \(success), skipped \(duplicates), failed \(failed)."
+                    self.backupStatusMessage = "Backup complete. Uploaded \(finalSuccess), skipped \(finalDuplicates), failed \(finalFailed)."
                 }
             } catch is CancellationError {
                 await MainActor.run {
@@ -656,23 +696,23 @@ final class BackupDashboardViewModel: ObservableObject {
         )
     }
 
-    private func resolveReceiverURLForBackup() async throws -> URL {
+    private static func resolveReceiverURLForBackup(
+        pairedReceiver: DiscoveredReceiver?,
+        pairedReceiverName: String?,
+        discoveredReceivers: [DiscoveredReceiver],
+        storedReceiverURLString: String?
+    ) async throws -> URL {
         if let pairedReceiver {
-            let resolvedURL = try await resolveEndpoint(pairedReceiver.endpoint)
-            UserDefaults.standard.set(resolvedURL.absoluteString, forKey: receiverURLKey)
-            return resolvedURL
+            return try await resolveEndpoint(pairedReceiver.endpoint)
         }
 
         if let pairedReceiverName,
            let discoveredReceiver = discoveredReceivers.first(where: { $0.name == pairedReceiverName }) {
-            pairedReceiver = discoveredReceiver
-            let resolvedURL = try await resolveEndpoint(discoveredReceiver.endpoint)
-            UserDefaults.standard.set(resolvedURL.absoluteString, forKey: receiverURLKey)
-            return resolvedURL
+            return try await resolveEndpoint(discoveredReceiver.endpoint)
         }
 
-        if let receiverURLString = UserDefaults.standard.string(forKey: receiverURLKey),
-           let receiverURL = URL(string: receiverURLString),
+        if let storedReceiverURLString,
+           let receiverURL = URL(string: storedReceiverURLString),
            !isLinkLocalReceiverURL(receiverURL) {
             return receiverURL
         }
@@ -680,12 +720,12 @@ final class BackupDashboardViewModel: ObservableObject {
         throw URLError(.cannotFindHost)
     }
 
-    private func isLinkLocalReceiverURL(_ url: URL) -> Bool {
+    private static func isLinkLocalReceiverURL(_ url: URL) -> Bool {
         guard let host = url.host()?.lowercased() else { return false }
         return host.hasPrefix("fe80:")
     }
     
-    private func resolveEndpoint(_ endpoint: NWEndpoint) async throws -> URL {
+    private static func resolveEndpoint(_ endpoint: NWEndpoint) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
             let connection = NWConnection(to: endpoint, using: .tcp)
             connection.stateUpdateHandler = { state in

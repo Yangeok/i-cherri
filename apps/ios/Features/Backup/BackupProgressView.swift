@@ -252,6 +252,14 @@ public final class BackupProgressViewModel: ObservableObject {
         cancellationToken = task
     }
 
+    public func setTotalCount(_ count: Int) {
+        totalCount = count
+        progress = count > 0 ? Double(completedCount) / Double(count) : 0
+        if completedCount < count {
+            isComplete = false
+        }
+    }
+
     public func update(
         filename: String,
         completed: Int,
