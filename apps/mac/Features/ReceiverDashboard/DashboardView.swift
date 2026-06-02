@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import QuickLookThumbnailing
 import ICherriDesignSystem
 import ICherriProtocol
 import Inject
@@ -140,7 +142,7 @@ struct DashboardView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                    TextField("Search filename or asset ID", text: $viewModel.assetSearchQuery)
+                    TextField("Search filename", text: $viewModel.assetSearchQuery)
                         .textFieldStyle(.plain)
                 }
                 .padding(.horizontal, 12)
@@ -263,13 +265,7 @@ struct DashboardView: View {
 
     private func assetHistoryRow(_ asset: BackupAssetRecord) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(assetStatusColor(asset.status).opacity(0.12))
-                Image(systemName: assetIconName(asset.mediaType))
-                    .foregroundStyle(assetStatusColor(asset.status))
-            }
-            .frame(width: 42, height: 42)
+            AssetHistoryThumbnailView(asset: asset)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top) {
@@ -278,11 +274,9 @@ struct DashboardView: View {
                             .font(.headline)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Text(asset.assetLocalId)
-                            .font(.caption2.monospaced())
+                        Text(asset.creationDate.formatted(date: .abbreviated, time: .omitted))
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
                     }
                     Spacer()
                     Text(assetStatusLabel(asset.status))
@@ -512,6 +506,95 @@ final class DashboardViewModel: ObservableObject {
             await load()
         } catch {
             print("[DashboardViewModel] Delete device failed: \(error)")
+        }
+    }
+}
+
+private struct AssetHistoryThumbnailView: View {
+    let asset: BackupAssetRecord
+    @StateObject private var loader: AssetHistoryThumbnailLoader
+
+    init(asset: BackupAssetRecord) {
+        self.asset = asset
+        _loader = StateObject(wrappedValue: AssetHistoryThumbnailLoader(path: asset.finalPath))
+    }
+
+    var body: some View {
+        Group {
+            if let image = loader.image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(color.opacity(0.12))
+                    Image(systemName: iconName)
+                        .foregroundStyle(color)
+                }
+            }
+        }
+        .frame(width: 56, height: 56)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .task {
+            await loader.loadIfNeeded()
+        }
+    }
+
+    private var iconName: String {
+        switch asset.mediaType.lowercased() {
+        case "video":
+            return "video.fill"
+        default:
+            return "photo.fill"
+        }
+    }
+
+    private var color: Color {
+        switch asset.status {
+        case "completed":
+            return .green
+        case "duplicate":
+            return .orange
+        case "failed":
+            return .red
+        default:
+            return .secondary
+        }
+    }
+}
+
+@MainActor
+private final class AssetHistoryThumbnailLoader: ObservableObject {
+    @Published var image: NSImage?
+
+    private let path: String
+    private var hasLoaded = false
+
+    init(path: String) {
+        self.path = path
+    }
+
+    func loadIfNeeded() async {
+        guard !hasLoaded else { return }
+        hasLoaded = true
+        guard !path.isEmpty else { return }
+
+        let fileURL = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        let request = QLThumbnailGenerator.Request(
+            fileAt: fileURL,
+            size: CGSize(width: 112, height: 112),
+            scale: NSScreen.main?.backingScaleFactor ?? 2,
+            representationTypes: .thumbnail
+        )
+
+        do {
+            let thumbnail = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
+            image = thumbnail.nsImage
+        } catch {
+            image = NSImage(contentsOf: fileURL)
         }
     }
 }

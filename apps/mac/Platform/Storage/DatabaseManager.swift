@@ -501,8 +501,8 @@ actor DatabaseManager {
             if !trimmedQuery.isEmpty {
                 let pattern = "%\(trimmedQuery)%"
                 request = request.filter(
-                    sql: "original_filename LIKE ? COLLATE NOCASE OR asset_local_id LIKE ? COLLATE NOCASE",
-                    arguments: [pattern, pattern]
+                    sql: "original_filename LIKE ? COLLATE NOCASE",
+                    arguments: [pattern]
                 )
             }
 
@@ -517,8 +517,8 @@ actor DatabaseManager {
         try queue.read { db in
             try UploadSessionRecord
                 .filter(
-                    sql: "status IN (?, ?, ?)",
-                    arguments: ["initialized", "receiving", "paused"]
+                    sql: "(status = ? OR (status = ? AND updated_at >= ?))",
+                    arguments: ["receiving", "initialized", Date().addingTimeInterval(-120)]
                 )
                 .order(Column("updated_at").desc)
                 .fetchAll(db)
