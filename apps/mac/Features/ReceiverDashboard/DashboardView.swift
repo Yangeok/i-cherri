@@ -136,27 +136,62 @@ struct DashboardView: View {
                 GlowBadge(label: "Failed", value: "\(viewModel.failedCount(for: device.deviceId))", color: .red)
             }
 
-            Table(viewModel.visibleAssets) {
-                TableColumn("Filename", value: \.originalFilename)
-                TableColumn("Type", value: \.mediaType)
-                TableColumn("Size") { asset in
-                    Text(ByteCountFormatter.string(fromByteCount: asset.byteSize, countStyle: .file))
+            HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search filename or asset ID", text: $viewModel.assetSearchQuery)
+                        .textFieldStyle(.plain)
                 }
-                TableColumn("Status", value: \.status)
-                TableColumn("Date") { asset in
-                    Text(asset.completedAt?.formatted(date: .abbreviated, time: .shortened) ?? "—")
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                Picker("Status", selection: $viewModel.assetStatusFilter) {
+                    ForEach(AssetHistoryFilter.allCases) { filter in
+                        Text(filter.label).tag(filter)
+                    }
                 }
+                .pickerStyle(.segmented)
+            }
+            .onChange(of: viewModel.assetSearchQuery) { _, _ in
+                Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
+            }
+            .onChange(of: viewModel.assetStatusFilter) { _, _ in
+                Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
             }
 
-            if viewModel.hasMoreVisibleAssets {
-                HStack {
-                    Spacer()
-                    Button("Load More") {
-                        Task { await viewModel.loadSelectedDeviceAssets(reset: false) }
+            if viewModel.visibleAssets.isEmpty, !viewModel.isLoadingAssetPage {
+                emptyHistoryState
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(Array(viewModel.visibleAssets.enumerated()), id: \.element.backupId) { index, asset in
+                            assetHistoryRow(asset)
+                                .onAppear {
+                                    Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
+                                }
+                        }
+
+                        if viewModel.isLoadingAssetPage {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                Text("Loading more history…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                        } else if !viewModel.hasMoreVisibleAssets, !viewModel.visibleAssets.isEmpty {
+                            Text("End of backup history")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity)
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    Spacer()
                 }
+                .scrollContentBackground(.hidden)
             }
         }
         .padding(24)
@@ -211,6 +246,113 @@ struct DashboardView: View {
         }
     }
 
+    private var emptyHistoryState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "tray")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+            Text("No backup history matches this filter")
+                .foregroundStyle(.secondary)
+            Text("Adjust the search text or status filter.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func assetHistoryRow(_ asset: BackupAssetRecord) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(assetStatusColor(asset.status).opacity(0.12))
+                Image(systemName: assetIconName(asset.mediaType))
+                    .foregroundStyle(assetStatusColor(asset.status))
+            }
+            .frame(width: 42, height: 42)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(asset.originalFilename)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(asset.assetLocalId)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer()
+                    Text(assetStatusLabel(asset.status))
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(assetStatusColor(asset.status).opacity(0.14))
+                        .foregroundStyle(assetStatusColor(asset.status))
+                        .clipShape(Capsule())
+                }
+
+                HStack(spacing: 14) {
+                    Label(asset.mediaType.capitalized, systemImage: "photo")
+                    Label(ByteCountFormatter.string(fromByteCount: asset.byteSize, countStyle: .file), systemImage: "externaldrive")
+                    Label(assetHistoryDate(asset), systemImage: "calendar")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if let lastError = asset.lastError, !lastError.isEmpty {
+                    Text(lastError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func assetHistoryDate(_ asset: BackupAssetRecord) -> String {
+        (asset.completedAt ?? asset.firstSeenAt).formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func assetIconName(_ mediaType: String) -> String {
+        switch mediaType.lowercased() {
+        case "video":
+            return "video.fill"
+        default:
+            return "photo.fill"
+        }
+    }
+
+    private func assetStatusLabel(_ status: String) -> String {
+        switch status {
+        case "completed":
+            return "Backed Up"
+        case "duplicate":
+            return "Duplicate"
+        case "failed":
+            return "Failed"
+        default:
+            return status.capitalized
+        }
+    }
+
+    private func assetStatusColor(_ status: String) -> Color {
+        switch status {
+        case "completed":
+            return .green
+        case "duplicate":
+            return .orange
+        case "failed":
+            return .red
+        default:
+            return .secondary
+        }
+    }
+
     private func statusPill(_ status: String) -> some View {
         Text(status.capitalized)
             .font(.caption.weight(.medium))
@@ -233,8 +375,11 @@ final class DashboardViewModel: ObservableObject {
     @Published var allAssets: [BackupAssetRecord] = []
     @Published var visibleAssets: [BackupAssetRecord] = []
     @Published var hasMoreVisibleAssets = false
+    @Published var isLoadingAssetPage = false
     @Published var selectedDevice: String?
     @Published var backupFolderPath: String?
+    @Published var assetSearchQuery = ""
+    @Published var assetStatusFilter: AssetHistoryFilter = .all
 
     private var assetPageOffset = 0
 
@@ -293,11 +438,17 @@ final class DashboardViewModel: ObservableObject {
             assetPageOffset = 0
             return
         }
+        guard !isLoadingAssetPage else { return }
 
         do {
+            isLoadingAssetPage = true
+            defer { isLoadingAssetPage = false }
+
             let offset = reset ? 0 : assetPageOffset
             let page = try await DatabaseManager.shared.fetchAssets(
                 deviceId: deviceId,
+                searchQuery: assetSearchQuery,
+                status: assetStatusFilter.databaseValue,
                 limit: Self.assetPageSize,
                 offset: offset
             )
@@ -311,8 +462,15 @@ final class DashboardViewModel: ObservableObject {
             assetPageOffset = offset + page.count
             hasMoreVisibleAssets = page.count == Self.assetPageSize
         } catch {
+            isLoadingAssetPage = false
             print("[DashboardViewModel] Asset page load failed: \(error)")
         }
+    }
+
+    func loadMoreIfNeeded(currentIndex: Int) async {
+        guard hasMoreVisibleAssets else { return }
+        guard currentIndex >= visibleAssets.count - 30 else { return }
+        await loadSelectedDeviceAssets(reset: false)
     }
 
     func assets(for deviceId: String) -> [BackupAssetRecord] {
@@ -354,6 +512,37 @@ final class DashboardViewModel: ObservableObject {
             await load()
         } catch {
             print("[DashboardViewModel] Delete device failed: \(error)")
+        }
+    }
+}
+
+enum AssetHistoryFilter: String, CaseIterable, Identifiable {
+    case all
+    case completed
+    case duplicate
+    case failed
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all:
+            return "All"
+        case .completed:
+            return "Backed Up"
+        case .duplicate:
+            return "Duplicates"
+        case .failed:
+            return "Failed"
+        }
+    }
+
+    var databaseValue: String? {
+        switch self {
+        case .all:
+            return nil
+        default:
+            return rawValue
         }
     }
 }

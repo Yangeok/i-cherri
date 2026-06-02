@@ -482,11 +482,32 @@ actor DatabaseManager {
         }
     }
 
-    func fetchAssets(deviceId: String, limit: Int, offset: Int) throws -> [BackupAssetRecord] {
+    func fetchAssets(
+        deviceId: String,
+        searchQuery: String,
+        status: String?,
+        limit: Int,
+        offset: Int
+    ) throws -> [BackupAssetRecord] {
         try queue.read { db in
-            try BackupAssetRecord
-                .filter(Column("device_id") == deviceId && Column("status") == "completed")
-                .order(Column("completed_at").desc)
+            var request = BackupAssetRecord
+                .filter(Column("device_id") == deviceId)
+
+            if let status {
+                request = request.filter(Column("status") == status)
+            }
+
+            let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedQuery.isEmpty {
+                let pattern = "%\(trimmedQuery)%"
+                request = request.filter(
+                    sql: "original_filename LIKE ? COLLATE NOCASE OR asset_local_id LIKE ? COLLATE NOCASE",
+                    arguments: [pattern, pattern]
+                )
+            }
+
+            return try request
+                .order(sql: "COALESCE(completed_at, first_seen_at) DESC")
                 .limit(limit, offset: offset)
                 .fetchAll(db)
         }
