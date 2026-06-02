@@ -76,6 +76,22 @@ public struct BackupDashboardView: View {
     private var pairingSection: some View {
         GroupBox {
             VStack(spacing: 16) {
+                if let receiverName = viewModel.pairedReceiverName {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Current Backup Target")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(receiverName)
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        Spacer()
+                        Button("Forget") { viewModel.clearPairedReceiver() }
+                            .font(.caption)
+                            .buttonStyle(.bordered)
+                            .disabled(viewModel.isPairing || viewModel.isBackingUp)
+                    }
+                }
                 if viewModel.discoveredReceivers.isEmpty {
                     VStack(spacing: 8) {
                         ProgressView()
@@ -175,16 +191,25 @@ public struct BackupDashboardView: View {
     private func receiverRow(_ receiver: DiscoveredReceiver) -> some View {
         HStack {
             Image(systemName: "desktopcomputer")
-            Text(receiver.name)
-                .font(.subheadline)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(receiver.name)
+                    .font(.subheadline)
+                if viewModel.isPaired && viewModel.pairedReceiverName == receiver.name {
+                    Text("Current backup target")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Spacer()
             if viewModel.isPaired && viewModel.pairedReceiver?.id == receiver.id {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Label("Current", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
             } else {
-                Button("Connect") { Task { await viewModel.pair(with: receiver) } }
+                Button(viewModel.isPaired ? "Switch Target" : "Connect") { Task { await viewModel.pair(with: receiver) } }
                     .font(.caption)
                     .buttonStyle(.bordered)
-                    .disabled(viewModel.isPairing)
+                    .disabled(viewModel.isPairing || viewModel.isBackingUp)
             }
         }
         .padding(.vertical, 4)
@@ -313,6 +338,19 @@ final class BackupDashboardViewModel: ObservableObject {
             pairingStatusMessage = previousStatusMessage
             pairingErrorMessage = "Pairing failed: \(error.localizedDescription)"
         }
+    }
+
+    func clearPairedReceiver() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: trustTokenKey)
+        defaults.removeObject(forKey: receiverURLKey)
+        defaults.removeObject(forKey: receiverNameKey)
+
+        pairedReceiver = nil
+        pairedReceiverName = nil
+        isPaired = false
+        pairingStatusMessage = "Choose a Mac receiver to use as the backup target."
+        backupStatusMessage = nil
     }
 
     func startBackup() async {
