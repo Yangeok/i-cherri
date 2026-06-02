@@ -52,6 +52,9 @@ final class UploadHandler {
                 receivedBytes: 0,
                 expiresAt: expiresAt
             )
+            await MainActor.run {
+                NotificationCenter.default.post(name: .receiverDataDidChange, object: nil)
+            }
             return (try? HTTPResponse.json(response, status: 200)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
         } catch {
             return .error(code: "session_error", message: error.localizedDescription, status: 500)
@@ -79,6 +82,9 @@ final class UploadHandler {
             try await sessionManager.updateProgress(uploadID: uploadID, receivedBytes: newReceived, status: "receiving")
 
             let response = ChunkUploadResponse(uploadID: uploadID, index: chunkIndex, receivedBytes: newReceived)
+            await MainActor.run {
+                NotificationCenter.default.post(name: .receiverDataDidChange, object: nil)
+            }
             return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
         } catch {
             return .error(code: "chunk_error", message: error.localizedDescription, status: 500)
