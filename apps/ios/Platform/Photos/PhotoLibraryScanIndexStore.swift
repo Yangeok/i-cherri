@@ -15,12 +15,28 @@ struct PhotoLibraryScanPlan {
 }
 
 private struct PhotoLibraryScanIndexState: Codable {
+    static let currentSchemaVersion = 2
+
+    var schemaVersion = currentSchemaVersion
     var cachedAssetsByID: [String: AssetMetadata] = [:]
     var pendingAssetIDs: Set<String> = []
     var retryAssetIDs: Set<String> = []
     var fullScanCompleted = false
     var requiresReconcile = false
     var incrementalRunsSinceReconcile = 0
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 0
+        cachedAssetsByID = try container.decodeIfPresent([String: AssetMetadata].self, forKey: .cachedAssetsByID) ?? [:]
+        pendingAssetIDs = try container.decodeIfPresent(Set<String>.self, forKey: .pendingAssetIDs) ?? []
+        retryAssetIDs = try container.decodeIfPresent(Set<String>.self, forKey: .retryAssetIDs) ?? []
+        fullScanCompleted = try container.decodeIfPresent(Bool.self, forKey: .fullScanCompleted) ?? false
+        requiresReconcile = try container.decodeIfPresent(Bool.self, forKey: .requiresReconcile) ?? false
+        incrementalRunsSinceReconcile = try container.decodeIfPresent(Int.self, forKey: .incrementalRunsSinceReconcile) ?? 0
+    }
 }
 
 @MainActor
@@ -180,6 +196,11 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
             let data = try? Data(contentsOf: fileURL),
             let decoded = try? JSONDecoder().decode(PhotoLibraryScanIndexState.self, from: data)
         else {
+            state = PhotoLibraryScanIndexState()
+            return
+        }
+
+        guard decoded.schemaVersion == PhotoLibraryScanIndexState.currentSchemaVersion else {
             state = PhotoLibraryScanIndexState()
             return
         }

@@ -346,7 +346,16 @@ public final class BackupProgressViewModel: ObservableObject {
 
     private func formatByteCount(_ bytes: Int64) -> String {
         guard bytes > 0 else { return "0 B" }
-        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        if bytes < 1_000 {
+            return "\(bytes) B"
+        }
+        if bytes < 1_000_000 {
+            return String(format: "%.1f KB", Double(bytes) / 1_000)
+        }
+        if bytes < 1_000_000_000 {
+            return String(format: "%.1f MB", Double(bytes) / 1_000_000)
+        }
+        return String(format: "%.1f GB", Double(bytes) / 1_000_000_000)
     }
 }
 
@@ -378,7 +387,16 @@ public struct ActiveUploadProgressItem: Identifiable, Equatable {
 
     private func formatByteCount(_ bytes: Int64) -> String {
         guard bytes > 0 else { return "0 B" }
-        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        if bytes < 1_000 {
+            return "\(bytes) B"
+        }
+        if bytes < 1_000_000 {
+            return String(format: "%.1f KB", Double(bytes) / 1_000)
+        }
+        if bytes < 1_000_000_000 {
+            return String(format: "%.1f MB", Double(bytes) / 1_000_000)
+        }
+        return String(format: "%.1f GB", Double(bytes) / 1_000_000_000)
     }
 }
 
