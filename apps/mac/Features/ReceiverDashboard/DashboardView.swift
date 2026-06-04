@@ -2,6 +2,8 @@ import SwiftUI
 import AppKit
 import QuickLook
 import QuickLookThumbnailing
+import AVFoundation
+import ImageIO
 import ICherriDesignSystem
 import ICherriProtocol
 import Inject
@@ -12,6 +14,7 @@ struct DashboardView: View {
     @StateObject private var viewModel = DashboardViewModel()
     @State private var devicePendingDeletion: PairedDeviceRecord?
     @State private var previewURL: URL?
+    @State private var assetActionError: String?
 
     var body: some View {
         NavigationSplitView {
@@ -53,6 +56,20 @@ struct DashboardView: View {
             }
         } message: { device in
             Text("This removes \(device.deviceName), its backup history, active sessions, and failure logs from this Mac.")
+        }
+        .alert("File Unavailable", isPresented: Binding(
+            get: { assetActionError != nil },
+            set: { isPresented in
+                if !isPresented {
+                    assetActionError = nil
+                }
+            }
+        )) {
+            Button("OK", role: .cancel) {
+                assetActionError = nil
+            }
+        } message: {
+            Text(assetActionError ?? "The backup file could not be found.")
         }
     }
 
@@ -121,7 +138,7 @@ struct DashboardView: View {
     }
 
     private func deviceDetailView(_ device: PairedDeviceRecord) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.deviceName)
@@ -158,6 +175,13 @@ struct DashboardView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+
+                Picker("View", selection: $viewModel.assetHistoryViewMode) {
+                    Image(systemName: "list.bullet").tag(AssetHistoryViewMode.list)
+                    Image(systemName: "square.grid.2x2").tag(AssetHistoryViewMode.grid)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 120)
             }
             .onChange(of: viewModel.assetSearchQuery) { _, _ in
                 Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
@@ -170,27 +194,35 @@ struct DashboardView: View {
                 emptyHistoryState
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(Array(viewModel.visibleAssets.enumerated()), id: \.element.backupId) { index, asset in
-                            assetHistoryListItem(asset, index: index)
-                        }
-
-                        if viewModel.isLoadingAssetPage {
-                            HStack(spacing: 10) {
-                                ProgressView()
-                                Text("Loading more history…")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    if viewModel.assetHistoryViewMode == .grid {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12, alignment: .top)], spacing: 12) {
+                            ForEach(Array(viewModel.visibleAssets.enumerated()), id: \.element.backupId) { index, asset in
+                                assetHistoryGridItem(asset, index: index)
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                        } else if !viewModel.hasMoreVisibleAssets, !viewModel.visibleAssets.isEmpty {
-                            Text("End of backup history")
+                        }
+                    } else {
+                        LazyVStack(spacing: 8) {
+                            ForEach(Array(viewModel.visibleAssets.enumerated()), id: \.element.backupId) { index, asset in
+                                assetHistoryListItem(asset, index: index)
+                            }
+                        }
+                    }
+
+                    if viewModel.isLoadingAssetPage {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Loading more history…")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .padding(.vertical, 8)
-                                .frame(maxWidth: .infinity)
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    } else if !viewModel.hasMoreVisibleAssets, !viewModel.visibleAssets.isEmpty {
+                        Text("End of backup history")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity)
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -264,8 +296,8 @@ struct DashboardView: View {
     }
 
     private func assetHistoryRow(_ asset: BackupAssetRecord) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            AssetHistoryThumbnailView(asset: asset)
+        HStack(alignment: .top, spacing: 12) {
+            AssetHistoryThumbnailView(asset: asset, size: 48)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top) {
@@ -291,7 +323,7 @@ struct DashboardView: View {
                 HStack(spacing: 14) {
                     Label(asset.mediaType.capitalized, systemImage: "photo")
                     Label(ByteCountFormatter.string(fromByteCount: asset.byteSize, countStyle: .file), systemImage: "externaldrive")
-                    Label(assetHistoryDate(asset), systemImage: "calendar")
+                    Label("Backed up \(assetHistoryDate(asset))", systemImage: "calendar")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -304,26 +336,66 @@ struct DashboardView: View {
                 }
             }
         }
-        .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func assetHistoryGridCard(_ asset: BackupAssetRecord) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                AssetHistoryThumbnailView(asset: asset, size: 72)
+                Spacer(minLength: 0)
+                Text(assetStatusLabel(asset.status))
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(assetStatusColor(asset.status).opacity(0.14))
+                    .foregroundStyle(assetStatusColor(asset.status))
+                    .clipShape(Capsule())
+            }
+
+            Text(asset.originalFilename)
+                .font(.headline)
+                .lineLimit(2)
+                .truncationMode(.middle)
+
+            Text(asset.creationDate.formatted(date: .abbreviated, time: .omitted))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Label(asset.mediaType.capitalized, systemImage: assetIconName(asset.mediaType))
+                Label(ByteCountFormatter.string(fromByteCount: asset.byteSize, countStyle: .file), systemImage: "externaldrive")
+                Label("Backed up \(assetHistoryDate(asset))", systemImage: "calendar")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func assetHistoryListItem(_ asset: BackupAssetRecord, index: Int) -> some View {
         assetHistoryRow(asset)
-            .onTapGesture(count: 2) {
-                previewAsset(asset)
+            .modifier(AssetHistoryInteractionModifier(
+                onPreview: { previewAsset(asset) },
+                onOpen: { openAsset(asset) },
+                onReveal: { revealAsset(asset) }
+            ))
+            .onAppear {
+                Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
             }
-            .contextMenu {
-                Button("Preview") {
-                    previewAsset(asset)
-                }
-                Button("Open") {
-                    openAsset(asset)
-                }
-                Button("Reveal in Finder") {
-                    revealAsset(asset)
-                }
-            }
+    }
+
+    private func assetHistoryGridItem(_ asset: BackupAssetRecord, index: Int) -> some View {
+        assetHistoryGridCard(asset)
+            .modifier(AssetHistoryInteractionModifier(
+                onPreview: { previewAsset(asset) },
+                onOpen: { openAsset(asset) },
+                onReveal: { revealAsset(asset) }
+            ))
             .onAppear {
                 Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
             }
@@ -381,17 +453,34 @@ struct DashboardView: View {
     }
 
     private func previewAsset(_ asset: BackupAssetRecord) {
-        previewURL = assetFileURL(asset)
+        guard let url = assetFileURL(asset) else {
+            assetActionError = missingFileMessage(for: asset)
+            return
+        }
+        previewURL = nil
+        DispatchQueue.main.async {
+            previewURL = url
+        }
     }
 
     private func openAsset(_ asset: BackupAssetRecord) {
-        guard let url = assetFileURL(asset) else { return }
+        guard let url = assetFileURL(asset) else {
+            assetActionError = missingFileMessage(for: asset)
+            return
+        }
         NSWorkspace.shared.open(url)
     }
 
     private func revealAsset(_ asset: BackupAssetRecord) {
-        guard let url = assetFileURL(asset) else { return }
+        guard let url = assetFileURL(asset) else {
+            assetActionError = missingFileMessage(for: asset)
+            return
+        }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func missingFileMessage(for asset: BackupAssetRecord) -> String {
+        "Could not find \(asset.originalFilename) in the current backup folder."
     }
 
     private func statusPill(_ status: String) -> some View {
@@ -402,6 +491,31 @@ struct DashboardView: View {
             .background(status == "paired" ? Color.green.opacity(0.15) : Color.secondary.opacity(0.15))
             .foregroundStyle(status == "paired" ? .green : .secondary)
             .clipShape(Capsule())
+    }
+}
+
+private struct AssetHistoryInteractionModifier: ViewModifier {
+    let onPreview: () -> Void
+    let onOpen: () -> Void
+    let onReveal: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .onTapGesture(count: 2) {
+                onPreview()
+            }
+            .contextMenu {
+                Button("Preview") {
+                    onPreview()
+                }
+                Button("Open") {
+                    onOpen()
+                }
+                Button("Reveal in Finder") {
+                    onReveal()
+                }
+            }
     }
 }
 
@@ -421,6 +535,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var backupFolderPath: String?
     @Published var assetSearchQuery = ""
     @Published var assetStatusFilter: AssetHistoryFilter = .all
+    @Published var assetHistoryViewMode: AssetHistoryViewMode = .list
 
     private var assetPageOffset = 0
 
@@ -559,10 +674,12 @@ final class DashboardViewModel: ObservableObject {
 
 private struct AssetHistoryThumbnailView: View {
     let asset: BackupAssetRecord
+    let size: CGFloat
     @StateObject private var loader: AssetHistoryThumbnailLoader
 
-    init(asset: BackupAssetRecord) {
+    init(asset: BackupAssetRecord, size: CGFloat) {
         self.asset = asset
+        self.size = size
         let resolvedPath: String
         if (asset.finalPath as NSString).isAbsolutePath {
             resolvedPath = asset.finalPath
@@ -571,7 +688,7 @@ private struct AssetHistoryThumbnailView: View {
                 .appendingPathComponent(asset.finalPath)
                 .path
         }
-        _loader = StateObject(wrappedValue: AssetHistoryThumbnailLoader(path: resolvedPath))
+        _loader = StateObject(wrappedValue: AssetHistoryThumbnailLoader(path: resolvedPath, mediaType: asset.mediaType, size: size))
     }
 
     var body: some View {
@@ -589,7 +706,7 @@ private struct AssetHistoryThumbnailView: View {
                 }
             }
         }
-        .frame(width: 56, height: 56)
+        .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .task {
             await loader.loadIfNeeded()
@@ -624,10 +741,14 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
     @Published var image: NSImage?
 
     private let path: String
+    private let mediaType: String
+    private let size: CGFloat
     private var hasLoaded = false
 
-    init(path: String) {
+    init(path: String, mediaType: String, size: CGFloat) {
         self.path = path
+        self.mediaType = mediaType
+        self.size = size
     }
 
     func loadIfNeeded() async {
@@ -638,14 +759,14 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         let fileURL = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
 
-        if let directImage = NSImage(contentsOf: fileURL) {
+        if let directImage = loadDirectThumbnail(fileURL: fileURL) {
             image = directImage
             return
         }
 
         let request = QLThumbnailGenerator.Request(
             fileAt: fileURL,
-            size: CGSize(width: 112, height: 112),
+            size: CGSize(width: size * 2, height: size * 2),
             scale: NSScreen.main?.backingScaleFactor ?? 2,
             representationTypes: .all
         )
@@ -657,6 +778,42 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
             image = nil
         }
     }
+
+    private func loadDirectThumbnail(fileURL: URL) -> NSImage? {
+        if mediaType.lowercased() == "video" {
+            let asset = AVURLAsset(url: fileURL)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: size * 2, height: size * 2)
+
+            do {
+                let frame = try generator.copyCGImage(at: .zero, actualTime: nil)
+                return NSImage(cgImage: frame, size: CGSize(width: size, height: size))
+            } catch {
+                return nil
+            }
+        }
+
+        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(size * 2)
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: CGSize(width: size, height: size))
+    }
+}
+
+enum AssetHistoryViewMode: String, CaseIterable, Identifiable {
+    case list
+    case grid
+
+    var id: String { rawValue }
 }
 
 enum AssetHistoryFilter: String, CaseIterable, Identifiable {
