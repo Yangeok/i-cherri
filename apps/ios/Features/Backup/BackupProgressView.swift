@@ -16,28 +16,30 @@ public struct BackupProgressView: View {
     public var body: some View {
         ZStack {
             backgroundGradient
-            ScrollView {
-                VStack(spacing: 24) {
-                    headerSection
-                    if let errorMessage = viewModel.errorMessage {
-                        errorSection(errorMessage)
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(spacing: 24) {
+                        headerSection
+                        if let errorMessage = viewModel.errorMessage {
+                            errorSection(errorMessage)
+                        }
+                        progressSection
+                        statsSection
+                        if !viewModel.activeUploads.isEmpty {
+                            activeUploadsSection
+                        }
+                        if !viewModel.failedUploads.isEmpty {
+                            failedUploadsSection
+                        }
                     }
-                    progressSection
-                    statsSection
-                    if !viewModel.activeUploads.isEmpty {
-                        activeUploadsSection
-                    }
-                    if !viewModel.failedUploads.isEmpty {
-                        failedUploadsSection
-                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 32)
+                    .padding(.bottom, 24)
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 32)
-                .padding(.bottom, 120)
+                if viewModel.canCancel {
+                    cancelBar
+                }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            cancelBar
         }
         .navigationBarBackButtonHidden(true)
         .enableInjection()
@@ -180,24 +182,20 @@ public struct BackupProgressView: View {
     // MARK: - Cancel
 
     private var cancelBar: some View {
-        Group {
-            if !viewModel.isComplete && viewModel.errorMessage == nil {
-                VStack(spacing: 0) {
-                    Divider()
-                    Button(role: .destructive) {
-                        viewModel.cancel()
-                    } label: {
-                        Text("Cancel Backup")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 12)
-                    .padding(.bottom, 16)
-                }
-                .background(.ultraThinMaterial)
+        VStack(spacing: 0) {
+            Divider()
+            Button(role: .destructive) {
+                viewModel.cancel()
+            } label: {
+                Text("Cancel Backup")
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.bordered)
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 16)
         }
+        .background(.ultraThinMaterial)
     }
 
     private var backgroundGradient: some View {
@@ -294,6 +292,10 @@ public final class BackupProgressViewModel: ObservableObject {
         errorMessage = message
         isComplete = true
         formattedSpeed = "—"
+    }
+
+    public var canCancel: Bool {
+        !isComplete && errorMessage == nil
     }
 
     public var headerTitle: String {

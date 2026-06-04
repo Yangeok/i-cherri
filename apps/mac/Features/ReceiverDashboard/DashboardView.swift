@@ -15,6 +15,7 @@ struct DashboardView: View {
     @State private var devicePendingDeletion: PairedDeviceRecord?
     @State private var previewURL: URL?
     @State private var assetActionError: String?
+    @State private var gridPinchStartSize: CGFloat?
 
     var body: some View {
         NavigationSplitView {
@@ -197,7 +198,7 @@ struct DashboardView: View {
                                     .foregroundStyle(.secondary)
 
                                 if viewModel.assetHistoryViewMode == .grid {
-                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12, alignment: .top)], spacing: 12) {
+                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: viewModel.gridThumbnailSize), spacing: 10, alignment: .top)], spacing: 10) {
                                         ForEach(section.entries) { entry in
                                             assetHistoryGridItem(entry.asset, index: entry.index)
                                         }
@@ -231,6 +232,23 @@ struct DashboardView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { value in
+                            guard viewModel.assetHistoryViewMode == .grid else { return }
+                            let start = gridPinchStartSize ?? viewModel.gridThumbnailSize
+                            if gridPinchStartSize == nil {
+                                gridPinchStartSize = start
+                            }
+                            viewModel.gridThumbnailSize = min(max(start * value, 110), 260)
+                        }
+                        .onEnded { value in
+                            guard viewModel.assetHistoryViewMode == .grid else { return }
+                            let start = gridPinchStartSize ?? viewModel.gridThumbnailSize
+                            viewModel.gridThumbnailSize = min(max(start * value, 110), 260)
+                            gridPinchStartSize = nil
+                        }
+                )
             }
         }
         .padding(24)
@@ -332,6 +350,7 @@ struct DashboardView: View {
         HStack {
             ProgressView(value: Double(upload.receivedBytes), total: Double(upload.expectedByteSize))
                 .frame(width: 40)
+                .tint(upload.status == "receiving" ? .accentColor : .gray)
             VStack(alignment: .leading, spacing: 2) {
                 Text(upload.filename)
                     .font(.caption)
@@ -441,21 +460,10 @@ struct DashboardView: View {
     }
 
     private func assetHistoryGridCard(_ asset: BackupAssetRecord) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            AssetHistoryThumbnailView(asset: asset, size: 72)
-
-            Text(asset.originalFilename)
-                .font(.headline)
-                .lineLimit(2)
-                .truncationMode(.middle)
-
-            Text(asset.creationDate.formatted(date: .abbreviated, time: .omitted))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        AssetHistoryThumbnailView(asset: asset, size: viewModel.gridThumbnailSize)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(4)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func assetHistoryListItem(_ asset: BackupAssetRecord, index: Int) -> some View {
@@ -472,6 +480,7 @@ struct DashboardView: View {
 
     private func assetHistoryGridItem(_ asset: BackupAssetRecord, index: Int) -> some View {
         assetHistoryGridCard(asset)
+            .id("\(asset.backupId)-\(Int(viewModel.gridThumbnailSize))")
             .modifier(AssetHistoryInteractionModifier(
                 onPreview: { previewAsset(asset) },
                 onOpen: { openAsset(asset) },
@@ -658,6 +667,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var assetHistoryViewMode: AssetHistoryViewMode = .list
     @Published var assetHistoryTimeGroupingMode: AssetHistoryTimeGroupingMode = .month
     @Published var assetHistoryMediaFilter: AssetHistoryMediaFilter = .all
+    @Published var gridThumbnailSize: CGFloat = 156
 
     private var assetPageOffset = 0
 

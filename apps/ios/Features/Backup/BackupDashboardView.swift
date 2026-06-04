@@ -152,12 +152,32 @@ public struct BackupDashboardView: View {
         GroupBox {
             VStack(spacing: 16) {
                 if let receiverName = viewModel.pairedReceiverName {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("Connected to \(receiverName)")
-                            .font(.subheadline)
-                        Spacer()
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("Connected to \(receiverName)")
+                                .font(.subheadline)
+                            Spacer()
+                        }
+
+                        if let backupCoverageSummary = viewModel.backupCoverageSummary,
+                           let backupCoverageProgress = viewModel.backupCoverageProgress {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Library Coverage")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(backupCoverageSummary)
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                ProgressView(value: backupCoverageProgress)
+                                    .tint(.green)
+                            }
+                        }
                     }
                 }
                 Button(action: { Task { await viewModel.startBackup() } }) {
@@ -262,6 +282,8 @@ final class BackupDashboardViewModel: ObservableObject {
     @Published var pairingErrorMessage: String?
     @Published var backupStatusMessage: String?
     @Published var activeBackupProgressViewModel: BackupProgressViewModel?
+    @Published var backupCoverageSummary: String?
+    @Published var backupCoverageProgress: Double?
 
     private let scanner = PhotoLibraryScanner()
     private let bonjourBrowser = BonjourBrowser()
@@ -391,6 +413,8 @@ final class BackupDashboardViewModel: ObservableObject {
         isPaired = false
         pairingStatusMessage = "Choose a Mac receiver to use as the backup target."
         backupStatusMessage = nil
+        backupCoverageSummary = nil
+        backupCoverageProgress = nil
     }
 
     func startBackup() async {
@@ -408,6 +432,8 @@ final class BackupDashboardViewModel: ObservableObject {
 
         isBackingUp = true
         backupStatusMessage = "Scanning photo library..."
+        backupCoverageSummary = nil
+        backupCoverageProgress = nil
         let device = currentDeviceInfo()
         let progressViewModel = BackupProgressViewModel(totalCount: 0)
         progressViewModel.update(
@@ -492,6 +518,9 @@ final class BackupDashboardViewModel: ObservableObject {
                 let duplicates = batchResponse.alreadyBackedUp.count + batchResponse.duplicates.count
                 var failed = batchResponse.unsupported.count
                 var pendingAssets: [AssetMetadata] = []
+                await MainActor.run {
+                    self.updateBackupCoverage(backedUpCount: duplicates, totalCount: scannedAssets.count)
+                }
                 var initialFailures = batchResponse.unsupported.map { assetLocalID in
                     FailedUploadProgressItem(
                         id: "unsupported-\(assetLocalID)",
@@ -591,6 +620,9 @@ final class BackupDashboardViewModel: ObservableObject {
                         case .success(let assetLocalID, let filename):
                             success += 1
                             completed += 1
+                            await MainActor.run {
+                                self.updateBackupCoverage(backedUpCount: duplicates + success, totalCount: scannedAssets.count)
+                            }
                             await progressCoordinator.finishAsset(
                                 assetLocalID: assetLocalID,
                                 filename: filename,
@@ -625,6 +657,7 @@ final class BackupDashboardViewModel: ObservableObject {
                 let finalDuplicates = duplicates
                 let finalFailed = failed
                 await MainActor.run {
+                    self.updateBackupCoverage(backedUpCount: finalDuplicates + finalSuccess, totalCount: scannedAssets.count)
                     self.backupStatusMessage = "Backup complete. Uploaded \(finalSuccess), skipped \(finalDuplicates), failed \(finalFailed)."
                 }
             } catch is CancellationError {
@@ -648,6 +681,19 @@ final class BackupDashboardViewModel: ObservableObject {
 
     func dismissBackupProgress() {
         activeBackupProgressViewModel = nil
+    }
+
+    private func updateBackupCoverage(backedUpCount: Int, totalCount: Int) {
+        guard totalCount > 0 else {
+            backupCoverageSummary = nil
+            backupCoverageProgress = nil
+            return
+        }
+
+        let clampedCount = min(max(backedUpCount, 0), totalCount)
+        let percent = Int((Double(clampedCount) / Double(totalCount) * 100).rounded())
+        backupCoverageProgress = Double(clampedCount) / Double(totalCount)
+        backupCoverageSummary = "\(percent)% · \(clampedCount.formatted()) / \(totalCount.formatted())"
     }
 
     private func updatePhotoPermission() {
