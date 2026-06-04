@@ -22,6 +22,7 @@ struct DashboardView: View {
     @State private var hoveredMediaFilter: AssetHistoryMediaFilter?
     @State private var scrubberActiveSectionID: String?
     @State private var scrubberActiveSectionTitle: String?
+    @State private var scrubberCommitTask: Task<Void, Never>?
 
     var body: some View {
         NavigationSplitView {
@@ -473,14 +474,14 @@ struct DashboardView: View {
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
-                                    scrubberJump(
+                                    updateScrubberSelection(
                                         locationY: value.location.y,
                                         trackHeight: scrubberSize.height,
-                                        sections: sections,
-                                        scrollProxy: scrollProxy
+                                        sections: sections
                                     )
                                 }
                                 .onEnded { _ in
+                                    commitScrubberSelection(scrollProxy: scrollProxy)
                                     withAnimation(.easeOut(duration: 0.18)) {
                                         scrubberActiveSectionTitle = nil
                                     }
@@ -494,11 +495,10 @@ struct DashboardView: View {
         }
     }
 
-    private func scrubberJump(
+    private func updateScrubberSelection(
         locationY: CGFloat,
         trackHeight: CGFloat,
-        sections: [AssetHistorySection],
-        scrollProxy: ScrollViewProxy
+        sections: [AssetHistorySection]
     ) {
         guard !sections.isEmpty else { return }
         let clampedY = min(max(locationY, 0), max(trackHeight, 1))
@@ -510,11 +510,23 @@ struct DashboardView: View {
 
         scrubberActiveSectionID = section.id
         scrubberActiveSectionTitle = section.title
-        Task {
-            await viewModel.ensureSectionVisible(section.id)
+
+        if viewModel.visibleAssetSections.contains(where: { $0.id == section.id }) {
+            // keep drag responsive for already-loaded sections without triggering pagination work
+        }
+    }
+
+    private func commitScrubberSelection(scrollProxy: ScrollViewProxy) {
+        guard let targetSectionID = scrubberActiveSectionID else { return }
+
+        scrubberCommitTask?.cancel()
+        scrubberCommitTask = Task {
+            await viewModel.ensureSectionVisible(targetSectionID)
+            guard !Task.isCancelled else { return }
+
             await MainActor.run {
                 withAnimation(.easeOut(duration: 0.12)) {
-                    scrollProxy.scrollTo(section.id, anchor: .top)
+                    scrollProxy.scrollTo(targetSectionID, anchor: .top)
                 }
             }
         }
@@ -828,6 +840,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var gridColumnCount: Int = 4
 
     private var assetPageOffset = 0
+    private var lastThumbnailBackfillSignature: String?
 
     var selectedDeviceInfo: PairedDeviceRecord? {
         pairedDevices.first { $0.deviceId == selectedDevice }
@@ -884,6 +897,7 @@ final class DashboardViewModel: ObservableObject {
             scrubberSections = []
             hasMoreVisibleAssets = false
             assetPageOffset = 0
+            lastThumbnailBackfillSignature = nil
             return
         }
         guard !isLoadingAssetPage else { return }
@@ -906,6 +920,7 @@ final class DashboardViewModel: ObservableObject {
                 visibleAssets = page
                 visibleAssetSections = Self.buildSections(from: page, mode: assetHistoryTimeGroupingMode)
                 rebuildScrubberSections()
+                scheduleThumbnailBackfillIfNeeded(for: deviceId)
             } else {
                 let startIndex = visibleAssets.count
                 visibleAssets.append(contentsOf: page)
@@ -931,14 +946,7 @@ final class DashboardViewModel: ObservableObject {
         let lowerBound = max(0, index - 12)
         let upperBound = min(visibleAssets.count - 1, index + 24)
         let assetsToWarm = Array(visibleAssets[lowerBound...upperBound])
-
-        await withTaskGroup(of: Void.self) { group in
-            for asset in assetsToWarm {
-                group.addTask {
-                    await AssetHistoryThumbnailPrefetcher.prefetch(asset: asset, size: size)
-                }
-            }
-        }
+        await AssetHistoryThumbnailPrefetcher.prefetch(assets: assetsToWarm, size: size)
     }
 
     func assets(for deviceId: String) -> [BackupAssetRecord] {
@@ -977,6 +985,18 @@ final class DashboardViewModel: ObservableObject {
 
     private func rebuildScrubberSections() {
         scrubberSections = Self.buildSections(from: matchingAssetsForSelectedDevice(), mode: assetHistoryTimeGroupingMode)
+    }
+
+    private func scheduleThumbnailBackfillIfNeeded(for deviceId: String) {
+        let trimmedQuery = assetSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let signature = "\(deviceId)|\(assetHistoryMediaFilter.rawValue)|\(trimmedQuery)"
+        guard signature != lastThumbnailBackfillSignature else { return }
+
+        lastThumbnailBackfillSignature = signature
+        let assetsToBackfill = matchingAssetsForSelectedDevice()
+        Task.detached(priority: .utility) {
+            await AssetHistoryThumbnailPrefetcher.backfill(assets: assetsToBackfill)
+        }
     }
 
     private func matchingAssetsForSelectedDevice() -> [BackupAssetRecord] {
@@ -1439,46 +1459,135 @@ actor AssetHistoryThumbnailCache {
     }
 }
 
-enum AssetHistoryThumbnailPrefetcher {
-    static func prewarmCommittedAsset(relativePath: String, mediaType: String) async {
-        let resolvedPath: String
-        if (relativePath as NSString).isAbsolutePath {
-            resolvedPath = relativePath
-        } else {
-            let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
-            resolvedPath = backupFolder.appendingPathComponent(relativePath).path
+actor AssetHistoryThumbnailPrefetchCoordinator {
+    static let shared = AssetHistoryThumbnailPrefetchCoordinator()
+
+    private struct Request: Hashable {
+        let path: String
+        let mediaType: String
+        let size: Int
+    }
+
+    private let maxConcurrentPrefetches = 2
+    private var queuedRequests: [Request] = []
+    private var queuedRequestSet: Set<Request> = []
+    private var activeWorkerCount = 0
+
+    func enqueue(relativePath: String, mediaType: String, sizes: [CGFloat]) async {
+        guard let fileURL = await AssetHistoryThumbnailPrefetcher.resolvedFileURL(for: relativePath) else { return }
+        enqueue(fileURL: fileURL, mediaType: mediaType, sizes: sizes)
+    }
+
+    func enqueue(assets: [BackupAssetRecord], sizes: [CGFloat]) async {
+        guard !assets.isEmpty else { return }
+
+        let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
+        var requests: [Request] = []
+        requests.reserveCapacity(assets.count * sizes.count)
+
+        for asset in assets {
+            guard let resolvedPath = AssetHistoryThumbnailPrefetcher.resolvedPath(
+                for: asset.finalPath,
+                backupFolder: backupFolder
+            ) else {
+                continue
+            }
+
+            for size in sizes {
+                requests.append(
+                    Request(
+                        path: resolvedPath,
+                        mediaType: asset.mediaType,
+                        size: max(Int(size.rounded()), 1)
+                    )
+                )
+            }
         }
 
-        guard !resolvedPath.isEmpty else { return }
-        let fileURL = URL(fileURLWithPath: resolvedPath)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        enqueue(requests)
+    }
 
-        let sizes: [CGFloat] = [48, 96, 160, 240]
-        await withTaskGroup(of: Void.self) { group in
-            for size in sizes {
-                group.addTask {
-                    await prefetch(fileURL: fileURL, mediaType: mediaType, size: size)
-                }
+    private func enqueue(fileURL: URL, mediaType: String, sizes: [CGFloat]) {
+        let requests = sizes.map {
+            Request(
+                path: fileURL.path,
+                mediaType: mediaType,
+                size: max(Int($0.rounded()), 1)
+            )
+        }
+        enqueue(requests)
+    }
+
+    private func enqueue(_ requests: [Request]) {
+        guard !requests.isEmpty else { return }
+
+        for request in requests where !queuedRequestSet.contains(request) {
+            queuedRequests.append(request)
+            queuedRequestSet.insert(request)
+        }
+
+        spawnWorkersIfNeeded()
+    }
+
+    private func spawnWorkersIfNeeded() {
+        while activeWorkerCount < maxConcurrentPrefetches && !queuedRequests.isEmpty {
+            activeWorkerCount += 1
+            Task.detached(priority: .utility) {
+                await self.workerLoop()
             }
         }
     }
 
-    static func prefetch(asset: BackupAssetRecord, size: CGFloat) async {
-        let resolvedPath: String
-        if (asset.finalPath as NSString).isAbsolutePath {
-            resolvedPath = asset.finalPath
-        } else {
-            let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
-            resolvedPath = backupFolder
-                .appendingPathComponent(asset.finalPath)
-                .path
+    private func workerLoop() async {
+        while let request = dequeueNextRequest() {
+            await AssetHistoryThumbnailPrefetcher.prefetch(
+                fileURL: URL(fileURLWithPath: request.path),
+                mediaType: request.mediaType,
+                size: CGFloat(request.size)
+            )
+        }
+    }
+
+    private func dequeueNextRequest() -> Request? {
+        guard !queuedRequests.isEmpty else {
+            activeWorkerCount = max(0, activeWorkerCount - 1)
+            return nil
         }
 
-        guard !resolvedPath.isEmpty else { return }
+        let request = queuedRequests.removeFirst()
+        queuedRequestSet.remove(request)
+        return request
+    }
+}
 
-        let fileURL = URL(fileURLWithPath: resolvedPath)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
-        await prefetch(fileURL: fileURL, mediaType: asset.mediaType, size: size)
+enum AssetHistoryThumbnailPrefetcher {
+    static let committedAssetSizes: [CGFloat] = [48, 96, 160, 240]
+    static let backgroundBackfillSizes: [CGFloat] = [48, 160, 240]
+
+    static func prewarmCommittedAsset(relativePath: String, mediaType: String) async {
+        await AssetHistoryThumbnailPrefetchCoordinator.shared.enqueue(
+            relativePath: relativePath,
+            mediaType: mediaType,
+            sizes: committedAssetSizes
+        )
+    }
+
+    static func backfill(assets: [BackupAssetRecord]) async {
+        await AssetHistoryThumbnailPrefetchCoordinator.shared.enqueue(
+            assets: assets,
+            sizes: backgroundBackfillSizes
+        )
+    }
+
+    static func prefetch(assets: [BackupAssetRecord], size: CGFloat) async {
+        await AssetHistoryThumbnailPrefetchCoordinator.shared.enqueue(
+            assets: assets,
+            sizes: [size]
+        )
+    }
+
+    static func prefetch(asset: BackupAssetRecord, size: CGFloat) async {
+        await prefetch(assets: [asset], size: size)
     }
 
     static func prefetch(fileURL: URL, mediaType: String, size: CGFloat) async {
@@ -1489,6 +1598,34 @@ enum AssetHistoryThumbnailPrefetcher {
             size: size,
             scale: displayScale
         )
+    }
+
+    static func resolvedFileURL(for path: String) async -> URL? {
+        let resolvedPath: String
+        if (path as NSString).isAbsolutePath {
+            resolvedPath = path
+        } else {
+            let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
+            resolvedPath = backupFolder.appendingPathComponent(path).path
+        }
+
+        guard !resolvedPath.isEmpty else { return nil }
+        let fileURL = URL(fileURLWithPath: resolvedPath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        return fileURL
+    }
+
+    static func resolvedPath(for path: String, backupFolder: URL) -> String? {
+        let resolvedPath: String
+        if (path as NSString).isAbsolutePath {
+            resolvedPath = path
+        } else {
+            resolvedPath = backupFolder.appendingPathComponent(path).path
+        }
+
+        guard !resolvedPath.isEmpty else { return nil }
+        guard FileManager.default.fileExists(atPath: resolvedPath) else { return nil }
+        return resolvedPath
     }
 }
 
