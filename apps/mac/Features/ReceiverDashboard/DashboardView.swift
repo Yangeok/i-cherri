@@ -20,6 +20,8 @@ struct DashboardView: View {
     @State private var gridPinchStartColumns: Int?
     @State private var hoveredHistoryControlID: String?
     @State private var hoveredMediaFilter: AssetHistoryMediaFilter?
+    @State private var scrubberActiveSectionID: String?
+    @State private var scrubberActiveSectionTitle: String?
 
     var body: some View {
         NavigationSplitView {
@@ -148,6 +150,17 @@ struct DashboardView: View {
 
     private func deviceDetailView(_ device: PairedDeviceRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            deviceHeader(device)
+            historySearchBar
+            historyMediaFilterBar
+            historyBrowser
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func deviceHeader(_ device: PairedDeviceRecord) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.deviceName)
@@ -165,118 +178,157 @@ struct DashboardView: View {
                 Spacer()
                 statusPill(device.pairingStatus)
             }
-            
+
             Text(historySummary(for: device))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
 
-            HStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Search filename", text: $viewModel.assetSearchQuery)
-                        .textFieldStyle(.plain)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .onChange(of: viewModel.assetSearchQuery) { _, _ in
-                Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
-            }
-
+    private var historySearchBar: some View {
+        HStack(spacing: 10) {
             HStack(spacing: 8) {
-                ForEach(AssetHistoryMediaFilter.allCases) { filter in
-                    mediaFilterChip(filter)
-                }
-                Spacer()
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search filename", text: $viewModel.assetSearchQuery)
+                    .textFieldStyle(.plain)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .onChange(of: viewModel.assetSearchQuery) { _, _ in
+            Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
+        }
+    }
 
+    private var historyMediaFilterBar: some View {
+        HStack(spacing: 8) {
+            ForEach(AssetHistoryMediaFilter.allCases) { filter in
+                mediaFilterChip(filter)
+            }
+            Spacer()
+        }
+    }
+
+    private var historyBrowser: some View {
+        Group {
             if viewModel.visibleAssets.isEmpty, !viewModel.isLoadingAssetPage {
                 emptyHistoryState
             } else {
                 GeometryReader { proxy in
-                    let contentWidth = max(proxy.size.width, 1)
-                    let gridColumns = Array(
-                        repeating: GridItem(.flexible(), spacing: 8, alignment: .top),
-                        count: viewModel.gridColumnCount
-                    )
-                    let gridItemSize = (contentWidth - CGFloat(max(viewModel.gridColumnCount - 1, 0)) * 8) / CGFloat(viewModel.gridColumnCount)
-
-                    ZStack(alignment: .bottom) {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 16) {
-                                ForEach(viewModel.visibleAssetSections, id: \.id) { section in
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        Text(section.title)
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.secondary)
-
-                                        if viewModel.assetHistoryViewMode == .grid {
-                                            LazyVGrid(columns: gridColumns, spacing: 8) {
-                                                ForEach(section.entries) { entry in
-                                                    assetHistoryGridItem(entry.asset, index: entry.index, itemSize: gridItemSize)
-                                                }
-                                            }
-                                        } else {
-                                            LazyVStack(spacing: 8) {
-                                                ForEach(section.entries) { entry in
-                                                    assetHistoryListItem(entry.asset, index: entry.index)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if viewModel.isLoadingAssetPage {
-                                    HStack(spacing: 10) {
-                                        ProgressView()
-                                        Text("Loading more history…")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                } else if !viewModel.hasMoreVisibleAssets, !viewModel.visibleAssets.isEmpty {
-                                    Text("End of backup history")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.vertical, 8)
-                                        .frame(maxWidth: .infinity)
-                                }
-                            }
-                            .padding(.bottom, 96)
-                        }
-                        .scrollContentBackground(.hidden)
-                        .gesture(
-                            MagnificationGesture()
-                                .onChanged { value in
-                                    guard viewModel.assetHistoryViewMode == .grid else { return }
-                                    let start = gridPinchStartColumns ?? viewModel.gridColumnCount
-                                    if gridPinchStartColumns == nil {
-                                        gridPinchStartColumns = start
-                                    }
-                                    let proposed = Int((Double(start) / Double(value)).rounded())
-                                    viewModel.gridColumnCount = min(max(proposed, 2), 6)
-                                }
-                                .onEnded { value in
-                                    guard viewModel.assetHistoryViewMode == .grid else { return }
-                                    let start = gridPinchStartColumns ?? viewModel.gridColumnCount
-                                    let proposed = Int((Double(start) / Double(value)).rounded())
-                                    viewModel.gridColumnCount = min(max(proposed, 2), 6)
-                                    gridPinchStartColumns = nil
-                                }
-                        )
-
-                        historyFloatingControls
-                            .padding(.bottom, 16)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    historyBrowserContent(height: proxy.size.height, width: proxy.size.width)
                 }
             }
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func historyBrowserContent(height: CGFloat, width: CGFloat) -> some View {
+        let contentWidth = max(width, 1)
+        let columnCount = viewModel.gridColumnCount
+        let gridColumns = Array(
+            repeating: GridItem(.flexible(), spacing: 8, alignment: .top),
+            count: columnCount
+        )
+        let gridItemSize = (contentWidth - CGFloat(max(columnCount - 1, 0)) * 8) / CGFloat(columnCount)
+
+        return ScrollViewReader { scrollProxy in
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        ForEach(viewModel.visibleAssetSections, id: \.id) { section in
+                            historySectionView(section, gridColumns: gridColumns, gridItemSize: gridItemSize)
+                        }
+
+                        historyPaginationFooter
+                    }
+                    .padding(.bottom, 96)
+                }
+                .scrollContentBackground(.hidden)
+                .gesture(historyGridMagnificationGesture)
+
+                historyFloatingControls
+                    .padding(.bottom, 16)
+
+                historyTimelineScrubber(
+                    sections: viewModel.visibleAssetSections,
+                    height: height,
+                    scrollProxy: scrollProxy
+                )
+                .padding(.trailing, 10)
+                .padding(.bottom, 104)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        }
+    }
+
+    private func historySectionView(
+        _ section: AssetHistorySection,
+        gridColumns: [GridItem],
+        gridItemSize: CGFloat
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(section.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if viewModel.assetHistoryViewMode == .grid {
+                LazyVGrid(columns: gridColumns, spacing: 8) {
+                    ForEach(section.entries) { entry in
+                        assetHistoryGridItem(entry.asset, index: entry.index, itemSize: gridItemSize)
+                    }
+                }
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(section.entries) { entry in
+                        assetHistoryListItem(entry.asset, index: entry.index)
+                    }
+                }
+            }
+        }
+        .id(section.id)
+    }
+
+    private var historyPaginationFooter: some View {
+        Group {
+            if viewModel.isLoadingAssetPage {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Loading more history…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+            } else if !viewModel.hasMoreVisibleAssets, !viewModel.visibleAssets.isEmpty {
+                Text("End of backup history")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private var historyGridMagnificationGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                guard viewModel.assetHistoryViewMode == .grid else { return }
+                let start = gridPinchStartColumns ?? viewModel.gridColumnCount
+                if gridPinchStartColumns == nil {
+                    gridPinchStartColumns = start
+                }
+                let proposed = Int((Double(start) / Double(value)).rounded())
+                viewModel.gridColumnCount = min(max(proposed, 2), 6)
+            }
+            .onEnded { value in
+                guard viewModel.assetHistoryViewMode == .grid else { return }
+                let start = gridPinchStartColumns ?? viewModel.gridColumnCount
+                let proposed = Int((Double(start) / Double(value)).rounded())
+                viewModel.gridColumnCount = min(max(proposed, 2), 6)
+                gridPinchStartColumns = nil
+            }
     }
 
     private var historyFloatingControls: some View {
@@ -359,6 +411,105 @@ struct DashboardView: View {
         .buttonStyle(.plain)
         .onHover { isHovering in
             hoveredHistoryControlID = isHovering ? id : (hoveredHistoryControlID == id ? nil : hoveredHistoryControlID)
+        }
+    }
+
+    private func historyTimelineScrubber(
+        sections: [AssetHistorySection],
+        height: CGFloat,
+        scrollProxy: ScrollViewProxy
+    ) -> some View {
+        let scrubberHeight = max(min(height - 156, 420), 180)
+
+        return Group {
+            if sections.count > 1 {
+                HStack(spacing: 10) {
+                    if let scrubberActiveSectionTitle {
+                        Text(scrubberActiveSectionTitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .shadow(color: .black.opacity(0.1), radius: 10, y: 5)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
+
+                    GeometryReader { scrubberProxy in
+                        let scrubberSize = scrubberProxy.size
+                        let markers = markerIndices(for: sections.count)
+
+                        ZStack(alignment: .top) {
+                            Capsule()
+                                .fill(.ultraThinMaterial)
+                                .overlay {
+                                    Capsule()
+                                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                                }
+
+                            VStack(spacing: 0) {
+                                ForEach(markers, id: \.self) { markerIndex in
+                                    Circle()
+                                        .fill(scrubberActiveSectionID == sections[markerIndex].id ? Color.accentColor : Color.secondary.opacity(0.45))
+                                        .frame(width: scrubberActiveSectionID == sections[markerIndex].id ? 7 : 5, height: scrubberActiveSectionID == sections[markerIndex].id ? 7 : 5)
+                                        .frame(maxHeight: .infinity)
+                                }
+                            }
+                            .padding(.vertical, 10)
+                        }
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    scrubberJump(
+                                        locationY: value.location.y,
+                                        trackHeight: scrubberSize.height,
+                                        sections: sections,
+                                        scrollProxy: scrollProxy
+                                    )
+                                }
+                                .onEnded { _ in
+                                    withAnimation(.easeOut(duration: 0.18)) {
+                                        scrubberActiveSectionTitle = nil
+                                    }
+                                }
+                        )
+                    }
+                    .frame(width: 18, height: scrubberHeight)
+                }
+                .animation(.easeOut(duration: 0.16), value: scrubberActiveSectionTitle)
+            }
+        }
+    }
+
+    private func scrubberJump(
+        locationY: CGFloat,
+        trackHeight: CGFloat,
+        sections: [AssetHistorySection],
+        scrollProxy: ScrollViewProxy
+    ) {
+        guard !sections.isEmpty else { return }
+        let clampedY = min(max(locationY, 0), max(trackHeight, 1))
+        let progress = clampedY / max(trackHeight, 1)
+        let rawIndex = Int((progress * CGFloat(max(sections.count - 1, 0))).rounded())
+        let section = sections[min(max(rawIndex, 0), sections.count - 1)]
+
+        guard scrubberActiveSectionID != section.id else { return }
+
+        scrubberActiveSectionID = section.id
+        scrubberActiveSectionTitle = section.title
+        withAnimation(.easeOut(duration: 0.12)) {
+            scrollProxy.scrollTo(section.id, anchor: .top)
+        }
+    }
+
+    private func markerIndices(for sectionCount: Int) -> [Int] {
+        guard sectionCount > 0 else { return [] }
+        let markerCount = min(sectionCount, 9)
+        guard markerCount > 1 else { return [0] }
+
+        return (0..<markerCount).map { step in
+            Int((Double(step) / Double(markerCount - 1) * Double(sectionCount - 1)).rounded())
         }
     }
 
@@ -1004,10 +1155,10 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
             mediaType: mediaType,
             size: size,
             scale: displayScale
-        ), let generatedImage = NSImage(data: thumbnailData) {
+        ) {
             await MainActor.run {
                 if image == nil {
-                    image = generatedImage
+                    image = NSImage(data: thumbnailData)
                 }
             }
         }
