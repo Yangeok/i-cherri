@@ -5,6 +5,7 @@ import QuickLookThumbnailing
 import AVFoundation
 import CryptoKit
 import ImageIO
+import UniformTypeIdentifiers
 import ICherriDesignSystem
 import ICherriProtocol
 import Inject
@@ -1026,14 +1027,16 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
 
         do {
             let thumbnail = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
-            let croppedImage = squareCroppedImage(from: thumbnail.nsImage, size: size) ?? thumbnail.nsImage
+            guard let croppedImage = squareCroppedImage(from: thumbnail.nsImage, size: size) else {
+                return nil
+            }
             return jpegData(from: croppedImage)
         } catch {
             return nil
         }
     }
 
-    private static func loadDirectThumbnail(fileURL: URL, mediaType: String, size: CGFloat) -> NSImage? {
+    private static func loadDirectThumbnail(fileURL: URL, mediaType: String, size: CGFloat) -> CGImage? {
         if mediaType.lowercased() == "video" {
             let asset = AVURLAsset(url: fileURL)
             let generator = AVAssetImageGenerator(asset: asset)
@@ -1062,7 +1065,7 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         return squareCroppedImage(from: cgImage, size: size)
     }
 
-    private static func squareCroppedImage(from nsImage: NSImage, size: CGFloat) -> NSImage? {
+    private static func squareCroppedImage(from nsImage: NSImage, size: CGFloat) -> CGImage? {
         var proposedRect = CGRect(origin: .zero, size: nsImage.size)
         guard let cgImage = nsImage.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil) else {
             return nil
@@ -1070,7 +1073,7 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         return squareCroppedImage(from: cgImage, size: size)
     }
 
-    private static func squareCroppedImage(from cgImage: CGImage, size: CGFloat) -> NSImage {
+    private static func squareCroppedImage(from cgImage: CGImage, size: CGFloat) -> CGImage {
         let sideLength = min(cgImage.width, cgImage.height)
         let cropRect = CGRect(
             x: (cgImage.width - sideLength) / 2,
@@ -1079,24 +1082,60 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
             height: sideLength
         )
         let croppedImage = cgImage.cropping(to: cropRect) ?? cgImage
-        return NSImage(cgImage: croppedImage, size: CGSize(width: size, height: size))
+        return resizedRGBImage(from: croppedImage, size: Int(size * 2)) ?? croppedImage
     }
 
-    private static func jpegData(from image: NSImage) -> Data? {
-        guard let tiffData = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData) else {
+    private static func resizedRGBImage(from cgImage: CGImage, size: Int) -> CGImage? {
+        let clampedSize = max(size, 1)
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpace(name: CGColorSpace.displayP3) else {
             return nil
         }
 
-        return bitmap.representation(
-            using: .jpeg,
-            properties: [.compressionFactor: 0.82]
-        )
+        guard let context = CGContext(
+            data: nil,
+            width: clampedSize,
+            height: clampedSize,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: clampedSize, height: clampedSize))
+        return context.makeImage()
+    }
+
+    private static func jpegData(from cgImage: CGImage) -> Data? {
+        let outputImage = resizedRGBImage(from: cgImage, size: cgImage.width) ?? cgImage
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        let properties: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: 0.82
+        ]
+        CGImageDestinationAddImage(destination, outputImage, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            return nil
+        }
+
+        return data as Data
     }
 }
 
 actor AssetHistoryThumbnailCache {
     static let shared = AssetHistoryThumbnailCache()
+
+    private static let cacheVersion = "v2"
 
     private let memoryCache = NSCache<NSString, NSData>()
     private let fileManager = FileManager.default
@@ -1170,7 +1209,7 @@ actor AssetHistoryThumbnailCache {
     private func cacheKey(for fileURL: URL, size: CGFloat) -> String? {
         let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path)
         let modificationDate = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let rawKey = "\(fileURL.path)|\(Int(size.rounded()))|\(modificationDate)"
+        let rawKey = "\(Self.cacheVersion)|\(fileURL.path)|\(Int(size.rounded()))|\(modificationDate)"
         let digest = SHA256.hash(data: Data(rawKey.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
