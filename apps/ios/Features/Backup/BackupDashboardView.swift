@@ -439,6 +439,18 @@ final class BackupDashboardViewModel: ObservableObject {
         let device = currentDeviceInfo()
         let progressViewModel = BackupProgressViewModel(totalCount: 0)
         progressViewModel.setPhase(.scanning)
+        progressViewModel.onRetryFailedUploads = { [weak self] assetIDs in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.retryFailedUploads(assetIDs: assetIDs)
+            }
+        }
+        progressViewModel.onRetryUpload = { [weak self] assetLocalID in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.retryFailedUploads(assetIDs: [assetLocalID])
+            }
+        }
         progressViewModel.update(
             filename: "Scanning photo library...",
             completed: 0,
@@ -550,7 +562,8 @@ final class BackupDashboardViewModel: ObservableObject {
                     FailedUploadProgressItem(
                         id: "unsupported-\(assetLocalID)",
                         filename: assetIndex[assetLocalID]?.originalFilename ?? assetLocalID,
-                        reason: "Unsupported media type."
+                        reason: "Unsupported media type.",
+                        retryAssetLocalID: nil
                     )
                 }
 
@@ -562,7 +575,8 @@ final class BackupDashboardViewModel: ObservableObject {
                             FailedUploadProgressItem(
                                 id: requirement.assetLocalID,
                                 filename: requirement.assetLocalID,
-                                reason: "Asset metadata could not be resolved before upload."
+                                reason: "Asset metadata could not be resolved before upload.",
+                                retryAssetLocalID: requirement.assetLocalID
                             )
                         )
                         continue
@@ -721,6 +735,17 @@ final class BackupDashboardViewModel: ObservableObject {
 
     func dismissBackupProgress() {
         activeBackupProgressViewModel = nil
+    }
+
+    func retryFailedUploads(assetIDs: [String]) async {
+        let retryableIDs = Array(Set(assetIDs))
+        guard !retryableIDs.isEmpty else { return }
+        guard !isBackingUp else { return }
+
+        scanIndexStore.markRetryRequired(assetIDs: retryableIDs)
+        activeBackupProgressViewModel = nil
+        backupStatusMessage = "Retrying failed uploads..."
+        await startBackup()
     }
 
     private func updateBackupCoverage(backedUpCount: Int, totalCount: Int) {
@@ -985,7 +1010,8 @@ private final class BackupUploadProgressCoordinator {
             FailedUploadProgressItem(
                 id: assetLocalID,
                 filename: filename,
-                reason: reason
+                reason: reason,
+                retryAssetLocalID: assetLocalID
             )
         )
         failedUploads.sort { $0.filename.localizedStandardCompare($1.filename) == .orderedAscending }

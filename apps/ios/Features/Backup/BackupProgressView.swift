@@ -169,6 +169,13 @@ public struct BackupProgressView: View {
                 Text("Failed Uploads")
                     .font(.headline)
                 Spacer()
+                if viewModel.canRetryFailedUploads {
+                    Button("Retry Failed") {
+                        viewModel.retryFailedUploads()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+                }
                 Text("\(viewModel.failedUploads.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -176,10 +183,20 @@ public struct BackupProgressView: View {
 
             ForEach(viewModel.failedUploads) { failedUpload in
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(failedUpload.filename)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(failedUpload.filename)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        if failedUpload.isRetryable {
+                            Button("Retry") {
+                                viewModel.retryUpload(failedUpload)
+                            }
+                            .font(.caption.weight(.semibold))
+                            .buttonStyle(.bordered)
+                        }
+                    }
                     Text(failedUpload.reason)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -240,6 +257,9 @@ public final class BackupProgressViewModel: ObservableObject {
     @Published public var isComplete: Bool = false
     @Published public var errorMessage: String?
     @Published public var phase: BackupProgressPhase = .scanning
+
+    public var onRetryFailedUploads: (([String]) -> Void)?
+    public var onRetryUpload: ((String) -> Void)?
 
     private var sentBytes: Int64 = 0
     private var totalBytes: Int64 = 0
@@ -345,6 +365,10 @@ public final class BackupProgressViewModel: ObservableObject {
         successCount
     }
 
+    public var canRetryFailedUploads: Bool {
+        failedUploads.contains(where: \.isRetryable)
+    }
+
     public var headerTitle: String {
         if errorMessage != nil { return "Backup Failed" }
         if isComplete { return "Backup Complete" }
@@ -415,6 +439,17 @@ public final class BackupProgressViewModel: ObservableObject {
 
     public func cancel() {
         cancellationToken?.cancel()
+    }
+
+    public func retryFailedUploads() {
+        let assetIDs = failedUploads.compactMap(\.retryAssetLocalID)
+        guard !assetIDs.isEmpty else { return }
+        onRetryFailedUploads?(assetIDs)
+    }
+
+    public func retryUpload(_ failedUpload: FailedUploadProgressItem) {
+        guard let assetLocalID = failedUpload.retryAssetLocalID else { return }
+        onRetryUpload?(assetLocalID)
     }
 
     private func formatSpeed(_ bps: Double) -> String {
@@ -491,6 +526,11 @@ public struct FailedUploadProgressItem: Identifiable, Equatable {
     public let id: String
     public let filename: String
     public let reason: String
+    public let retryAssetLocalID: String?
+
+    public var isRetryable: Bool {
+        retryAssetLocalID != nil
+    }
 }
 
 private struct ActiveUploadThumbnailView: View {
