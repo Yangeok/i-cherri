@@ -920,7 +920,7 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
 
         do {
             let thumbnail = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
-            image = thumbnail.nsImage
+            image = squareCroppedImage(from: thumbnail.nsImage) ?? thumbnail.nsImage
         } catch {
             image = nil
         }
@@ -935,7 +935,7 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
 
             do {
                 let frame = try generator.copyCGImage(at: .zero, actualTime: nil)
-                return NSImage(cgImage: frame, size: CGSize(width: size, height: size))
+                return squareCroppedImage(from: frame)
             } catch {
                 return nil
             }
@@ -952,7 +952,27 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
             return nil
         }
 
-        return NSImage(cgImage: cgImage, size: CGSize(width: size, height: size))
+        return squareCroppedImage(from: cgImage)
+    }
+
+    private func squareCroppedImage(from nsImage: NSImage) -> NSImage? {
+        var proposedRect = CGRect(origin: .zero, size: nsImage.size)
+        guard let cgImage = nsImage.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil) else {
+            return nil
+        }
+        return squareCroppedImage(from: cgImage)
+    }
+
+    private func squareCroppedImage(from cgImage: CGImage) -> NSImage {
+        let sideLength = min(cgImage.width, cgImage.height)
+        let cropRect = CGRect(
+            x: (cgImage.width - sideLength) / 2,
+            y: (cgImage.height - sideLength) / 2,
+            width: sideLength,
+            height: sideLength
+        )
+        let croppedImage = cgImage.cropping(to: cropRect) ?? cgImage
+        return NSImage(cgImage: croppedImage, size: CGSize(width: size, height: size))
     }
 }
 
