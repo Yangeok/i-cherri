@@ -817,6 +817,8 @@ private struct AssetHistoryInteractionModifier: ViewModifier {
 @MainActor
 final class DashboardViewModel: ObservableObject {
     private static let assetPageSize = 200
+    private static let retainedPageRadius = 2
+    private static let assetPageLoadThreshold = 30
 
     @Published var pairedDevices: [PairedDeviceRecord] = []
     @Published var activeUploads: [DashboardActiveUpload] = []
@@ -839,7 +841,8 @@ final class DashboardViewModel: ObservableObject {
     @Published var assetHistoryMediaFilter: AssetHistoryMediaFilter = .all
     @Published var gridColumnCount: Int = 4
 
-    private var assetPageOffset = 0
+    private var filteredAssets: [BackupAssetRecord] = []
+    private var visibleAssetWindowRange: Range<Int> = 0..<0
     private var lastThumbnailBackfillSignature: String?
 
     var selectedDeviceInfo: PairedDeviceRecord? {
@@ -896,55 +899,52 @@ final class DashboardViewModel: ObservableObject {
             visibleAssetSections = []
             scrubberSections = []
             hasMoreVisibleAssets = false
-            assetPageOffset = 0
+            filteredAssets = []
+            visibleAssetWindowRange = 0..<0
             lastThumbnailBackfillSignature = nil
             return
         }
-        guard !isLoadingAssetPage else { return }
 
-        do {
-            isLoadingAssetPage = true
-            defer { isLoadingAssetPage = false }
+        isLoadingAssetPage = true
+        defer { isLoadingAssetPage = false }
 
-            let offset = reset ? 0 : assetPageOffset
-            let page = try await DatabaseManager.shared.fetchAssets(
-                deviceId: deviceId,
-                searchQuery: assetSearchQuery,
-                status: nil,
-                mediaType: assetHistoryMediaFilter.databaseValue,
-                limit: Self.assetPageSize,
-                offset: offset
-            )
-
-            if reset {
-                visibleAssets = page
-                visibleAssetSections = Self.buildSections(from: page, mode: assetHistoryTimeGroupingMode)
-                rebuildScrubberSections()
-                scheduleThumbnailBackfillIfNeeded(for: deviceId)
-            } else {
-                let startIndex = visibleAssets.count
-                visibleAssets.append(contentsOf: page)
-                appendSections(for: page, startingAt: startIndex)
-            }
-
-            assetPageOffset = offset + page.count
-            hasMoreVisibleAssets = page.count == Self.assetPageSize
-        } catch {
-            isLoadingAssetPage = false
-            print("[DashboardViewModel] Asset page load failed: \(error)")
+        if reset {
+            filteredAssets = matchingAssetsForSelectedDevice()
+            visibleAssetWindowRange = 0..<0
+            rebuildScrubberSections()
+            scheduleThumbnailBackfillIfNeeded(for: deviceId)
         }
+
+        updateVisibleAssetWindow(anchorIndex: reset ? 0 : visibleAssetWindowRange.lowerBound)
     }
 
     func loadMoreIfNeeded(currentIndex: Int) async {
-        guard hasMoreVisibleAssets else { return }
-        guard currentIndex >= visibleAssets.count - 30 else { return }
-        await loadSelectedDeviceAssets(reset: false)
+        guard !filteredAssets.isEmpty else { return }
+        guard !visibleAssetWindowRange.isEmpty else { return }
+
+        let shouldLoadNext = AssetHistoryWindowPlanner.shouldLoadNext(
+            currentIndex: currentIndex,
+            lastVisibleIndex: visibleAssetWindowRange.upperBound - 1,
+            threshold: Self.assetPageLoadThreshold
+        )
+        let shouldLoadPrevious = AssetHistoryWindowPlanner.shouldLoadPrevious(
+            currentIndex: currentIndex,
+            firstVisibleIndex: visibleAssetWindowRange.lowerBound,
+            threshold: Self.assetPageLoadThreshold
+        )
+
+        guard shouldLoadNext || shouldLoadPrevious else { return }
+        updateVisibleAssetWindow(anchorIndex: currentIndex)
     }
 
     func prefetchVisibleAssetNeighborhood(around index: Int, size: CGFloat) async {
         guard !visibleAssets.isEmpty else { return }
-        let lowerBound = max(0, index - 12)
-        let upperBound = min(visibleAssets.count - 1, index + 24)
+
+        let localIndex = index - visibleAssetWindowRange.lowerBound
+        guard visibleAssets.indices.contains(localIndex) else { return }
+
+        let lowerBound = max(0, localIndex - 12)
+        let upperBound = min(visibleAssets.count - 1, localIndex + 24)
         let assetsToWarm = Array(visibleAssets[lowerBound...upperBound])
         await AssetHistoryThumbnailPrefetcher.prefetch(assets: assetsToWarm, size: size)
     }
@@ -980,11 +980,19 @@ final class DashboardViewModel: ObservableObject {
     }
 
     private func rebuildVisibleAssetSections() {
-        visibleAssetSections = Self.buildSections(from: visibleAssets, mode: assetHistoryTimeGroupingMode)
+        visibleAssetSections = Self.buildSections(
+            from: visibleAssets,
+            mode: assetHistoryTimeGroupingMode,
+            baseIndex: visibleAssetWindowRange.lowerBound
+        )
     }
 
     private func rebuildScrubberSections() {
-        scrubberSections = Self.buildSections(from: matchingAssetsForSelectedDevice(), mode: assetHistoryTimeGroupingMode)
+        scrubberSections = Self.buildSections(
+            from: filteredAssets,
+            mode: assetHistoryTimeGroupingMode,
+            baseIndex: 0
+        )
     }
 
     private func scheduleThumbnailBackfillIfNeeded(for deviceId: String) {
@@ -993,7 +1001,7 @@ final class DashboardViewModel: ObservableObject {
         guard signature != lastThumbnailBackfillSignature else { return }
 
         lastThumbnailBackfillSignature = signature
-        let assetsToBackfill = matchingAssetsForSelectedDevice()
+        let assetsToBackfill = filteredAssets
         Task.detached(priority: .utility) {
             await AssetHistoryThumbnailPrefetcher.backfill(assets: assetsToBackfill)
         }
@@ -1027,32 +1035,51 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func ensureSectionVisible(_ sectionID: String) async {
-        guard scrubberSections.contains(where: { $0.id == sectionID }) else { return }
-
-        while !visibleAssetSections.contains(where: { $0.id == sectionID }) && hasMoreVisibleAssets {
-            await loadSelectedDeviceAssets(reset: false)
-        }
-    }
-
-    private func appendSections(for page: [BackupAssetRecord], startingAt startIndex: Int) {
-        guard !page.isEmpty else { return }
-
-        var sections = visibleAssetSections
-        for (offset, asset) in page.enumerated() {
-            let entry = AssetHistoryEntry(index: startIndex + offset, asset: asset)
-            let key = Self.sectionKey(for: asset, mode: assetHistoryTimeGroupingMode)
-
-            if !sections.isEmpty, sections[sections.count - 1].id == key.id {
-                sections[sections.count - 1].entries.append(entry)
-            } else {
-                sections.append(AssetHistorySection(id: key.id, title: key.title, entries: [entry]))
-            }
+        guard let targetSection = scrubberSections.first(where: { $0.id == sectionID }),
+              let targetIndex = targetSection.entries.first?.index else {
+            return
         }
 
-        visibleAssetSections = sections
+        updateVisibleAssetWindow(anchorIndex: targetIndex)
     }
 
-    private static func buildSections(from assets: [BackupAssetRecord], mode: AssetHistoryTimeGroupingMode) -> [AssetHistorySection] {
+    private func updateVisibleAssetWindow(anchorIndex: Int) {
+        guard !filteredAssets.isEmpty else {
+            visibleAssetWindowRange = 0..<0
+            visibleAssets = []
+            visibleAssetSections = []
+            hasMoreVisibleAssets = false
+            return
+        }
+
+        let lastPage = max(0, (filteredAssets.count - 1) / Self.assetPageSize)
+        let clampedAnchor = min(max(0, anchorIndex), filteredAssets.count - 1)
+        let anchorPage = clampedAnchor / Self.assetPageSize
+        let pageRange = AssetHistoryWindowPlanner.pageRange(
+            centeringOn: anchorPage,
+            lastPage: lastPage,
+            radius: Self.retainedPageRadius
+        )
+        let lowerBound = pageRange.lowerBound * Self.assetPageSize
+        let upperBound = min(filteredAssets.count, (pageRange.upperBound + 1) * Self.assetPageSize)
+        let nextRange = lowerBound..<upperBound
+
+        guard nextRange != visibleAssetWindowRange else {
+            hasMoreVisibleAssets = upperBound < filteredAssets.count
+            return
+        }
+
+        visibleAssetWindowRange = nextRange
+        visibleAssets = Array(filteredAssets[nextRange])
+        rebuildVisibleAssetSections()
+        hasMoreVisibleAssets = upperBound < filteredAssets.count
+    }
+
+    private static func buildSections(
+        from assets: [BackupAssetRecord],
+        mode: AssetHistoryTimeGroupingMode,
+        baseIndex: Int
+    ) -> [AssetHistorySection] {
         guard !assets.isEmpty else { return [] }
 
         var sections: [AssetHistorySection] = []
@@ -1060,7 +1087,7 @@ final class DashboardViewModel: ObservableObject {
 
         for (index, asset) in assets.enumerated() {
             let key = sectionKey(for: asset, mode: mode)
-            let entry = AssetHistoryEntry(index: index, asset: asset)
+            let entry = AssetHistoryEntry(index: baseIndex + index, asset: asset)
 
             if !sections.isEmpty, sections[sections.count - 1].id == key.id {
                 sections[sections.count - 1].entries.append(entry)
@@ -1701,6 +1728,27 @@ private struct AssetHistorySection: Identifiable {
 private struct AssetHistorySectionKey: Hashable {
     let id: String
     let title: String
+}
+
+struct AssetHistoryWindowPlanner {
+    static func pageRange(centeringOn currentPage: Int, lastPage: Int, radius: Int) -> ClosedRange<Int> {
+        guard lastPage > 0 else { return 0...0 }
+
+        let clampedPage = min(max(0, currentPage), lastPage)
+        let maxWindowPageCount = max(1, radius * 2 + 1)
+        let earliestLowerBound = max(0, lastPage - (maxWindowPageCount - 1))
+        let lowerBound = min(max(0, clampedPage - radius), earliestLowerBound)
+        let upperBound = min(lastPage, lowerBound + maxWindowPageCount - 1)
+        return lowerBound...upperBound
+    }
+
+    static func shouldLoadNext(currentIndex: Int, lastVisibleIndex: Int, threshold: Int) -> Bool {
+        currentIndex >= (lastVisibleIndex - threshold)
+    }
+
+    static func shouldLoadPrevious(currentIndex: Int, firstVisibleIndex: Int, threshold: Int) -> Bool {
+        currentIndex <= (firstVisibleIndex + threshold)
+    }
 }
 
 struct DashboardActiveUpload: Identifiable {
