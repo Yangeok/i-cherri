@@ -6,6 +6,7 @@ import AVFoundation
 import CryptoKit
 import ImageIO
 import UniformTypeIdentifiers
+import Darwin
 import ICherriDesignSystem
 import ICherriProtocol
 import Inject
@@ -996,6 +997,12 @@ final class DashboardViewModel: ObservableObject {
     }
 
     private func scheduleThumbnailBackfillIfNeeded(for deviceId: String) {
+        let workloadProfile = AssetHistoryThumbnailWorkloadProfile.current()
+        guard workloadProfile.allowsBackgroundBackfill else {
+            lastThumbnailBackfillSignature = nil
+            return
+        }
+
         let trimmedQuery = assetSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let signature = "\(deviceId)|\(assetHistoryMediaFilter.rawValue)|\(trimmedQuery)"
         guard signature != lastThumbnailBackfillSignature else { return }
@@ -1300,7 +1307,9 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
             let asset = AVURLAsset(url: fileURL)
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
-            generator.maximumSize = CGSize(width: size * 2, height: size * 2)
+            let workloadProfile = AssetHistoryThumbnailWorkloadProfile.current()
+            let targetSize = min(size, workloadProfile.maxVideoPixelSize)
+            generator.maximumSize = CGSize(width: targetSize * 2, height: targetSize * 2)
 
             do {
                 let frame = try generator.copyCGImage(at: .zero, actualTime: nil)
@@ -1389,6 +1398,102 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
 
         return data as Data
     }
+}
+
+private enum AssetHistoryThumbnailWorkloadKind {
+    case committedPrewarm
+    case backgroundBackfill
+    case neighborhoodPrefetch
+}
+
+private struct AssetHistoryThumbnailWorkloadProfile {
+    let allowsBackgroundBackfill: Bool
+    let maxConcurrentPhotoPrefetches: Int
+    let maxConcurrentVideoPrefetches: Int
+    let maxVideoPixelSize: CGFloat
+    let committedPhotoSizes: [CGFloat]
+    let committedVideoSizes: [CGFloat]
+    let backfillPhotoSizes: [CGFloat]
+    let backfillVideoSizes: [CGFloat]
+
+    static func current() -> AssetHistoryThumbnailWorkloadProfile {
+        let processInfo = ProcessInfo.processInfo
+        let lowSpecHardware = !HardwareCapabilities.isAppleSilicon
+        let constrainedPower = processInfo.isLowPowerModeEnabled
+        let constrainedThermals = processInfo.thermalState == .serious || processInfo.thermalState == .critical
+
+        if lowSpecHardware || constrainedPower || constrainedThermals {
+            return AssetHistoryThumbnailWorkloadProfile(
+                allowsBackgroundBackfill: false,
+                maxConcurrentPhotoPrefetches: 1,
+                maxConcurrentVideoPrefetches: 1,
+                maxVideoPixelSize: 96,
+                committedPhotoSizes: [48, 96, 160],
+                committedVideoSizes: [48, 96],
+                backfillPhotoSizes: [48, 96],
+                backfillVideoSizes: []
+            )
+        }
+
+        return AssetHistoryThumbnailWorkloadProfile(
+            allowsBackgroundBackfill: true,
+            maxConcurrentPhotoPrefetches: 2,
+            maxConcurrentVideoPrefetches: 1,
+            maxVideoPixelSize: 160,
+            committedPhotoSizes: [48, 96, 160, 240],
+            committedVideoSizes: [48, 96, 160],
+            backfillPhotoSizes: [48, 160, 240],
+            backfillVideoSizes: [48, 96]
+        )
+    }
+
+    func sizes(for mediaType: String, workload: AssetHistoryThumbnailWorkloadKind, requestedSizes: [CGFloat]) -> [CGFloat] {
+        let normalizedMediaType = mediaType.lowercased()
+
+        if normalizedMediaType == "video" {
+            let configuredSizes: [CGFloat]
+            switch workload {
+            case .committedPrewarm:
+                configuredSizes = committedVideoSizes
+            case .backgroundBackfill:
+                configuredSizes = backfillVideoSizes
+            case .neighborhoodPrefetch:
+                configuredSizes = requestedSizes.map { min($0, maxVideoPixelSize) }
+            }
+
+            return normalizedSizes(configuredSizes)
+        }
+
+        let configuredSizes: [CGFloat]
+        switch workload {
+        case .committedPrewarm:
+            configuredSizes = committedPhotoSizes
+        case .backgroundBackfill:
+            configuredSizes = backfillPhotoSizes
+        case .neighborhoodPrefetch:
+            configuredSizes = requestedSizes
+        }
+
+        return normalizedSizes(configuredSizes)
+    }
+
+    private func normalizedSizes(_ sizes: [CGFloat]) -> [CGFloat] {
+        var seen = Set<Int>()
+        return sizes.compactMap { size in
+            let rounded = max(Int(size.rounded()), 1)
+            guard seen.insert(rounded).inserted else { return nil }
+            return CGFloat(rounded)
+        }
+    }
+}
+
+private enum HardwareCapabilities {
+    static let isAppleSilicon: Bool = {
+        var value: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        let result = sysctlbyname("hw.optional.arm64", &value, &size, nil, 0)
+        return result == 0 && value == 1
+    }()
 }
 
 actor AssetHistoryThumbnailCache {
@@ -1493,22 +1598,24 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
         let path: String
         let mediaType: String
         let size: Int
+        let workload: AssetHistoryThumbnailWorkloadKind
     }
 
-    private let maxConcurrentPrefetches = 2
     private var queuedRequests: [Request] = []
     private var queuedRequestSet: Set<Request> = []
-    private var activeWorkerCount = 0
+    private var activePhotoWorkerCount = 0
+    private var activeVideoWorkerCount = 0
 
-    func enqueue(relativePath: String, mediaType: String, sizes: [CGFloat]) async {
+    fileprivate func enqueue(relativePath: String, mediaType: String, workload: AssetHistoryThumbnailWorkloadKind, sizes: [CGFloat]) async {
         guard let fileURL = await AssetHistoryThumbnailPrefetcher.resolvedFileURL(for: relativePath) else { return }
-        enqueue(fileURL: fileURL, mediaType: mediaType, sizes: sizes)
+        enqueue(fileURL: fileURL, mediaType: mediaType, workload: workload, sizes: sizes)
     }
 
-    func enqueue(assets: [BackupAssetRecord], sizes: [CGFloat]) async {
+    fileprivate func enqueue(assets: [BackupAssetRecord], workload: AssetHistoryThumbnailWorkloadKind, sizes: [CGFloat]) async {
         guard !assets.isEmpty else { return }
 
         let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
+        let profile = AssetHistoryThumbnailWorkloadProfile.current()
         var requests: [Request] = []
         requests.reserveCapacity(assets.count * sizes.count)
 
@@ -1520,12 +1627,13 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
                 continue
             }
 
-            for size in sizes {
+            for size in profile.sizes(for: asset.mediaType, workload: workload, requestedSizes: sizes) {
                 requests.append(
                     Request(
                         path: resolvedPath,
                         mediaType: asset.mediaType,
-                        size: max(Int(size.rounded()), 1)
+                        size: max(Int(size.rounded()), 1),
+                        workload: workload
                     )
                 )
             }
@@ -1534,12 +1642,14 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
         enqueue(requests)
     }
 
-    private func enqueue(fileURL: URL, mediaType: String, sizes: [CGFloat]) {
-        let requests = sizes.map {
+    private func enqueue(fileURL: URL, mediaType: String, workload: AssetHistoryThumbnailWorkloadKind, sizes: [CGFloat]) {
+        let profile = AssetHistoryThumbnailWorkloadProfile.current()
+        let requests = profile.sizes(for: mediaType, workload: workload, requestedSizes: sizes).map {
             Request(
                 path: fileURL.path,
                 mediaType: mediaType,
-                size: max(Int($0.rounded()), 1)
+                size: max(Int($0.rounded()), 1),
+                workload: workload
             )
         }
         enqueue(requests)
@@ -1557,58 +1667,77 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
     }
 
     private func spawnWorkersIfNeeded() {
-        while activeWorkerCount < maxConcurrentPrefetches && !queuedRequests.isEmpty {
-            activeWorkerCount += 1
+        while let request = reserveNextRequest() {
             Task.detached(priority: .utility) {
-                await self.workerLoop()
+                await AssetHistoryThumbnailPrefetcher.prefetch(
+                    fileURL: URL(fileURLWithPath: request.path),
+                    mediaType: request.mediaType,
+                    size: CGFloat(request.size)
+                )
+                await self.complete(request)
             }
         }
     }
 
-    private func workerLoop() async {
-        while let request = dequeueNextRequest() {
-            await AssetHistoryThumbnailPrefetcher.prefetch(
-                fileURL: URL(fileURLWithPath: request.path),
-                mediaType: request.mediaType,
-                size: CGFloat(request.size)
-            )
+    private func reserveNextRequest() -> Request? {
+        guard !queuedRequests.isEmpty else { return nil }
+
+        let profile = AssetHistoryThumbnailWorkloadProfile.current()
+
+        for (index, request) in queuedRequests.enumerated() {
+            let isVideo = request.mediaType.caseInsensitiveCompare("video") == .orderedSame
+            if isVideo {
+                guard activeVideoWorkerCount < profile.maxConcurrentVideoPrefetches else { continue }
+                activeVideoWorkerCount += 1
+            } else {
+                guard activePhotoWorkerCount < profile.maxConcurrentPhotoPrefetches else { continue }
+                activePhotoWorkerCount += 1
+            }
+
+            queuedRequests.remove(at: index)
+            queuedRequestSet.remove(request)
+            return request
         }
+
+        return nil
     }
 
-    private func dequeueNextRequest() -> Request? {
-        guard !queuedRequests.isEmpty else {
-            activeWorkerCount = max(0, activeWorkerCount - 1)
-            return nil
+    private func complete(_ request: Request) {
+        if request.mediaType.caseInsensitiveCompare("video") == .orderedSame {
+            activeVideoWorkerCount = max(0, activeVideoWorkerCount - 1)
+        } else {
+            activePhotoWorkerCount = max(0, activePhotoWorkerCount - 1)
         }
 
-        let request = queuedRequests.removeFirst()
-        queuedRequestSet.remove(request)
-        return request
+        spawnWorkersIfNeeded()
     }
 }
 
 enum AssetHistoryThumbnailPrefetcher {
-    static let committedAssetSizes: [CGFloat] = [48, 96, 160, 240]
-    static let backgroundBackfillSizes: [CGFloat] = [48, 160, 240]
-
     static func prewarmCommittedAsset(relativePath: String, mediaType: String) async {
+        let profile = AssetHistoryThumbnailWorkloadProfile.current()
         await AssetHistoryThumbnailPrefetchCoordinator.shared.enqueue(
             relativePath: relativePath,
             mediaType: mediaType,
-            sizes: committedAssetSizes
+            workload: .committedPrewarm,
+            sizes: mediaType.caseInsensitiveCompare("video") == .orderedSame ? profile.committedVideoSizes : profile.committedPhotoSizes
         )
     }
 
     static func backfill(assets: [BackupAssetRecord]) async {
+        let profile = AssetHistoryThumbnailWorkloadProfile.current()
+        guard profile.allowsBackgroundBackfill else { return }
         await AssetHistoryThumbnailPrefetchCoordinator.shared.enqueue(
             assets: assets,
-            sizes: backgroundBackfillSizes
+            workload: .backgroundBackfill,
+            sizes: profile.backfillPhotoSizes + profile.backfillVideoSizes
         )
     }
 
     static func prefetch(assets: [BackupAssetRecord], size: CGFloat) async {
         await AssetHistoryThumbnailPrefetchCoordinator.shared.enqueue(
             assets: assets,
+            workload: .neighborhoodPrefetch,
             sizes: [size]
         )
     }
