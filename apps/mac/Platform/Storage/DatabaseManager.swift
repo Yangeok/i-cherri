@@ -512,7 +512,7 @@ actor DatabaseManager {
             }
 
             return try request
-                .order(sql: "COALESCE(completed_at, first_seen_at) DESC")
+                .order(sql: "creation_date DESC, COALESCE(completed_at, first_seen_at) DESC")
                 .limit(limit, offset: offset)
                 .fetchAll(db)
         }

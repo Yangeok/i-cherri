@@ -160,7 +160,6 @@ struct DashboardView: View {
                 compactStatChip(label: "Duplicates", value: viewModel.duplicateCount(for: device.deviceId), color: .orange)
                 compactStatChip(label: "Failed", value: viewModel.failedCount(for: device.deviceId), color: .red)
                 Spacer()
-                timeGroupingPicker
                 historyViewModePicker
             }
 
@@ -235,7 +234,12 @@ struct DashboardView: View {
             }
         }
         .padding(24)
+        .padding(.bottom, 72)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .bottom) {
+            timeGroupingBar
+                .padding(.bottom, 18)
+        }
     }
 
     private var historyViewModePicker: some View {
@@ -264,26 +268,26 @@ struct DashboardView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    private var timeGroupingPicker: some View {
-        Menu {
+    private var timeGroupingBar: some View {
+        HStack(spacing: 4) {
             ForEach(AssetHistoryTimeGroupingMode.allCases) { mode in
                 Button {
                     viewModel.assetHistoryTimeGroupingMode = mode
                 } label: {
-                    if viewModel.assetHistoryTimeGroupingMode == mode {
-                        Label(mode.label, systemImage: "checkmark")
-                    } else {
-                        Text(mode.label)
-                    }
+                    Text(mode.label)
+                        .font(.caption.weight(.medium))
+                        .frame(minWidth: 56)
+                        .padding(.vertical, 8)
                 }
+                .buttonStyle(.plain)
+                .background(viewModel.assetHistoryTimeGroupingMode == mode ? Color.accentColor.opacity(0.16) : .clear)
+                .foregroundStyle(viewModel.assetHistoryTimeGroupingMode == mode ? Color.accentColor : Color.secondary)
+                .clipShape(Capsule())
             }
-        } label: {
-            Image(systemName: "calendar")
-                .frame(width: 28, height: 28)
         }
-        .menuStyle(.borderlessButton)
-        .padding(4)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
     }
 
     // MARK: - Toolbar
