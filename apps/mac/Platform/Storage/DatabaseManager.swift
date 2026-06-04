@@ -486,6 +486,7 @@ actor DatabaseManager {
         deviceId: String,
         searchQuery: String,
         status: String?,
+        mediaType: String?,
         limit: Int,
         offset: Int
     ) throws -> [BackupAssetRecord] {
@@ -495,6 +496,10 @@ actor DatabaseManager {
 
             if let status {
                 request = request.filter(Column("status") == status)
+            }
+
+            if let mediaType {
+                request = request.filter(Column("media_type") == mediaType)
             }
 
             let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)

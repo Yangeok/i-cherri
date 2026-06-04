@@ -179,6 +179,13 @@ struct DashboardView: View {
                 Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
             }
 
+            HStack(spacing: 8) {
+                ForEach(AssetHistoryMediaFilter.allCases) { filter in
+                    mediaFilterChip(filter)
+                }
+                Spacer()
+            }
+
             if viewModel.visibleAssets.isEmpty, !viewModel.isLoadingAssetPage {
                 emptyHistoryState
             } else {
@@ -348,6 +355,26 @@ struct DashboardView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(.thinMaterial, in: Capsule())
+    }
+
+    private func mediaFilterChip(_ filter: AssetHistoryMediaFilter) -> some View {
+        Button {
+            viewModel.assetHistoryMediaFilter = filter
+            Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
+        } label: {
+            Text(filter.label)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    viewModel.assetHistoryMediaFilter == filter
+                    ? Color.accentColor.opacity(0.16)
+                    : Color.secondary.opacity(0.10)
+                )
+                .foregroundStyle(viewModel.assetHistoryMediaFilter == filter ? Color.accentColor : Color.secondary)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private func assetHistoryRow(_ asset: BackupAssetRecord) -> some View {
@@ -623,6 +650,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var assetSearchQuery = ""
     @Published var assetHistoryViewMode: AssetHistoryViewMode = .list
     @Published var assetHistoryTimeGroupingMode: AssetHistoryTimeGroupingMode = .month
+    @Published var assetHistoryMediaFilter: AssetHistoryMediaFilter = .all
 
     private var assetPageOffset = 0
 
@@ -692,6 +720,7 @@ final class DashboardViewModel: ObservableObject {
                 deviceId: deviceId,
                 searchQuery: assetSearchQuery,
                 status: nil,
+                mediaType: assetHistoryMediaFilter.databaseValue,
                 limit: Self.assetPageSize,
                 offset: offset
             )
@@ -918,6 +947,36 @@ enum AssetHistoryTimeGroupingMode: String, CaseIterable, Identifiable {
             return "Month"
         case .day:
             return "Day"
+        }
+    }
+}
+
+enum AssetHistoryMediaFilter: String, CaseIterable, Identifiable {
+    case all
+    case photos
+    case videos
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all:
+            return "All"
+        case .photos:
+            return "Photos"
+        case .videos:
+            return "Videos"
+        }
+    }
+
+    var databaseValue: String? {
+        switch self {
+        case .all:
+            return nil
+        case .photos:
+            return "photo"
+        case .videos:
+            return "video"
         }
     }
 }
