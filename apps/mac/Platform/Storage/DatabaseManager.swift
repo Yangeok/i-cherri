@@ -522,7 +522,7 @@ actor DatabaseManager {
         try queue.read { db in
             try UploadSessionRecord
                 .filter(
-                    sql: "(status = ? OR (status = ? AND updated_at >= ?))",
+                    sql: "((status = ? OR status = ?) AND updated_at >= ?)",
                     arguments: ["receiving", "initialized", Date().addingTimeInterval(-120)]
                 )
                 .order(Column("updated_at").desc)

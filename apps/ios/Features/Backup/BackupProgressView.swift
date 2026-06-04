@@ -24,29 +24,29 @@ public struct BackupProgressView: View {
     public var body: some View {
         ZStack {
             backgroundGradient
-            VStack(spacing: 0) {
-                ScrollView {
-                    VStack(spacing: 24) {
-                        headerSection
-                        if let errorMessage = viewModel.errorMessage {
-                            errorSection(errorMessage)
-                        }
-                        progressSection
-                        statsSection
-                        if !viewModel.activeUploads.isEmpty {
-                            activeUploadsSection
-                        }
-                        if !viewModel.failedUploads.isEmpty {
-                            failedUploadsSection
-                        }
+            ScrollView {
+                VStack(spacing: 24) {
+                    headerSection
+                    if let errorMessage = viewModel.errorMessage {
+                        errorSection(errorMessage)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 32)
-                    .padding(.bottom, 24)
+                    progressSection
+                    statsSection
+                    if !viewModel.activeUploads.isEmpty {
+                        activeUploadsSection
+                    }
+                    if !viewModel.failedUploads.isEmpty {
+                        failedUploadsSection
+                    }
                 }
-                if viewModel.canCancel {
-                    cancelBar
-                }
+                .padding(.horizontal, 24)
+                .padding(.top, 32)
+                .padding(.bottom, viewModel.canCancel ? 120 : 32)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if viewModel.canCancel {
+                cancelBar
             }
         }
         .navigationBarBackButtonHidden(true)
@@ -270,6 +270,12 @@ public final class BackupProgressViewModel: ObservableObject {
 
     public func setPhase(_ phase: BackupProgressPhase) {
         self.phase = phase
+        switch phase {
+        case .complete, .failed:
+            isComplete = true
+        case .scanning, .checking, .uploading:
+            isComplete = false
+        }
     }
 
     public func update(
@@ -317,7 +323,11 @@ public final class BackupProgressViewModel: ObservableObject {
         progress = totalCount > 0 ? Double(completed) / Double(totalCount) : 0
         formattedSpeed = formatSpeed(bytesPerSecond)
         formattedTransfer = formatTransfer(sentBytes: self.sentBytes, totalBytes: self.totalBytes)
-        if completed >= totalCount { isComplete = true }
+        if totalCount > 0, completed >= totalCount {
+            isComplete = true
+        } else if phase != .failed {
+            isComplete = false
+        }
     }
 
     public func markRunFailed(_ message: String) {
