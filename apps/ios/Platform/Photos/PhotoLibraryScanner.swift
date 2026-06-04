@@ -22,10 +22,16 @@ public final class PhotoLibraryScanner {
         mapStatus(PHPhotoLibrary.authorizationStatus(for: .readWrite))
     }
 
+    public func totalAssetCount() -> Int {
+        let options = PHFetchOptions()
+        options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
+        return PHAsset.fetchAssets(with: options).count
+    }
+
     // Scans all media assets and returns AssetMetadata array. Targets >1000 assets/sec.
     public func scanAllAssets(deviceID: String) async -> [AssetMetadata] {
         let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
 
         let result = PHAsset.fetchAssets(with: options)
@@ -33,11 +39,32 @@ public final class PhotoLibraryScanner {
         assets.reserveCapacity(result.count)
 
         result.enumerateObjects { asset, _, _ in
-            guard let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) else { return }
-            assets.append(metadata)
+            autoreleasepool {
+                guard let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) else { return }
+                assets.append(metadata)
+            }
         }
 
         return assets
+    }
+
+    public func scanAssets(localIdentifiers: [String], deviceID: String) async -> [AssetMetadata] {
+        guard !localIdentifiers.isEmpty else { return [] }
+
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: localIdentifiers, options: nil)
+        var assets: [AssetMetadata] = []
+        assets.reserveCapacity(result.count)
+
+        result.enumerateObjects { asset, _, _ in
+            autoreleasepool {
+                guard let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) else { return }
+                assets.append(metadata)
+            }
+        }
+
+        return assets.sorted { lhs, rhs in
+            lhs.creationDate > rhs.creationDate
+        }
     }
 
     // Fetches raw file data for a given asset local identifier.

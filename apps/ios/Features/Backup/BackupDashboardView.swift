@@ -286,6 +286,7 @@ final class BackupDashboardViewModel: ObservableObject {
     @Published var backupCoverageProgress: Double?
 
     private let scanner = PhotoLibraryScanner()
+    private let scanIndexStore = PhotoLibraryScanIndexStore.shared
     private let bonjourBrowser = BonjourBrowser()
     private let trustTokenKey = "iCherriTrustToken"
     private let receiverURLKey = "iCherriReceiverURL"
@@ -308,6 +309,7 @@ final class BackupDashboardViewModel: ObservableObject {
     func onAppear() async {
         updatePhotoPermission()
         restorePairingState()
+        scanIndexStore.startObserving()
         bonjourBrowser.startBrowsing()
         // Observe browser changes
         Task { @MainActor in
@@ -457,6 +459,7 @@ final class BackupDashboardViewModel: ObservableObject {
         let storedReceiverURLString = UserDefaults.standard.string(forKey: receiverURLKey)
 
         let backupTask = Task.detached(priority: .userInitiated) { [maxConcurrentUploads = Self.maxConcurrentUploads] in
+            var executedScanMode: PhotoLibraryScanPlan.Mode = .incremental
             defer {
                 Task { @MainActor in
                     self.isBackingUp = false
@@ -466,10 +469,12 @@ final class BackupDashboardViewModel: ObservableObject {
             do {
                 try Task.checkCancellation()
 
-                let scannedAssets = await PhotoLibraryScanner().scanAllAssets(deviceID: device.deviceID)
+                let scanPlan = await self.scanIndexStore.makeScanPlan(scanner: self.scanner, deviceID: device.deviceID)
+                executedScanMode = scanPlan.mode
+                let scannedAssets = scanPlan.assets
 
                 await MainActor.run {
-                    progressViewModel.setTotalCount(scannedAssets.count)
+                    progressViewModel.setTotalCount(scanPlan.totalAssetCount)
                 }
 
                 try Task.checkCancellation()
@@ -477,14 +482,18 @@ final class BackupDashboardViewModel: ObservableObject {
                 if scannedAssets.isEmpty {
                     await MainActor.run {
                         progressViewModel.update(
-                            filename: "No media found",
-                            completed: 0,
+                            filename: scanPlan.mode == .incremental ? "Nothing new to back up" : "No media found",
+                            completed: scanPlan.totalAssetCount,
                             success: 0,
                             duplicates: 0,
                             failed: 0,
                             bytesPerSecond: 0
                         )
-                        self.backupStatusMessage = "No photos or videos found to back up."
+                        self.updateBackupCoverage(backedUpCount: 0, totalCount: scanPlan.totalAssetCount)
+                        self.backupStatusMessage = scanPlan.mode == .incremental
+                            ? "No changed photos or videos need backup."
+                            : "No photos or videos found to back up."
+                        self.scanIndexStore.finishBackupRun(mode: scanPlan.mode)
                     }
                     return
                 }
@@ -519,7 +528,8 @@ final class BackupDashboardViewModel: ObservableObject {
                 var failed = batchResponse.unsupported.count
                 var pendingAssets: [AssetMetadata] = []
                 await MainActor.run {
-                    self.updateBackupCoverage(backedUpCount: duplicates, totalCount: scannedAssets.count)
+                    self.updateBackupCoverage(backedUpCount: duplicates, totalCount: scanPlan.totalAssetCount)
+                    self.scanIndexStore.markSucceeded(assetIDs: batchResponse.alreadyBackedUp + batchResponse.duplicates)
                 }
                 var initialFailures = batchResponse.unsupported.map { assetLocalID in
                     FailedUploadProgressItem(
@@ -543,6 +553,11 @@ final class BackupDashboardViewModel: ObservableObject {
                         continue
                     }
                     pendingAssets.append(metadata)
+                }
+
+                let requiredUploadIDs = pendingAssets.map(\.assetLocalID)
+                await MainActor.run {
+                    self.scanIndexStore.markRetryRequired(assetIDs: requiredUploadIDs)
                 }
 
                 await progressCoordinator.setInitialFailures(initialFailures)
@@ -621,7 +636,8 @@ final class BackupDashboardViewModel: ObservableObject {
                             success += 1
                             completed += 1
                             await MainActor.run {
-                                self.updateBackupCoverage(backedUpCount: duplicates + success, totalCount: scannedAssets.count)
+                                self.updateBackupCoverage(backedUpCount: duplicates + success, totalCount: scanPlan.totalAssetCount)
+                                self.scanIndexStore.markSucceeded(assetIDs: [assetLocalID])
                             }
                             await progressCoordinator.finishAsset(
                                 assetLocalID: assetLocalID,
@@ -657,12 +673,14 @@ final class BackupDashboardViewModel: ObservableObject {
                 let finalDuplicates = duplicates
                 let finalFailed = failed
                 await MainActor.run {
-                    self.updateBackupCoverage(backedUpCount: finalDuplicates + finalSuccess, totalCount: scannedAssets.count)
+                    self.updateBackupCoverage(backedUpCount: finalDuplicates + finalSuccess, totalCount: scanPlan.totalAssetCount)
+                    self.scanIndexStore.finishBackupRun(mode: scanPlan.mode)
                     self.backupStatusMessage = "Backup complete. Uploaded \(finalSuccess), skipped \(finalDuplicates), failed \(finalFailed)."
                 }
             } catch is CancellationError {
                 await MainActor.run {
                     self.backupStatusMessage = "Backup canceled."
+                    self.scanIndexStore.finishBackupRun(mode: executedScanMode)
                     self.activeBackupProgressViewModel = nil
                 }
             } catch {

@@ -515,7 +515,12 @@ struct DashboardView: View {
                 AssetHistorySection(
                     id: key.id,
                     title: key.title,
-                    entries: entries.sorted { $0.index < $1.index }
+                    entries: entries.sorted {
+                        if $0.asset.creationDate == $1.asset.creationDate {
+                            return $0.index < $1.index
+                        }
+                        return $0.asset.creationDate > $1.asset.creationDate
+                    }
                 )
             }
             .sorted { $0.id > $1.id }
