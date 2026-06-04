@@ -251,7 +251,7 @@ struct DashboardView: View {
                     .padding(.bottom, 16)
 
                 historyTimelineScrubber(
-                    sections: viewModel.visibleAssetSections,
+                    sections: viewModel.scrubberSections,
                     height: height,
                     scrollProxy: scrollProxy
                 )
@@ -449,7 +449,7 @@ struct DashboardView: View {
 
                     GeometryReader { scrubberProxy in
                         let scrubberSize = scrubberProxy.size
-                        let markers = markerIndices(for: sections.count)
+                        let markers = markerIndices(for: sections.count, trackHeight: scrubberSize.height)
 
                         ZStack(alignment: .top) {
                             Capsule()
@@ -510,14 +510,20 @@ struct DashboardView: View {
 
         scrubberActiveSectionID = section.id
         scrubberActiveSectionTitle = section.title
-        withAnimation(.easeOut(duration: 0.12)) {
-            scrollProxy.scrollTo(section.id, anchor: .top)
+        Task {
+            await viewModel.ensureSectionVisible(section.id)
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.12)) {
+                    scrollProxy.scrollTo(section.id, anchor: .top)
+                }
+            }
         }
     }
 
-    private func markerIndices(for sectionCount: Int) -> [Int] {
+    private func markerIndices(for sectionCount: Int, trackHeight: CGFloat) -> [Int] {
         guard sectionCount > 0 else { return [] }
-        let markerCount = min(sectionCount, 9)
+        let estimatedMarkerCapacity = max(Int(trackHeight / 14), 8)
+        let markerCount = min(sectionCount, estimatedMarkerCapacity)
         guard markerCount > 1 else { return [0] }
 
         return (0..<markerCount).map { step in
@@ -805,6 +811,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var allAssets: [BackupAssetRecord] = []
     @Published var visibleAssets: [BackupAssetRecord] = []
     @Published fileprivate var visibleAssetSections: [AssetHistorySection] = []
+    @Published fileprivate var scrubberSections: [AssetHistorySection] = []
     @Published var hasMoreVisibleAssets = false
     @Published var isLoadingAssetPage = false
     @Published var selectedDevice: String?
@@ -814,6 +821,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var assetHistoryTimeGroupingMode: AssetHistoryTimeGroupingMode = .month {
         didSet {
             rebuildVisibleAssetSections()
+            rebuildScrubberSections()
         }
     }
     @Published var assetHistoryMediaFilter: AssetHistoryMediaFilter = .all
@@ -873,6 +881,7 @@ final class DashboardViewModel: ObservableObject {
         guard let deviceId = selectedDevice else {
             visibleAssets = []
             visibleAssetSections = []
+            scrubberSections = []
             hasMoreVisibleAssets = false
             assetPageOffset = 0
             return
@@ -896,6 +905,7 @@ final class DashboardViewModel: ObservableObject {
             if reset {
                 visibleAssets = page
                 visibleAssetSections = Self.buildSections(from: page, mode: assetHistoryTimeGroupingMode)
+                rebuildScrubberSections()
             } else {
                 let startIndex = visibleAssets.count
                 visibleAssets.append(contentsOf: page)
@@ -963,6 +973,45 @@ final class DashboardViewModel: ObservableObject {
 
     private func rebuildVisibleAssetSections() {
         visibleAssetSections = Self.buildSections(from: visibleAssets, mode: assetHistoryTimeGroupingMode)
+    }
+
+    private func rebuildScrubberSections() {
+        scrubberSections = Self.buildSections(from: matchingAssetsForSelectedDevice(), mode: assetHistoryTimeGroupingMode)
+    }
+
+    private func matchingAssetsForSelectedDevice() -> [BackupAssetRecord] {
+        guard let deviceId = selectedDevice else { return [] }
+
+        return allAssets.filter { asset in
+            guard asset.deviceId == deviceId else { return false }
+
+            if let mediaType = assetHistoryMediaFilter.databaseValue,
+               asset.mediaType.caseInsensitiveCompare(mediaType) != .orderedSame {
+                return false
+            }
+
+            let trimmedQuery = assetSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedQuery.isEmpty,
+               asset.originalFilename.range(of: trimmedQuery, options: [.caseInsensitive, .diacriticInsensitive]) == nil {
+                return false
+            }
+
+            return true
+        }
+        .sorted { lhs, rhs in
+            if lhs.creationDate == rhs.creationDate {
+                return lhs.backupId > rhs.backupId
+            }
+            return lhs.creationDate > rhs.creationDate
+        }
+    }
+
+    func ensureSectionVisible(_ sectionID: String) async {
+        guard scrubberSections.contains(where: { $0.id == sectionID }) else { return }
+
+        while !visibleAssetSections.contains(where: { $0.id == sectionID }) && hasMoreVisibleAssets {
+            await loadSelectedDeviceAssets(reset: false)
+        }
     }
 
     private func appendSections(for page: [BackupAssetRecord], startingAt startIndex: Int) {
