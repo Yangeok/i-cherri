@@ -46,7 +46,7 @@ public struct BackupDashboardView: View {
                 NavigationStack {
                     BackupProgressView(viewModel: progressViewModel)
                 }
-                .presentationDetents([.height(260), .large], selection: $backupSheetDetent)
+                .presentationDetents([.height(88), .large], selection: $backupSheetDetent)
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled(viewModel.isBackupSheetLocked)
                 .onAppear {

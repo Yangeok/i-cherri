@@ -22,6 +22,7 @@ public struct BackupProgressView: View {
                     if let errorMessage = viewModel.errorMessage {
                         errorSection(errorMessage)
                     }
+                    progressSection
                     statsSection
                     if !viewModel.activeUploads.isEmpty {
                         activeUploadsSection
@@ -29,13 +30,14 @@ public struct BackupProgressView: View {
                     if !viewModel.failedUploads.isEmpty {
                         failedUploadsSection
                     }
-                    progressSection
-                    cancelButton
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 32)
-                .padding(.bottom, 24)
+                .padding(.bottom, 120)
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            cancelBar
         }
         .navigationBarBackButtonHidden(true)
         .enableInjection()
@@ -59,15 +61,6 @@ public struct BackupProgressView: View {
             Text(viewModel.headerTitle)
                 .font(.system(.title2, design: .rounded, weight: .semibold))
 
-            if !viewModel.isComplete, let filename = viewModel.currentFilename {
-                Text(filename)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    .animation(.easeInOut(duration: 0.3), value: filename)
-            }
         }
     }
 
@@ -106,11 +99,6 @@ public struct BackupProgressView: View {
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Spacer()
-                if viewModel.activeUploadCount > 0 {
-                    Text("\(viewModel.activeUploadCount) active")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
             }
         }
     }
@@ -120,7 +108,6 @@ public struct BackupProgressView: View {
     private var statsSection: some View {
         HStack(spacing: 12) {
             GlowBadge(label: "Uploaded", value: "\(viewModel.successCount)", color: .green)
-            GlowBadge(label: "Skipped", value: "\(viewModel.duplicateCount)", color: .orange)
             GlowBadge(label: "Failed", value: "\(viewModel.failedCount)", color: .red)
         }
     }
@@ -130,10 +117,6 @@ public struct BackupProgressView: View {
             HStack {
                 Text("Active Uploads")
                     .font(.headline)
-                Spacer()
-                Text("\(viewModel.activeUploads.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             ForEach(viewModel.activeUploads) { upload in
@@ -196,16 +179,23 @@ public struct BackupProgressView: View {
 
     // MARK: - Cancel
 
-    private var cancelButton: some View {
+    private var cancelBar: some View {
         Group {
             if !viewModel.isComplete && viewModel.errorMessage == nil {
-                Button(role: .destructive) {
-                    viewModel.cancel()
-                } label: {
-                    Text("Cancel Backup")
-                        .frame(maxWidth: .infinity)
+                VStack(spacing: 0) {
+                    Divider()
+                    Button(role: .destructive) {
+                        viewModel.cancel()
+                    } label: {
+                        Text("Cancel Backup")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
                 }
-                .buttonStyle(.bordered)
+                .background(.ultraThinMaterial)
             }
         }
     }

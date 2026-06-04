@@ -76,11 +76,14 @@ struct DashboardView: View {
     // MARK: - Sidebar
 
     private var sidebar: some View {
-        List(selection: $viewModel.selectedDevice) {
+        List {
             Section("Paired Devices") {
                 ForEach(viewModel.pairedDevices, id: \.deviceId) { device in
                     deviceRow(device)
-                        .tag(device.deviceId)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            viewModel.selectedDevice = device.deviceId
+                        }
                         .contextMenu {
                             Button("Delete Device", role: .destructive) {
                                 devicePendingDeletion = device
@@ -92,6 +95,7 @@ struct DashboardView: View {
                 ForEach(viewModel.activeUploads) { upload in
                     activeUploadRow(upload)
                         .allowsHitTesting(false)
+                        .selectionDisabled(true)
                 }
                 if viewModel.activeUploads.isEmpty {
                     Text("No active uploads")
@@ -156,6 +160,7 @@ struct DashboardView: View {
                 compactStatChip(label: "Duplicates", value: viewModel.duplicateCount(for: device.deviceId), color: .orange)
                 compactStatChip(label: "Failed", value: viewModel.failedCount(for: device.deviceId), color: .red)
                 Spacer()
+                timeGroupingPicker
                 historyViewModePicker
             }
 
@@ -178,18 +183,28 @@ struct DashboardView: View {
                 emptyHistoryState
             } else {
                 ScrollView {
-                    if viewModel.assetHistoryViewMode == .grid {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12, alignment: .top)], spacing: 12) {
-                            ForEach(Array(viewModel.visibleAssets.enumerated()), id: \.element.backupId) { index, asset in
-                                assetHistoryGridItem(asset, index: index)
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        ForEach(groupedVisibleAssets, id: \.id) { section in
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(section.title)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+
+                                if viewModel.assetHistoryViewMode == .grid {
+                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12, alignment: .top)], spacing: 12) {
+                                        ForEach(section.entries) { entry in
+                                            assetHistoryGridItem(entry.asset, index: entry.index)
+                                        }
+                                    }
+                                } else {
+                                    LazyVStack(spacing: 8) {
+                                        ForEach(section.entries) { entry in
+                                            assetHistoryListItem(entry.asset, index: entry.index)
+                                        }
+                                    }
+                                }
                             }
-                        }
-                    } else {
-                        LazyVStack(spacing: 8) {
-                            ForEach(Array(viewModel.visibleAssets.enumerated()), id: \.element.backupId) { index, asset in
-                                assetHistoryListItem(asset, index: index)
-                            }
-                        }
+                        } 
                     }
 
                     if viewModel.isLoadingAssetPage {
@@ -242,6 +257,15 @@ struct DashboardView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
+    private var timeGroupingPicker: some View {
+        Picker("Group", selection: $viewModel.assetHistoryTimeGroupingMode) {
+            ForEach(AssetHistoryTimeGroupingMode.allCases) { mode in
+                Text(mode.label).tag(mode)
+            }
+        }
+        .pickerStyle(.menu)
+    }
+
     // MARK: - Toolbar
 
     private var toolbarContent: some ToolbarContent {
@@ -273,6 +297,11 @@ struct DashboardView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .padding(.vertical, 2)
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(viewModel.selectedDevice == device.deviceId ? Color.accentColor.opacity(0.14) : .clear)
+        )
     }
 
     private func activeUploadRow(_ upload: DashboardActiveUpload) -> some View {
@@ -423,6 +452,46 @@ struct DashboardView: View {
         (asset.completedAt ?? asset.firstSeenAt).formatted(date: .abbreviated, time: .shortened)
     }
 
+    private var groupedVisibleAssets: [AssetHistorySection] {
+        let entries = viewModel.visibleAssets.enumerated().map { AssetHistoryEntry(index: $0.offset, asset: $0.element) }
+        let grouped = Dictionary(grouping: entries) { entry in
+            sectionKey(for: entry.asset)
+        }
+
+        return grouped
+            .map { key, entries in
+                AssetHistorySection(
+                    id: key.id,
+                    title: key.title,
+                    entries: entries.sorted { $0.index < $1.index }
+                )
+            }
+            .sorted { $0.id > $1.id }
+    }
+
+    private func sectionKey(for asset: BackupAssetRecord) -> AssetHistorySectionKey {
+        let calendar = Calendar(identifier: .gregorian)
+        let date = asset.creationDate
+        switch viewModel.assetHistoryTimeGroupingMode {
+        case .year:
+            let year = calendar.component(.year, from: date)
+            return AssetHistorySectionKey(id: String(format: "%04d", year), title: "\(year)")
+        case .month:
+            let year = calendar.component(.year, from: date)
+            let month = calendar.component(.month, from: date)
+            let monthName = date.formatted(.dateTime.year().month(.wide))
+            return AssetHistorySectionKey(id: String(format: "%04d-%02d", year, month), title: monthName)
+        case .day:
+            let year = calendar.component(.year, from: date)
+            let month = calendar.component(.month, from: date)
+            let day = calendar.component(.day, from: date)
+            return AssetHistorySectionKey(
+                id: String(format: "%04d-%02d-%02d", year, month, day),
+                title: date.formatted(date: .complete, time: .omitted)
+            )
+        }
+    }
+
     private func assetIconName(_ mediaType: String) -> String {
         switch mediaType.lowercased() {
         case "video":
@@ -553,6 +622,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var backupFolderPath: String?
     @Published var assetSearchQuery = ""
     @Published var assetHistoryViewMode: AssetHistoryViewMode = .list
+    @Published var assetHistoryTimeGroupingMode: AssetHistoryTimeGroupingMode = .month
 
     private var assetPageOffset = 0
 
@@ -831,6 +901,43 @@ enum AssetHistoryViewMode: String, CaseIterable, Identifiable {
     case grid
 
     var id: String { rawValue }
+}
+
+enum AssetHistoryTimeGroupingMode: String, CaseIterable, Identifiable {
+    case year
+    case month
+    case day
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .year:
+            return "Year"
+        case .month:
+            return "Month"
+        case .day:
+            return "Day"
+        }
+    }
+}
+
+private struct AssetHistoryEntry: Identifiable {
+    let index: Int
+    let asset: BackupAssetRecord
+
+    var id: String { asset.backupId }
+}
+
+private struct AssetHistorySection: Identifiable {
+    let id: String
+    let title: String
+    let entries: [AssetHistoryEntry]
+}
+
+private struct AssetHistorySectionKey: Hashable {
+    let id: String
+    let title: String
 }
 
 struct DashboardActiveUpload: Identifiable {
