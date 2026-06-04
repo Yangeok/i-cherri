@@ -198,7 +198,7 @@ struct DashboardView: View {
                                     .foregroundStyle(.secondary)
 
                                 if viewModel.assetHistoryViewMode == .grid {
-                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: viewModel.gridThumbnailSize), spacing: 10, alignment: .top)], spacing: 10) {
+                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: viewModel.gridThumbnailSize + 4), spacing: 8, alignment: .top)], spacing: 8) {
                                         ForEach(section.entries) { entry in
                                             assetHistoryGridItem(entry.asset, index: entry.index)
                                         }
@@ -240,12 +240,12 @@ struct DashboardView: View {
                             if gridPinchStartSize == nil {
                                 gridPinchStartSize = start
                             }
-                            viewModel.gridThumbnailSize = min(max(start * value, 110), 260)
+                            viewModel.gridThumbnailSize = min(max(start * value, 140), 360)
                         }
                         .onEnded { value in
                             guard viewModel.assetHistoryViewMode == .grid else { return }
                             let start = gridPinchStartSize ?? viewModel.gridThumbnailSize
-                            viewModel.gridThumbnailSize = min(max(start * value, 110), 260)
+                            viewModel.gridThumbnailSize = min(max(start * value, 140), 360)
                             gridPinchStartSize = nil
                         }
                 )
@@ -462,8 +462,6 @@ struct DashboardView: View {
     private func assetHistoryGridCard(_ asset: BackupAssetRecord) -> some View {
         AssetHistoryThumbnailView(asset: asset, size: viewModel.gridThumbnailSize)
             .frame(maxWidth: .infinity, alignment: .center)
-            .padding(4)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func assetHistoryListItem(_ asset: BackupAssetRecord, index: Int) -> some View {
@@ -667,7 +665,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var assetHistoryViewMode: AssetHistoryViewMode = .list
     @Published var assetHistoryTimeGroupingMode: AssetHistoryTimeGroupingMode = .month
     @Published var assetHistoryMediaFilter: AssetHistoryMediaFilter = .all
-    @Published var gridThumbnailSize: CGFloat = 156
+    @Published var gridThumbnailSize: CGFloat = 220
 
     private var assetPageOffset = 0
 
