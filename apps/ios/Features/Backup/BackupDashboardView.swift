@@ -266,9 +266,43 @@ public struct BackupDashboardView: View {
 
 enum PermissionStatus { case granted, denied, unknown }
 
+enum UploadConcurrencyPolicy {
+    static let hardCap = 4
+
+    static func recommendedConcurrency(for assets: ArraySlice<AssetMetadata>, maxAllowed: Int = hardCap) -> Int {
+        let candidates = Array(assets)
+        guard !candidates.isEmpty else { return 1 }
+
+        let cappedMax = max(1, min(maxAllowed, hardCap))
+        let videoCount = candidates.filter { $0.mediaType == .video }.count
+        let hugeAssetCount = candidates.filter { $0.byteSize >= 500_000_000 }.count
+        let largeAssetCount = candidates.filter { $0.byteSize >= 25_000_000 }.count
+        let unknownSizeCount = candidates.filter { $0.byteSize <= 0 }.count
+        let averageByteSize = candidates.reduce(Int64(0)) { $0 + max($1.byteSize, 0) } / Int64(max(candidates.count, 1))
+
+        if videoCount >= 2 || hugeAssetCount > 0 {
+            return min(2, cappedMax)
+        }
+
+        if videoCount == 1 {
+            return min(2, cappedMax)
+        }
+
+        if largeAssetCount >= 3 || unknownSizeCount > candidates.count / 2 {
+            return min(2, cappedMax)
+        }
+
+        if candidates.count >= 20 && averageByteSize > 0 && averageByteSize <= 8_000_000 {
+            return min(4, cappedMax)
+        }
+
+        return min(3, cappedMax)
+    }
+}
+
 @MainActor
 final class BackupDashboardViewModel: ObservableObject {
-    private static let maxConcurrentUploads = 3
+    private static let maxConcurrentUploads = UploadConcurrencyPolicy.hardCap
 
     @Published var photoPermissionStatus: PermissionStatus = .unknown
     @Published var localNetworkStatus: PermissionStatus = .unknown
@@ -605,11 +639,13 @@ final class BackupDashboardViewModel: ObservableObject {
 
                 try await withThrowingTaskGroup(of: UploadTaskOutcome.self) { group in
                     var nextIndex = 0
+                    var activeTaskCount = 0
 
                     func enqueueNextUpload() {
                         guard nextIndex < pendingAssets.count else { return }
                         let metadata = pendingAssets[nextIndex]
                         nextIndex += 1
+                        activeTaskCount += 1
 
                         group.addTask {
                             let taskBackupClient = BackupClient(
@@ -657,13 +693,20 @@ final class BackupDashboardViewModel: ObservableObject {
                         }
                     }
 
-                    let initialConcurrency = min(maxConcurrentUploads, pendingAssets.count)
+                    let initialConcurrency = min(
+                        UploadConcurrencyPolicy.recommendedConcurrency(
+                            for: pendingAssets[pendingAssets.startIndex...],
+                            maxAllowed: maxConcurrentUploads
+                        ),
+                        pendingAssets.count
+                    )
                     for _ in 0..<initialConcurrency {
                         enqueueNextUpload()
                     }
 
                     while let outcome = try await group.next() {
                         try Task.checkCancellation()
+                        activeTaskCount = max(activeTaskCount - 1, 0)
 
                         switch outcome {
                         case .success(let assetLocalID, let filename):
@@ -702,7 +745,13 @@ final class BackupDashboardViewModel: ObservableObject {
                             )
                         }
 
-                        enqueueNextUpload()
+                        let desiredConcurrency = UploadConcurrencyPolicy.recommendedConcurrency(
+                            for: pendingAssets[nextIndex...],
+                            maxAllowed: maxConcurrentUploads
+                        )
+                        while activeTaskCount < desiredConcurrency && nextIndex < pendingAssets.count {
+                            enqueueNextUpload()
+                        }
                     }
                 }
 

@@ -1,8 +1,57 @@
+import Foundation
 import Testing
+import ICherriProtocol
 @testable import iCherri_ios
 
 @MainActor
 struct BackupProgressViewModelTests {
+    private func makeAsset(
+        id: String,
+        mediaType: MediaType = .photo,
+        byteSize: Int64
+    ) -> AssetMetadata {
+        AssetMetadata(
+            deviceID: "device",
+            assetLocalID: id,
+            originalFilename: "\(id).jpg",
+            mediaType: mediaType,
+            creationDate: Date(timeIntervalSince1970: 1_700_000_000),
+            modificationDate: Date(timeIntervalSince1970: 1_700_000_000),
+            byteSize: byteSize,
+            pixelWidth: 4032,
+            pixelHeight: 3024,
+            quickFingerprint: id,
+            durationSeconds: mediaType == .video ? 12 : nil
+        )
+    }
+
+    @Test("Given many small photos when choosing upload concurrency then policy scales up to four")
+    func givenManySmallPhotos_whenChoosingUploadConcurrency_thenPolicyScalesUpToFour() async throws {
+        // Given
+        let assets = (0..<24).map { makeAsset(id: "photo-\($0)", byteSize: 3_000_000) }
+
+        // When
+        let concurrency = UploadConcurrencyPolicy.recommendedConcurrency(for: assets[...])
+
+        // Then
+        #expect(concurrency == 4)
+    }
+
+    @Test("Given videos in the queue when choosing upload concurrency then policy stays conservative")
+    func givenVideosInQueue_whenChoosingUploadConcurrency_thenPolicyStaysConservative() async throws {
+        // Given
+        let assets = [
+            makeAsset(id: "video-1", mediaType: .video, byteSize: 900_000_000),
+            makeAsset(id: "video-2", mediaType: .video, byteSize: 700_000_000),
+            makeAsset(id: "photo-1", byteSize: 4_000_000),
+        ]
+
+        // When
+        let concurrency = UploadConcurrencyPolicy.recommendedConcurrency(for: assets[...])
+
+        // Then
+        #expect(concurrency == 2)
+    }
 
     @Test("Given scanning phase when total library size becomes known then transfer text shows full library size")
     func givenScanningPhase_whenTotalLibrarySizeBecomesKnown_thenTransferTextShowsFullLibrarySize() async throws {
