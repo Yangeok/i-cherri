@@ -85,7 +85,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
             persist()
             return PhotoLibraryScanPlan(
                 mode: .full,
-                assets: assets,
+                assets: allKnownAssetsSorted(),
                 totalAssetCount: totalCount,
                 totalAssetBytes: sumOfCachedAssetBytes()
             )
@@ -95,7 +95,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
         guard !candidateIDs.isEmpty else {
             return PhotoLibraryScanPlan(
                 mode: .incremental,
-                assets: [],
+                assets: allKnownAssetsSorted(),
                 totalAssetCount: totalCount,
                 totalAssetBytes: sumOfCachedAssetBytes()
             )
@@ -119,7 +119,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
         persist()
         return PhotoLibraryScanPlan(
             mode: .incremental,
-            assets: assets,
+            assets: allKnownAssetsSorted(),
             totalAssetCount: totalCount,
             totalAssetBytes: sumOfCachedAssetBytes()
         )
@@ -223,6 +223,12 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
     private func sumOfCachedAssetBytes() -> Int64 {
         state.cachedAssetsByID.values.reduce(Int64(0)) { partialResult, asset in
             partialResult + max(asset.byteSize, 0)
+        }
+    }
+
+    private func allKnownAssetsSorted() -> [AssetMetadata] {
+        state.cachedAssetsByID.values.sorted { lhs, rhs in
+            lhs.creationDate > rhs.creationDate
         }
     }
 }

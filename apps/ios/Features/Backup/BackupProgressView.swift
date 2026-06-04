@@ -4,6 +4,14 @@ import UIKit
 import ICherriDesignSystem
 import Inject
 
+public enum BackupProgressPhase {
+    case scanning
+    case checking
+    case uploading
+    case complete
+    case failed
+}
+
 // Animated real-time backup progress screen with speed, ETA, and per-asset status.
 public struct BackupProgressView: View {
     @ObserveInjection var inject
@@ -87,20 +95,24 @@ public struct BackupProgressView: View {
                 .frame(height: 16)
 
             HStack {
-                Text("\(viewModel.backedUpCount) / \(viewModel.totalCount) backed up")
+                Text("\(viewModel.overallBackedUpCount) / \(viewModel.totalCount) backed up")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(viewModel.formattedSpeed)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if let trailingStatus = viewModel.trailingStatusText {
+                    Text(trailingStatus)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            HStack {
-                Text(viewModel.formattedTransfer)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Spacer()
+            if let transferStatus = viewModel.transferStatusText {
+                HStack {
+                    Text(transferStatus)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
             }
         }
     }
@@ -109,7 +121,7 @@ public struct BackupProgressView: View {
 
     private var statsSection: some View {
         HStack(spacing: 12) {
-            GlowBadge(label: "Backed Up", value: "\(viewModel.backedUpCount)", color: .green)
+            GlowBadge(label: "Uploaded", value: "\(viewModel.sessionUploadedCount)", color: .green)
             GlowBadge(label: "Failed", value: "\(viewModel.failedCount)", color: .red)
         }
     }
@@ -218,6 +230,7 @@ public final class BackupProgressViewModel: ObservableObject {
     @Published public var successCount: Int = 0
     @Published public var duplicateCount: Int = 0
     @Published public var failedCount: Int = 0
+    @Published public var overallBackedUpCount: Int = 0
     @Published public var currentFilename: String?
     @Published public var formattedSpeed: String = "—"
     @Published public var formattedTransfer: String = "—"
@@ -226,6 +239,7 @@ public final class BackupProgressViewModel: ObservableObject {
     @Published public var failedUploads: [FailedUploadProgressItem] = []
     @Published public var isComplete: Bool = false
     @Published public var errorMessage: String?
+    @Published public var phase: BackupProgressPhase = .scanning
 
     private var sentBytes: Int64 = 0
     private var totalBytes: Int64 = 0
@@ -254,12 +268,18 @@ public final class BackupProgressViewModel: ObservableObject {
         formattedTransfer = formatTransfer(sentBytes: sentBytes, totalBytes: totalBytes)
     }
 
+    public func setPhase(_ phase: BackupProgressPhase) {
+        self.phase = phase
+    }
+
     public func update(
         filename: String,
         completed: Int,
         success: Int,
         duplicates: Int,
         failed: Int,
+        overallBackedUpCount: Int? = nil,
+        phase: BackupProgressPhase? = nil,
         bytesPerSecond: Double,
         sentBytes: Int64? = nil,
         totalBytes: Int64? = nil,
@@ -272,6 +292,12 @@ public final class BackupProgressViewModel: ObservableObject {
         successCount = success
         duplicateCount = duplicates
         failedCount = failed
+        if let overallBackedUpCount {
+            self.overallBackedUpCount = overallBackedUpCount
+        }
+        if let phase {
+            self.phase = phase
+        }
         if let sentBytes {
             self.sentBytes = sentBytes
         }
@@ -298,32 +324,83 @@ public final class BackupProgressViewModel: ObservableObject {
         errorMessage = message
         isComplete = true
         formattedSpeed = "—"
+        phase = .failed
     }
 
     public var canCancel: Bool {
         !isComplete && errorMessage == nil
     }
 
-    public var backedUpCount: Int {
-        successCount + duplicateCount
+    public var sessionUploadedCount: Int {
+        successCount
     }
 
     public var headerTitle: String {
         if errorMessage != nil { return "Backup Failed" }
         if isComplete { return "Backup Complete" }
-        return "Backing Up…"
+        switch phase {
+        case .scanning:
+            return "Scanning Library…"
+        case .checking:
+            return "Checking Backups…"
+        case .uploading:
+            return "Backing Up…"
+        case .complete:
+            return "Backup Complete"
+        case .failed:
+            return "Backup Failed"
+        }
     }
 
     public var headerSymbolName: String {
         if errorMessage != nil { return "exclamationmark.triangle.fill" }
         if isComplete { return "checkmark.circle.fill" }
-        return "arrow.up.to.line.compact"
+        switch phase {
+        case .scanning:
+            return "photo.stack"
+        case .checking:
+            return "checklist"
+        case .uploading:
+            return "arrow.up.to.line.compact"
+        case .complete:
+            return "checkmark.circle.fill"
+        case .failed:
+            return "exclamationmark.triangle.fill"
+        }
     }
 
     public var headerSymbolColor: Color {
         if errorMessage != nil { return .red }
         if isComplete { return .green }
         return .accentColor
+    }
+
+    public var trailingStatusText: String? {
+        switch phase {
+        case .scanning:
+            return "Scanning"
+        case .checking:
+            return "Checking"
+        case .uploading:
+            return formattedSpeed
+        case .complete:
+            return "Done"
+        case .failed:
+            return "Failed"
+        }
+    }
+
+    public var transferStatusText: String? {
+        switch phase {
+        case .uploading, .complete:
+            return formattedTransfer
+        case .scanning:
+            return totalBytes > 0 ? "Library size \(formatByteCount(totalBytes))" : "Calculating library size..."
+        case .checking:
+            return "Comparing with Mac..."
+        case .failed:
+            return formattedTransfer == "—" ? nil : formattedTransfer
+        }
     }
 
     public func cancel() {

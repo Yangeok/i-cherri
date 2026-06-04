@@ -438,12 +438,15 @@ final class BackupDashboardViewModel: ObservableObject {
         backupCoverageProgress = nil
         let device = currentDeviceInfo()
         let progressViewModel = BackupProgressViewModel(totalCount: 0)
+        progressViewModel.setPhase(.scanning)
         progressViewModel.update(
             filename: "Scanning photo library...",
             completed: 0,
             success: 0,
             duplicates: 0,
             failed: 0,
+            overallBackedUpCount: 0,
+            phase: .scanning,
             bytesPerSecond: 0,
             sentBytes: 0,
             totalBytes: 0,
@@ -488,6 +491,8 @@ final class BackupDashboardViewModel: ObservableObject {
                             success: 0,
                             duplicates: 0,
                             failed: 0,
+                            overallBackedUpCount: scanPlan.totalAssetCount,
+                            phase: .complete,
                             bytesPerSecond: 0,
                             totalBytes: scanPlan.totalAssetBytes
                         )
@@ -513,6 +518,8 @@ final class BackupDashboardViewModel: ObservableObject {
                     success: 0,
                     duplicates: 0,
                     failed: 0,
+                    overallBackedUpCount: 0,
+                    phase: .checking,
                     bytesPerSecond: 0
                 )
 
@@ -576,6 +583,8 @@ final class BackupDashboardViewModel: ObservableObject {
                     success: success,
                     duplicates: duplicates,
                     failed: failed,
+                    overallBackedUpCount: duplicates,
+                    phase: pendingAssets.isEmpty ? .complete : .uploading,
                     bytesPerSecond: 0
                 )
 
@@ -655,7 +664,8 @@ final class BackupDashboardViewModel: ObservableObject {
                                 completed: completed,
                                 success: success,
                                 duplicates: duplicates,
-                                failed: failed
+                                failed: failed,
+                                overallBackedUpCount: duplicates + success
                             )
                         case .failure(let assetLocalID, let filename, let reason):
                             failed += 1
@@ -666,7 +676,8 @@ final class BackupDashboardViewModel: ObservableObject {
                                 completed: completed,
                                 success: success,
                                 duplicates: duplicates,
-                                failed: failed
+                                failed: failed,
+                                overallBackedUpCount: duplicates + success
                             )
                             await progressCoordinator.recordFailure(
                                 assetLocalID: assetLocalID,
@@ -686,6 +697,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     self.updateBackupCoverage(backedUpCount: finalDuplicates + finalSuccess, totalCount: scanPlan.totalAssetCount)
                     self.scanIndexStore.finishBackupRun(mode: scanPlan.mode)
                     self.backupStatusMessage = "Backup complete. Uploaded \(finalSuccess), skipped \(finalDuplicates), failed \(finalFailed)."
+                    progressViewModel.setPhase(.complete)
                 }
             } catch is CancellationError {
                 await MainActor.run {
@@ -887,6 +899,7 @@ private final class BackupUploadProgressCoordinator {
     private var success: Int = 0
     private var duplicates: Int = 0
     private var failed: Int = 0
+    private var overallBackedUpCount: Int = 0
     private var activeUploads: [String: ActiveUploadState] = [:]
     private var failedUploads: [FailedUploadProgressItem] = []
 
@@ -910,6 +923,8 @@ private final class BackupUploadProgressCoordinator {
         success: Int,
         duplicates: Int,
         failed: Int,
+        overallBackedUpCount: Int,
+        phase: BackupProgressPhase,
         bytesPerSecond: Double
     ) {
         currentFilename = filename
@@ -917,7 +932,8 @@ private final class BackupUploadProgressCoordinator {
         self.success = success
         self.duplicates = duplicates
         self.failed = failed
-        pushUpdate(bytesPerSecond: bytesPerSecond)
+        self.overallBackedUpCount = overallBackedUpCount
+        pushUpdate(bytesPerSecond: bytesPerSecond, phase: phase)
     }
 
     func setInitialFailures(_ failures: [FailedUploadProgressItem]) {
@@ -947,7 +963,8 @@ private final class BackupUploadProgressCoordinator {
         completed: Int,
         success: Int,
         duplicates: Int,
-        failed: Int
+        failed: Int,
+        overallBackedUpCount: Int
     ) {
         currentFilename = filename
         if let state = activeUploads.removeValue(forKey: assetLocalID) {
@@ -957,7 +974,9 @@ private final class BackupUploadProgressCoordinator {
         self.success = success
         self.duplicates = duplicates
         self.failed = failed
-        pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
+        self.overallBackedUpCount = overallBackedUpCount
+        let phase: BackupProgressPhase = activeUploads.isEmpty && completed >= viewModel.totalCount ? .complete : .uploading
+        pushUpdate(bytesPerSecond: aggregateBytesPerSecond, phase: phase)
     }
 
     func recordFailure(assetLocalID: String, filename: String, reason: String) {
@@ -970,14 +989,14 @@ private final class BackupUploadProgressCoordinator {
             )
         )
         failedUploads.sort { $0.filename.localizedStandardCompare($1.filename) == .orderedAscending }
-        pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
+        pushUpdate(bytesPerSecond: aggregateBytesPerSecond, phase: viewModel.phase)
     }
 
     private var aggregateBytesPerSecond: Double {
         activeUploads.values.reduce(0) { $0 + $1.bytesPerSecond }
     }
 
-    private func pushUpdate(bytesPerSecond: Double) {
+    private func pushUpdate(bytesPerSecond: Double, phase: BackupProgressPhase = .uploading) {
         let activeBytesSent = activeUploads.values.reduce(Int64(0)) { $0 + $1.sentBytes }
         let activeBytesTotal = activeUploads.values.reduce(Int64(0)) { $0 + $1.totalBytes }
         let activeUploadItems = activeUploads
@@ -999,6 +1018,8 @@ private final class BackupUploadProgressCoordinator {
             success: success,
             duplicates: duplicates,
             failed: failed,
+            overallBackedUpCount: overallBackedUpCount,
+            phase: phase,
             bytesPerSecond: bytesPerSecond,
             sentBytes: acknowledgedBytes + activeBytesSent,
             totalBytes: max(totalExpectedBytes, acknowledgedBytes + activeBytesTotal),
