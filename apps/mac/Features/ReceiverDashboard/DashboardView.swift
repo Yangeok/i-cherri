@@ -16,6 +16,7 @@ struct DashboardView: View {
     @State private var previewURL: URL?
     @State private var assetActionError: String?
     @State private var gridPinchStartColumns: Int?
+    @State private var hoveredHistoryControlID: String?
 
     var body: some View {
         NavigationSplitView {
@@ -156,13 +157,9 @@ struct DashboardView: View {
                 statusPill(device.pairingStatus)
             }
             
-            HStack(spacing: 8) {
-                Text(historySummary(for: device))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                historyViewModePicker
-            }
+            Text(historySummary(for: device))
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             HStack(spacing: 10) {
                 HStack(spacing: 8) {
@@ -199,6 +196,9 @@ struct DashboardView: View {
 
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 16) {
+                            Color.clear
+                                .frame(height: 54)
+
                             ForEach(groupedVisibleAssets, id: \.id) { section in
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text(section.title)
@@ -259,64 +259,98 @@ struct DashboardView: View {
                                 gridPinchStartColumns = nil
                             }
                     )
+                    .overlay(alignment: .topTrailing) {
+                        historyFloatingControls
+                            .padding(.top, 6)
+                    }
                 }
             }
         }
         .padding(24)
-        .padding(.bottom, 72)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .overlay(alignment: .bottom) {
-            timeGroupingBar
-                .padding(.bottom, 18)
-        }
     }
 
-    private var historyViewModePicker: some View {
-        HStack(spacing: 4) {
-            Button {
-                viewModel.assetHistoryViewMode = .list
-            } label: {
-                Image(systemName: "list.bullet")
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-            .background(viewModel.assetHistoryViewMode == .list ? Color.secondary.opacity(0.16) : .clear)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            Button {
-                viewModel.assetHistoryViewMode = .grid
-            } label: {
-                Image(systemName: "square.grid.2x2")
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-            .background(viewModel.assetHistoryViewMode == .grid ? Color.secondary.opacity(0.16) : .clear)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .padding(4)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private var timeGroupingBar: some View {
-        HStack(spacing: 4) {
-            ForEach(AssetHistoryTimeGroupingMode.allCases) { mode in
-                Button {
-                    viewModel.assetHistoryTimeGroupingMode = mode
-                } label: {
-                    Text(mode.label)
-                        .font(.caption.weight(.medium))
-                        .frame(minWidth: 56)
-                        .padding(.vertical, 8)
+    private var historyFloatingControls: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                historyControlButton(
+                    id: "view-list",
+                    isSelected: viewModel.assetHistoryViewMode == .list,
+                    action: { viewModel.assetHistoryViewMode = .list }
+                ) {
+                    Image(systemName: "list.bullet")
+                        .frame(width: 30, height: 30)
                 }
-                .buttonStyle(.plain)
-                .background(viewModel.assetHistoryTimeGroupingMode == mode ? Color.accentColor.opacity(0.16) : .clear)
-                .foregroundStyle(viewModel.assetHistoryTimeGroupingMode == mode ? Color.accentColor : Color.secondary)
-                .clipShape(Capsule())
+
+                historyControlButton(
+                    id: "view-grid",
+                    isSelected: viewModel.assetHistoryViewMode == .grid,
+                    action: { viewModel.assetHistoryViewMode = .grid }
+                ) {
+                    Image(systemName: "square.grid.2x2")
+                        .frame(width: 30, height: 30)
+                }
+            }
+
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 1, height: 22)
+
+            HStack(spacing: 4) {
+                ForEach(AssetHistoryTimeGroupingMode.allCases) { mode in
+                    historyControlButton(
+                        id: "group-\(mode.rawValue)",
+                        isSelected: viewModel.assetHistoryTimeGroupingMode == mode,
+                        action: { viewModel.assetHistoryTimeGroupingMode = mode }
+                    ) {
+                        Text(mode.label)
+                            .font(.caption.weight(.semibold))
+                            .frame(minWidth: 54)
+                            .padding(.horizontal, 2)
+                            .padding(.vertical, 6)
+                    }
+                }
             }
         }
-        .padding(6)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
-        .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
+        .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
+    }
+
+    private func historyControlButton<Content: View>(
+        id: String,
+        isSelected: Bool,
+        action: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let isHovered = hoveredHistoryControlID == id
+
+        return Button(action: action) {
+            content()
+                .foregroundStyle(isSelected ? Color.accentColor : (isHovered ? Color.primary : Color.secondary))
+                .padding(.horizontal, 8)
+                .background(
+                    Capsule()
+                        .fill(
+                            isSelected
+                                ? Color.accentColor.opacity(isHovered ? 0.24 : 0.18)
+                                : (isHovered ? Color.primary.opacity(0.08) : .clear)
+                        )
+                )
+                .scaleEffect(isSelected ? 1.02 : (isHovered ? 1.015 : 1.0))
+                .shadow(
+                    color: isSelected ? Color.accentColor.opacity(0.16) : .clear,
+                    radius: isSelected ? 8 : 0,
+                    y: isSelected ? 4 : 0
+                )
+                .animation(.spring(response: 0.22, dampingFraction: 0.78), value: isHovered)
+                .animation(.spring(response: 0.24, dampingFraction: 0.8), value: isSelected)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering in
+            hoveredHistoryControlID = isHovering ? id : (hoveredHistoryControlID == id ? nil : hoveredHistoryControlID)
+        }
     }
 
     // MARK: - Toolbar
