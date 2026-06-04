@@ -157,9 +157,9 @@ struct DashboardView: View {
             }
             
             HStack(spacing: 8) {
-                compactStatChip(label: "Backed Up", value: viewModel.assetCount(for: device.deviceId), color: .green)
-                compactStatChip(label: "Duplicates", value: viewModel.duplicateCount(for: device.deviceId), color: .orange)
-                compactStatChip(label: "Failed", value: viewModel.failedCount(for: device.deviceId), color: .red)
+                Text(historySummary(for: device))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 historyViewModePicker
             }
@@ -388,22 +388,6 @@ struct DashboardView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func compactStatChip(label: String, value: Int, color: Color) -> some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text("\(value)")
-                .font(.subheadline.weight(.semibold))
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(.thinMaterial, in: Capsule())
-    }
-
     private func mediaFilterChip(_ filter: AssetHistoryMediaFilter) -> some View {
         Button {
             viewModel.assetHistoryMediaFilter = filter
@@ -440,13 +424,6 @@ struct DashboardView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text(assetStatusLabel(asset.status))
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(assetStatusColor(asset.status).opacity(0.14))
-                        .foregroundStyle(assetStatusColor(asset.status))
-                        .clipShape(Capsule())
                 }
 
                 HStack(spacing: 14) {
@@ -558,30 +535,11 @@ struct DashboardView: View {
         }
     }
 
-    private func assetStatusLabel(_ status: String) -> String {
-        switch status {
-        case "completed":
-            return "Backed Up"
-        case "duplicate":
-            return "Duplicate"
-        case "failed":
-            return "Failed"
-        default:
-            return status.capitalized
-        }
-    }
-
-    private func assetStatusColor(_ status: String) -> Color {
-        switch status {
-        case "completed":
-            return .green
-        case "duplicate":
-            return .orange
-        case "failed":
-            return .red
-        default:
-            return .secondary
-        }
+    private func historySummary(for device: PairedDeviceRecord) -> String {
+        let backedUp = viewModel.assetCount(for: device.deviceId)
+        let duplicates = viewModel.duplicateCount(for: device.deviceId)
+        let failed = viewModel.failedCount(for: device.deviceId)
+        return "\(backedUp.formatted()) files • \(duplicates.formatted()) duplicates • \(failed.formatted()) failed"
     }
 
     private func assetFileURL(_ asset: BackupAssetRecord) -> URL? {
