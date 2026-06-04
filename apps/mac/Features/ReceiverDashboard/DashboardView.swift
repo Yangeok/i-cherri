@@ -138,7 +138,7 @@ struct DashboardView: View {
     }
 
     private func deviceDetailView(_ device: PairedDeviceRecord) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.deviceName)
@@ -150,15 +150,16 @@ struct DashboardView: View {
                 Spacer()
                 statusPill(device.pairingStatus)
             }
-            .padding(.bottom, 4)
-
-            HStack(spacing: 16) {
-                GlowBadge(label: "Backed Up", value: "\(viewModel.assetCount(for: device.deviceId))", color: .green)
-                GlowBadge(label: "Duplicates", value: "\(viewModel.duplicateCount(for: device.deviceId))", color: .orange)
-                GlowBadge(label: "Failed", value: "\(viewModel.failedCount(for: device.deviceId))", color: .red)
+            
+            HStack(spacing: 8) {
+                compactStatChip(label: "Backed Up", value: viewModel.assetCount(for: device.deviceId), color: .green)
+                compactStatChip(label: "Duplicates", value: viewModel.duplicateCount(for: device.deviceId), color: .orange)
+                compactStatChip(label: "Failed", value: viewModel.failedCount(for: device.deviceId), color: .red)
+                Spacer()
+                historyViewModePicker
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
@@ -166,27 +167,10 @@ struct DashboardView: View {
                         .textFieldStyle(.plain)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.vertical, 9)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                Picker("Status", selection: $viewModel.assetStatusFilter) {
-                    ForEach(AssetHistoryFilter.allCases) { filter in
-                        Text(filter.label).tag(filter)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Picker("View", selection: $viewModel.assetHistoryViewMode) {
-                    Image(systemName: "list.bullet").tag(AssetHistoryViewMode.list)
-                    Image(systemName: "square.grid.2x2").tag(AssetHistoryViewMode.grid)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 120)
             }
             .onChange(of: viewModel.assetSearchQuery) { _, _ in
-                Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
-            }
-            .onChange(of: viewModel.assetStatusFilter) { _, _ in
                 Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
             }
 
@@ -230,6 +214,32 @@ struct DashboardView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var historyViewModePicker: some View {
+        HStack(spacing: 4) {
+            Button {
+                viewModel.assetHistoryViewMode = .list
+            } label: {
+                Image(systemName: "list.bullet")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .background(viewModel.assetHistoryViewMode == .list ? Color.secondary.opacity(0.16) : .clear)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            Button {
+                viewModel.assetHistoryViewMode = .grid
+            } label: {
+                Image(systemName: "square.grid.2x2")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .background(viewModel.assetHistoryViewMode == .grid ? Color.secondary.opacity(0.16) : .clear)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .padding(4)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: - Toolbar
@@ -285,14 +295,30 @@ struct DashboardView: View {
             Image(systemName: "tray")
                 .font(.title2)
                 .foregroundStyle(.secondary)
-            Text("No backup history matches this filter")
+            Text("No backup history matches this search")
                 .foregroundStyle(.secondary)
-            Text("Adjust the search text or status filter.")
+            Text("Adjust the search text.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func compactStatChip(label: String, value: Int, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text("\(value)")
+                .font(.subheadline.weight(.semibold))
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.thinMaterial, in: Capsule())
     }
 
     private func assetHistoryRow(_ asset: BackupAssetRecord) -> some View {
@@ -342,7 +368,7 @@ struct DashboardView: View {
     }
 
     private func assetHistoryGridCard(_ asset: BackupAssetRecord) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
                 AssetHistoryThumbnailView(asset: asset, size: 72)
                 Spacer(minLength: 0)
@@ -363,14 +389,6 @@ struct DashboardView: View {
             Text(asset.creationDate.formatted(date: .abbreviated, time: .omitted))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Label(asset.mediaType.capitalized, systemImage: assetIconName(asset.mediaType))
-                Label(ByteCountFormatter.string(fromByteCount: asset.byteSize, countStyle: .file), systemImage: "externaldrive")
-                Label("Backed up \(assetHistoryDate(asset))", systemImage: "calendar")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -534,7 +552,6 @@ final class DashboardViewModel: ObservableObject {
     @Published var selectedDevice: String?
     @Published var backupFolderPath: String?
     @Published var assetSearchQuery = ""
-    @Published var assetStatusFilter: AssetHistoryFilter = .all
     @Published var assetHistoryViewMode: AssetHistoryViewMode = .list
 
     private var assetPageOffset = 0
@@ -604,7 +621,7 @@ final class DashboardViewModel: ObservableObject {
             let page = try await DatabaseManager.shared.fetchAssets(
                 deviceId: deviceId,
                 searchQuery: assetSearchQuery,
-                status: assetStatusFilter.databaseValue,
+                status: nil,
                 limit: Self.assetPageSize,
                 offset: offset
             )
@@ -814,37 +831,6 @@ enum AssetHistoryViewMode: String, CaseIterable, Identifiable {
     case grid
 
     var id: String { rawValue }
-}
-
-enum AssetHistoryFilter: String, CaseIterable, Identifiable {
-    case all
-    case completed
-    case duplicate
-    case failed
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .all:
-            return "All"
-        case .completed:
-            return "Backed Up"
-        case .duplicate:
-            return "Duplicates"
-        case .failed:
-            return "Failed"
-        }
-    }
-
-    var databaseValue: String? {
-        switch self {
-        case .all:
-            return nil
-        default:
-            return rawValue
-        }
-    }
 }
 
 struct DashboardActiveUpload: Identifiable {
