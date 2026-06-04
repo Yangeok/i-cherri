@@ -15,7 +15,7 @@ struct DashboardView: View {
     @State private var devicePendingDeletion: PairedDeviceRecord?
     @State private var previewURL: URL?
     @State private var assetActionError: String?
-    @State private var gridPinchStartSize: CGFloat?
+    @State private var gridPinchStartColumns: Int?
 
     var body: some View {
         NavigationSplitView {
@@ -189,66 +189,77 @@ struct DashboardView: View {
             if viewModel.visibleAssets.isEmpty, !viewModel.isLoadingAssetPage {
                 emptyHistoryState
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        ForEach(groupedVisibleAssets, id: \.id) { section in
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text(section.title)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
+                GeometryReader { proxy in
+                    let contentWidth = max(proxy.size.width, 1)
+                    let gridColumns = Array(
+                        repeating: GridItem(.flexible(), spacing: 8, alignment: .top),
+                        count: viewModel.gridColumnCount
+                    )
+                    let gridItemSize = (contentWidth - CGFloat(max(viewModel.gridColumnCount - 1, 0)) * 8) / CGFloat(viewModel.gridColumnCount)
 
-                                if viewModel.assetHistoryViewMode == .grid {
-                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: viewModel.gridThumbnailSize + 4), spacing: 8, alignment: .top)], spacing: 8) {
-                                        ForEach(section.entries) { entry in
-                                            assetHistoryGridItem(entry.asset, index: entry.index)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 16) {
+                            ForEach(groupedVisibleAssets, id: \.id) { section in
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text(section.title)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+
+                                    if viewModel.assetHistoryViewMode == .grid {
+                                        LazyVGrid(columns: gridColumns, spacing: 8) {
+                                            ForEach(section.entries) { entry in
+                                                assetHistoryGridItem(entry.asset, index: entry.index, itemSize: gridItemSize)
+                                            }
                                         }
-                                    }
-                                } else {
-                                    LazyVStack(spacing: 8) {
-                                        ForEach(section.entries) { entry in
-                                            assetHistoryListItem(entry.asset, index: entry.index)
+                                    } else {
+                                        LazyVStack(spacing: 8) {
+                                            ForEach(section.entries) { entry in
+                                                assetHistoryListItem(entry.asset, index: entry.index)
+                                            }
                                         }
                                     }
                                 }
                             }
-                        } 
-                    }
 
-                    if viewModel.isLoadingAssetPage {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("Loading more history…")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                    } else if !viewModel.hasMoreVisibleAssets, !viewModel.visibleAssets.isEmpty {
-                        Text("End of backup history")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 8)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .scrollContentBackground(.hidden)
-                .gesture(
-                    MagnificationGesture()
-                        .onChanged { value in
-                            guard viewModel.assetHistoryViewMode == .grid else { return }
-                            let start = gridPinchStartSize ?? viewModel.gridThumbnailSize
-                            if gridPinchStartSize == nil {
-                                gridPinchStartSize = start
+                            if viewModel.isLoadingAssetPage {
+                                HStack(spacing: 10) {
+                                    ProgressView()
+                                    Text("Loading more history…")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                            } else if !viewModel.hasMoreVisibleAssets, !viewModel.visibleAssets.isEmpty {
+                                Text("End of backup history")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity)
                             }
-                            viewModel.gridThumbnailSize = min(max(start * value, 140), 360)
                         }
-                        .onEnded { value in
-                            guard viewModel.assetHistoryViewMode == .grid else { return }
-                            let start = gridPinchStartSize ?? viewModel.gridThumbnailSize
-                            viewModel.gridThumbnailSize = min(max(start * value, 140), 360)
-                            gridPinchStartSize = nil
-                        }
-                )
+                    }
+                    .scrollContentBackground(.hidden)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                guard viewModel.assetHistoryViewMode == .grid else { return }
+                                let start = gridPinchStartColumns ?? viewModel.gridColumnCount
+                                if gridPinchStartColumns == nil {
+                                    gridPinchStartColumns = start
+                                }
+                                let proposed = Int((Double(start) / Double(value)).rounded())
+                                viewModel.gridColumnCount = min(max(proposed, 2), 6)
+                            }
+                            .onEnded { value in
+                                guard viewModel.assetHistoryViewMode == .grid else { return }
+                                let start = gridPinchStartColumns ?? viewModel.gridColumnCount
+                                let proposed = Int((Double(start) / Double(value)).rounded())
+                                viewModel.gridColumnCount = min(max(proposed, 2), 6)
+                                gridPinchStartColumns = nil
+                            }
+                    )
+                }
             }
         }
         .padding(24)
@@ -459,8 +470,8 @@ struct DashboardView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    private func assetHistoryGridCard(_ asset: BackupAssetRecord) -> some View {
-        AssetHistoryThumbnailView(asset: asset, size: viewModel.gridThumbnailSize)
+    private func assetHistoryGridCard(_ asset: BackupAssetRecord, itemSize: CGFloat) -> some View {
+        AssetHistoryThumbnailView(asset: asset, size: itemSize)
             .frame(maxWidth: .infinity, alignment: .center)
     }
 
@@ -476,9 +487,9 @@ struct DashboardView: View {
             }
     }
 
-    private func assetHistoryGridItem(_ asset: BackupAssetRecord, index: Int) -> some View {
-        assetHistoryGridCard(asset)
-            .id("\(asset.backupId)-\(Int(viewModel.gridThumbnailSize))")
+    private func assetHistoryGridItem(_ asset: BackupAssetRecord, index: Int, itemSize: CGFloat) -> some View {
+        assetHistoryGridCard(asset, itemSize: itemSize)
+            .id("\(asset.backupId)-\(viewModel.gridColumnCount)")
             .modifier(AssetHistoryInteractionModifier(
                 onPreview: { previewAsset(asset) },
                 onOpen: { openAsset(asset) },
@@ -665,7 +676,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var assetHistoryViewMode: AssetHistoryViewMode = .list
     @Published var assetHistoryTimeGroupingMode: AssetHistoryTimeGroupingMode = .month
     @Published var assetHistoryMediaFilter: AssetHistoryMediaFilter = .all
-    @Published var gridThumbnailSize: CGFloat = 220
+    @Published var gridColumnCount: Int = 4
 
     private var assetPageOffset = 0
 
