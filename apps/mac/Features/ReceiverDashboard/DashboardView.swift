@@ -319,16 +319,28 @@ struct DashboardView: View {
                 if gridPinchStartColumns == nil {
                     gridPinchStartColumns = start
                 }
-                let proposed = Int((Double(start) / Double(value)).rounded())
-                viewModel.gridColumnCount = min(max(proposed, 2), 6)
+                if let proposed = proposedGridColumnCount(start: start, magnificationValue: value) {
+                    viewModel.gridColumnCount = proposed
+                }
             }
             .onEnded { value in
                 guard viewModel.assetHistoryViewMode == .grid else { return }
                 let start = gridPinchStartColumns ?? viewModel.gridColumnCount
-                let proposed = Int((Double(start) / Double(value)).rounded())
-                viewModel.gridColumnCount = min(max(proposed, 2), 6)
+                if let proposed = proposedGridColumnCount(start: start, magnificationValue: value) {
+                    viewModel.gridColumnCount = proposed
+                }
                 gridPinchStartColumns = nil
             }
+    }
+
+    private func proposedGridColumnCount(start: Int, magnificationValue: CGFloat) -> Int? {
+        let safeValue = Double(magnificationValue)
+        guard safeValue.isFinite, safeValue > 0 else { return nil }
+
+        let proposed = Double(start) / safeValue
+        guard proposed.isFinite, !proposed.isNaN else { return nil }
+
+        return min(max(Int(proposed.rounded()), 2), 6)
     }
 
     private var historyFloatingControls: some View {
