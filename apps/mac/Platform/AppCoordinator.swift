@@ -404,6 +404,12 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
                     deviceID: session.deviceID,
                     assetLocalID: session.assetLocalID
                 )
+                Task.detached(priority: .utility) {
+                    await AssetHistoryThumbnailPrefetcher.prewarmCommittedAsset(
+                        relativePath: displayPath,
+                        mediaType: metadata.mediaType.rawValue
+                    )
+                }
                 await MainActor.run {
                     NotificationCenter.default.post(name: .receiverDataDidChange, object: nil)
                 }

@@ -205,7 +205,7 @@ struct DashboardView: View {
                     ZStack(alignment: .bottom) {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 16) {
-                                ForEach(groupedVisibleAssets, id: \.id) { section in
+                                ForEach(viewModel.visibleAssetSections, id: \.id) { section in
                                     VStack(alignment: .leading, spacing: 10) {
                                         Text(section.title)
                                             .font(.caption.weight(.semibold))
@@ -530,51 +530,6 @@ struct DashboardView: View {
             }
     }
 
-    private var groupedVisibleAssets: [AssetHistorySection] {
-        let entries = viewModel.visibleAssets.enumerated().map { AssetHistoryEntry(index: $0.offset, asset: $0.element) }
-        let grouped = Dictionary(grouping: entries) { entry in
-            sectionKey(for: entry.asset)
-        }
-
-        return grouped
-            .map { key, entries in
-                AssetHistorySection(
-                    id: key.id,
-                    title: key.title,
-                    entries: entries.sorted {
-                        if $0.asset.creationDate == $1.asset.creationDate {
-                            return $0.index < $1.index
-                        }
-                        return $0.asset.creationDate > $1.asset.creationDate
-                    }
-                )
-            }
-            .sorted { $0.id > $1.id }
-    }
-
-    private func sectionKey(for asset: BackupAssetRecord) -> AssetHistorySectionKey {
-        let calendar = Calendar(identifier: .gregorian)
-        let date = asset.creationDate
-        switch viewModel.assetHistoryTimeGroupingMode {
-        case .year:
-            let year = calendar.component(.year, from: date)
-            return AssetHistorySectionKey(id: String(format: "%04d", year), title: "\(year)")
-        case .month:
-            let year = calendar.component(.year, from: date)
-            let month = calendar.component(.month, from: date)
-            let monthName = date.formatted(.dateTime.year().month(.wide))
-            return AssetHistorySectionKey(id: String(format: "%04d-%02d", year, month), title: monthName)
-        case .day:
-            let year = calendar.component(.year, from: date)
-            let month = calendar.component(.month, from: date)
-            let day = calendar.component(.day, from: date)
-            return AssetHistorySectionKey(
-                id: String(format: "%04d-%02d-%02d", year, month, day),
-                title: date.formatted(date: .complete, time: .omitted)
-            )
-        }
-    }
-
     private func assetIconName(_ mediaType: String) -> String {
         switch mediaType.lowercased() {
         case "video":
@@ -685,13 +640,18 @@ final class DashboardViewModel: ObservableObject {
     @Published var activeUploads: [DashboardActiveUpload] = []
     @Published var allAssets: [BackupAssetRecord] = []
     @Published var visibleAssets: [BackupAssetRecord] = []
+    @Published fileprivate var visibleAssetSections: [AssetHistorySection] = []
     @Published var hasMoreVisibleAssets = false
     @Published var isLoadingAssetPage = false
     @Published var selectedDevice: String?
     @Published var backupFolderPath: String?
     @Published var assetSearchQuery = ""
     @Published var assetHistoryViewMode: AssetHistoryViewMode = .list
-    @Published var assetHistoryTimeGroupingMode: AssetHistoryTimeGroupingMode = .month
+    @Published var assetHistoryTimeGroupingMode: AssetHistoryTimeGroupingMode = .month {
+        didSet {
+            rebuildVisibleAssetSections()
+        }
+    }
     @Published var assetHistoryMediaFilter: AssetHistoryMediaFilter = .all
     @Published var gridColumnCount: Int = 4
 
@@ -748,6 +708,7 @@ final class DashboardViewModel: ObservableObject {
     func loadSelectedDeviceAssets(reset: Bool) async {
         guard let deviceId = selectedDevice else {
             visibleAssets = []
+            visibleAssetSections = []
             hasMoreVisibleAssets = false
             assetPageOffset = 0
             return
@@ -770,8 +731,11 @@ final class DashboardViewModel: ObservableObject {
 
             if reset {
                 visibleAssets = page
+                visibleAssetSections = Self.buildSections(from: page, mode: assetHistoryTimeGroupingMode)
             } else {
+                let startIndex = visibleAssets.count
                 visibleAssets.append(contentsOf: page)
+                appendSections(for: page, startingAt: startIndex)
             }
 
             assetPageOffset = offset + page.count
@@ -830,6 +794,72 @@ final class DashboardViewModel: ObservableObject {
         AppCoordinator.shared.selectBackupFolder()
         Task {
             await load()
+        }
+    }
+
+    private func rebuildVisibleAssetSections() {
+        visibleAssetSections = Self.buildSections(from: visibleAssets, mode: assetHistoryTimeGroupingMode)
+    }
+
+    private func appendSections(for page: [BackupAssetRecord], startingAt startIndex: Int) {
+        guard !page.isEmpty else { return }
+
+        var sections = visibleAssetSections
+        for (offset, asset) in page.enumerated() {
+            let entry = AssetHistoryEntry(index: startIndex + offset, asset: asset)
+            let key = Self.sectionKey(for: asset, mode: assetHistoryTimeGroupingMode)
+
+            if !sections.isEmpty, sections[sections.count - 1].id == key.id {
+                sections[sections.count - 1].entries.append(entry)
+            } else {
+                sections.append(AssetHistorySection(id: key.id, title: key.title, entries: [entry]))
+            }
+        }
+
+        visibleAssetSections = sections
+    }
+
+    private static func buildSections(from assets: [BackupAssetRecord], mode: AssetHistoryTimeGroupingMode) -> [AssetHistorySection] {
+        guard !assets.isEmpty else { return [] }
+
+        var sections: [AssetHistorySection] = []
+        sections.reserveCapacity(max(1, assets.count / 16))
+
+        for (index, asset) in assets.enumerated() {
+            let key = sectionKey(for: asset, mode: mode)
+            let entry = AssetHistoryEntry(index: index, asset: asset)
+
+            if !sections.isEmpty, sections[sections.count - 1].id == key.id {
+                sections[sections.count - 1].entries.append(entry)
+            } else {
+                sections.append(AssetHistorySection(id: key.id, title: key.title, entries: [entry]))
+            }
+        }
+
+        return sections
+    }
+
+    private static func sectionKey(for asset: BackupAssetRecord, mode: AssetHistoryTimeGroupingMode) -> AssetHistorySectionKey {
+        let calendar = Calendar(identifier: .gregorian)
+        let date = asset.creationDate
+
+        switch mode {
+        case .year:
+            let year = calendar.component(.year, from: date)
+            return AssetHistorySectionKey(id: String(format: "%04d", year), title: "\(year)")
+        case .month:
+            let year = calendar.component(.year, from: date)
+            let month = calendar.component(.month, from: date)
+            let monthName = date.formatted(.dateTime.year().month(.wide))
+            return AssetHistorySectionKey(id: String(format: "%04d-%02d", year, month), title: monthName)
+        case .day:
+            let year = calendar.component(.year, from: date)
+            let month = calendar.component(.month, from: date)
+            let day = calendar.component(.day, from: date)
+            return AssetHistorySectionKey(
+                id: String(format: "%04d-%02d-%02d", year, month, day),
+                title: date.formatted(date: .complete, time: .omitted)
+            )
         }
     }
 
@@ -945,7 +975,6 @@ private struct AssetHistoryThumbnailView: View {
     }
 }
 
-@MainActor
 private final class AssetHistoryThumbnailLoader: ObservableObject {
     @Published var image: NSImage?
 
@@ -969,21 +998,17 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         let displayScale = NSScreen.main?.backingScaleFactor ?? 2
 
-        if let cachedData = await AssetHistoryThumbnailCache.shared.cachedImageData(for: fileURL, size: size),
-           let cachedImage = NSImage(data: cachedData) {
-            image = cachedImage
-            return
-        }
-
-        let generatedData = await Task.detached(priority: .utility) {
-            await Self.generateThumbnailData(fileURL: fileURL, mediaType: self.mediaType, size: self.size, scale: displayScale)
-        }.value
-
-        if let generatedData,
-           let generatedImage = NSImage(data: generatedData) {
-            image = generatedImage
-            await AssetHistoryThumbnailCache.shared.store(generatedData, for: fileURL, size: size)
-            return
+        if let thumbnailData = await AssetHistoryThumbnailCache.shared.thumbnailData(
+            for: fileURL,
+            mediaType: mediaType,
+            size: size,
+            scale: displayScale
+        ), let generatedImage = NSImage(data: thumbnailData) {
+            await MainActor.run {
+                if image == nil {
+                    image = generatedImage
+                }
+            }
         }
     }
 
@@ -1076,6 +1101,7 @@ actor AssetHistoryThumbnailCache {
     private let memoryCache = NSCache<NSString, NSData>()
     private let fileManager = FileManager.default
     private let diskCacheURL: URL
+    private var inFlightTasks: [String: Task<Data?, Never>] = [:]
 
     init() {
         memoryCache.countLimit = 512
@@ -1107,11 +1133,38 @@ actor AssetHistoryThumbnailCache {
 
     func store(_ data: Data, for fileURL: URL, size: CGFloat) {
         guard let cacheKey = cacheKey(for: fileURL, size: size) else { return }
-        let nsCacheKey = cacheKey as NSString
-        memoryCache.setObject(data as NSData, forKey: nsCacheKey, cost: estimatedCost(for: size))
+        store(data, cacheKey: cacheKey, size: size)
+    }
 
-        let cachedFileURL = diskCacheURL.appendingPathComponent(cacheKey).appendingPathExtension("jpg")
-        try? data.write(to: cachedFileURL, options: .atomic)
+    func thumbnailData(for fileURL: URL, mediaType: String, size: CGFloat, scale: CGFloat) async -> Data? {
+        guard let cacheKey = cacheKey(for: fileURL, size: size) else { return nil }
+
+        if let cachedData = cachedImageData(for: fileURL, size: size) {
+            return cachedData
+        }
+
+        if let existingTask = inFlightTasks[cacheKey] {
+            return await existingTask.value
+        }
+
+        let task = Task.detached(priority: .utility) {
+            await AssetHistoryThumbnailLoader.generateThumbnailData(
+                fileURL: fileURL,
+                mediaType: mediaType,
+                size: size,
+                scale: scale
+            )
+        }
+        inFlightTasks[cacheKey] = task
+
+        let generatedData = await task.value
+        inFlightTasks[cacheKey] = nil
+
+        if let generatedData {
+            store(generatedData, cacheKey: cacheKey, size: size)
+        }
+
+        return generatedData
     }
 
     private func cacheKey(for fileURL: URL, size: CGFloat) -> String? {
@@ -1125,9 +1178,40 @@ actor AssetHistoryThumbnailCache {
     private func estimatedCost(for size: CGFloat) -> Int {
         Int(size * size * 4)
     }
+
+    private func store(_ data: Data, cacheKey: String, size: CGFloat) {
+        let nsCacheKey = cacheKey as NSString
+        memoryCache.setObject(data as NSData, forKey: nsCacheKey, cost: estimatedCost(for: size))
+
+        let cachedFileURL = diskCacheURL.appendingPathComponent(cacheKey).appendingPathExtension("jpg")
+        try? data.write(to: cachedFileURL, options: .atomic)
+    }
 }
 
 enum AssetHistoryThumbnailPrefetcher {
+    static func prewarmCommittedAsset(relativePath: String, mediaType: String) async {
+        let resolvedPath: String
+        if (relativePath as NSString).isAbsolutePath {
+            resolvedPath = relativePath
+        } else {
+            let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
+            resolvedPath = backupFolder.appendingPathComponent(relativePath).path
+        }
+
+        guard !resolvedPath.isEmpty else { return }
+        let fileURL = URL(fileURLWithPath: resolvedPath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        let sizes: [CGFloat] = [48, 96, 160, 240]
+        await withTaskGroup(of: Void.self) { group in
+            for size in sizes {
+                group.addTask {
+                    await prefetch(fileURL: fileURL, mediaType: mediaType, size: size)
+                }
+            }
+        }
+    }
+
     static func prefetch(asset: BackupAssetRecord, size: CGFloat) async {
         let resolvedPath: String
         if (asset.finalPath as NSString).isAbsolutePath {
@@ -1143,24 +1227,17 @@ enum AssetHistoryThumbnailPrefetcher {
 
         let fileURL = URL(fileURLWithPath: resolvedPath)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        await prefetch(fileURL: fileURL, mediaType: asset.mediaType, size: size)
+    }
 
-        if await AssetHistoryThumbnailCache.shared.cachedImageData(for: fileURL, size: size) != nil {
-            return
-        }
-
+    static func prefetch(fileURL: URL, mediaType: String, size: CGFloat) async {
         let displayScale = NSScreen.main?.backingScaleFactor ?? 2
-        let generatedData = await Task.detached(priority: .utility) {
-            await AssetHistoryThumbnailLoader.generateThumbnailData(
-                fileURL: fileURL,
-                mediaType: asset.mediaType,
-                size: size,
-                scale: displayScale
-            )
-        }.value
-
-        if let generatedData {
-            await AssetHistoryThumbnailCache.shared.store(generatedData, for: fileURL, size: size)
-        }
+        _ = await AssetHistoryThumbnailCache.shared.thumbnailData(
+            for: fileURL,
+            mediaType: mediaType,
+            size: size,
+            scale: displayScale
+        )
     }
 }
 
@@ -1230,7 +1307,7 @@ private struct AssetHistoryEntry: Identifiable {
 private struct AssetHistorySection: Identifiable {
     let id: String
     let title: String
-    let entries: [AssetHistoryEntry]
+    var entries: [AssetHistoryEntry]
 }
 
 private struct AssetHistorySectionKey: Hashable {
