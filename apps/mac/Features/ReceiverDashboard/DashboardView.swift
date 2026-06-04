@@ -231,10 +231,11 @@ struct DashboardView: View {
                                 Text("End of backup history")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity)
                             }
                         }
+                        .padding(.bottom, 96)
                     }
                     .scrollContentBackground(.hidden)
                     .gesture(
@@ -256,10 +257,9 @@ struct DashboardView: View {
                                 gridPinchStartColumns = nil
                             }
                     )
-                    .overlay(alignment: .topTrailing) {
+                    .overlay(alignment: .bottom) {
                         historyFloatingControls
-                            .padding(.top, 10)
-                            .padding(.trailing, 10)
+                            .padding(.bottom, 12)
                     }
                 }
             }
@@ -845,6 +845,17 @@ private struct AssetHistoryThumbnailView: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(alignment: .bottomTrailing) {
+            if let durationLabel {
+                Text(durationLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.black.opacity(0.72), in: Capsule())
+                    .padding(6)
+            }
+        }
         .task {
             await loader.loadIfNeeded()
         }
@@ -870,6 +881,23 @@ private struct AssetHistoryThumbnailView: View {
         default:
             return .secondary
         }
+    }
+
+    private var durationLabel: String? {
+        guard asset.mediaType.lowercased() == "video", let duration = asset.durationSeconds, duration > 0 else {
+            return nil
+        }
+
+        let totalSeconds = Int(duration.rounded())
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 
