@@ -196,9 +196,6 @@ struct DashboardView: View {
 
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 16) {
-                            Color.clear
-                                .frame(height: 54)
-
                             ForEach(groupedVisibleAssets, id: \.id) { section in
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text(section.title)
@@ -261,7 +258,8 @@ struct DashboardView: View {
                     )
                     .overlay(alignment: .topTrailing) {
                         historyFloatingControls
-                            .padding(.top, 6)
+                            .padding(.top, 10)
+                            .padding(.trailing, 10)
                     }
                 }
             }
