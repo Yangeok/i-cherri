@@ -151,9 +151,15 @@ struct DashboardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.deviceName)
                         .font(.title2.weight(.semibold))
-                    Text("Last seen: \(device.lastSeenAt.formatted(.relative(presentation: .named)))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if let lastBackupSummary = lastBackupSummary(for: device) {
+                        Text(lastBackupSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("No backups yet")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 statusPill(device.pairingStatus)
@@ -506,6 +512,7 @@ struct DashboardView: View {
             ))
             .onAppear {
                 Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
+                Task { await viewModel.prefetchVisibleAssetNeighborhood(around: index, size: 48) }
             }
     }
 
@@ -519,6 +526,7 @@ struct DashboardView: View {
             ))
             .onAppear {
                 Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
+                Task { await viewModel.prefetchVisibleAssetNeighborhood(around: index, size: itemSize) }
             }
     }
 
@@ -581,6 +589,11 @@ struct DashboardView: View {
         let duplicates = viewModel.duplicateCount(for: device.deviceId)
         let failed = viewModel.failedCount(for: device.deviceId)
         return "\(backedUp.formatted()) files • \(duplicates.formatted()) duplicates • \(failed.formatted()) failed"
+    }
+
+    private func lastBackupSummary(for device: PairedDeviceRecord) -> String? {
+        guard let date = viewModel.lastBackupDate(for: device.deviceId) else { return nil }
+        return "Backed up \(date.formatted(.relative(presentation: .named)))"
     }
 
     private func assetFileURL(_ asset: BackupAssetRecord) -> URL? {
@@ -775,6 +788,21 @@ final class DashboardViewModel: ObservableObject {
         await loadSelectedDeviceAssets(reset: false)
     }
 
+    func prefetchVisibleAssetNeighborhood(around index: Int, size: CGFloat) async {
+        guard !visibleAssets.isEmpty else { return }
+        let lowerBound = max(0, index - 12)
+        let upperBound = min(visibleAssets.count - 1, index + 24)
+        let assetsToWarm = Array(visibleAssets[lowerBound...upperBound])
+
+        await withTaskGroup(of: Void.self) { group in
+            for asset in assetsToWarm {
+                group.addTask {
+                    await AssetHistoryThumbnailPrefetcher.prefetch(asset: asset, size: size)
+                }
+            }
+        }
+    }
+
     func assets(for deviceId: String) -> [BackupAssetRecord] {
         allAssets.filter { $0.deviceId == deviceId && $0.status == "completed" }
     }
@@ -789,6 +817,13 @@ final class DashboardViewModel: ObservableObject {
 
     func failedCount(for deviceId: String) -> Int {
         allAssets.filter { $0.deviceId == deviceId && $0.status == "failed" }.count
+    }
+
+    func lastBackupDate(for deviceId: String) -> Date? {
+        allAssets
+            .filter { $0.deviceId == deviceId && ($0.status == "completed" || $0.status == "duplicate") }
+            .compactMap(\.completedAt)
+            .max()
     }
 
     func selectBackupFolder() {
@@ -952,7 +987,7 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         }
     }
 
-    private static func generateThumbnailData(fileURL: URL, mediaType: String, size: CGFloat, scale: CGFloat) async -> Data? {
+    static func generateThumbnailData(fileURL: URL, mediaType: String, size: CGFloat, scale: CGFloat) async -> Data? {
         if let directImage = loadDirectThumbnail(fileURL: fileURL, mediaType: mediaType, size: size) {
             return jpegData(from: directImage)
         }
@@ -1089,6 +1124,43 @@ actor AssetHistoryThumbnailCache {
 
     private func estimatedCost(for size: CGFloat) -> Int {
         Int(size * size * 4)
+    }
+}
+
+enum AssetHistoryThumbnailPrefetcher {
+    static func prefetch(asset: BackupAssetRecord, size: CGFloat) async {
+        let resolvedPath: String
+        if (asset.finalPath as NSString).isAbsolutePath {
+            resolvedPath = asset.finalPath
+        } else {
+            let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
+            resolvedPath = backupFolder
+                .appendingPathComponent(asset.finalPath)
+                .path
+        }
+
+        guard !resolvedPath.isEmpty else { return }
+
+        let fileURL = URL(fileURLWithPath: resolvedPath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        if await AssetHistoryThumbnailCache.shared.cachedImageData(for: fileURL, size: size) != nil {
+            return
+        }
+
+        let displayScale = NSScreen.main?.backingScaleFactor ?? 2
+        let generatedData = await Task.detached(priority: .utility) {
+            await AssetHistoryThumbnailLoader.generateThumbnailData(
+                fileURL: fileURL,
+                mediaType: asset.mediaType,
+                size: size,
+                scale: displayScale
+            )
+        }.value
+
+        if let generatedData {
+            await AssetHistoryThumbnailCache.shared.store(generatedData, for: fileURL, size: size)
+        }
     }
 }
 
