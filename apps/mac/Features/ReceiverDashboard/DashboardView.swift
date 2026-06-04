@@ -265,12 +265,25 @@ struct DashboardView: View {
     }
 
     private var timeGroupingPicker: some View {
-        Picker("Group", selection: $viewModel.assetHistoryTimeGroupingMode) {
+        Menu {
             ForEach(AssetHistoryTimeGroupingMode.allCases) { mode in
-                Text(mode.label).tag(mode)
+                Button {
+                    viewModel.assetHistoryTimeGroupingMode = mode
+                } label: {
+                    if viewModel.assetHistoryTimeGroupingMode == mode {
+                        Label(mode.label, systemImage: "checkmark")
+                    } else {
+                        Text(mode.label)
+                    }
+                }
             }
+        } label: {
+            Image(systemName: "calendar")
+                .frame(width: 28, height: 28)
         }
-        .pickerStyle(.menu)
+        .menuStyle(.borderlessButton)
+        .padding(4)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: - Toolbar
@@ -425,17 +438,7 @@ struct DashboardView: View {
 
     private func assetHistoryGridCard(_ asset: BackupAssetRecord) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
-                AssetHistoryThumbnailView(asset: asset, size: 72)
-                Spacer(minLength: 0)
-                Text(assetStatusLabel(asset.status))
-                    .font(.caption.weight(.medium))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(assetStatusColor(asset.status).opacity(0.14))
-                    .foregroundStyle(assetStatusColor(asset.status))
-                    .clipShape(Capsule())
-            }
+            AssetHistoryThumbnailView(asset: asset, size: 72)
 
             Text(asset.originalFilename)
                 .font(.headline)
