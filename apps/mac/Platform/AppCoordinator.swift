@@ -4,6 +4,80 @@ import AppKit
 import ICherriProtocol
 import ICherriCore
 
+actor BackupRunProgressStore {
+    struct Snapshot: Sendable {
+        let totalBytes: Int64
+        let completedBytes: Int64
+
+        var fractionCompleted: Double {
+            guard totalBytes > 0 else { return 0 }
+            return min(max(Double(completedBytes) / Double(totalBytes), 0), 1)
+        }
+    }
+
+    private struct DeviceRunProgress: Sendable {
+        var totalBytes: Int64
+        var alreadyBackedUpBytes: Int64
+        var uploadedAssetIDs: Set<String>
+        var candidateBytesByAssetID: [String: Int64]
+    }
+
+    private var runsByDeviceID: [String: DeviceRunProgress] = [:]
+
+    func recordCheckBatch(request: CheckBatchRequest, response: CheckBatchResponse) {
+        let unsupportedIDs = Set(response.unsupported)
+        let supportedCandidates = request.candidates.filter { !unsupportedIDs.contains($0.assetLocalID) }
+        let candidateBytesByAssetID = Dictionary(uniqueKeysWithValues: supportedCandidates.map { ($0.assetLocalID, max($0.byteSize, 0)) })
+        let alreadyBackedUpIDs = Set(response.alreadyBackedUp).union(response.duplicates)
+        let alreadyBackedUpBytes = alreadyBackedUpIDs.reduce(Int64(0)) { partial, assetID in
+            partial + (candidateBytesByAssetID[assetID] ?? 0)
+        }
+        let totalBytes = supportedCandidates.reduce(Int64(0)) { partial, asset in
+            partial + max(asset.byteSize, 0)
+        }
+
+        runsByDeviceID[request.device.deviceID] = DeviceRunProgress(
+            totalBytes: totalBytes,
+            alreadyBackedUpBytes: alreadyBackedUpBytes,
+            uploadedAssetIDs: [],
+            candidateBytesByAssetID: candidateBytesByAssetID
+        )
+    }
+
+    func markUploaded(deviceID: String, assetLocalID: String) {
+        guard var run = runsByDeviceID[deviceID] else { return }
+        guard run.candidateBytesByAssetID[assetLocalID] != nil else { return }
+        run.uploadedAssetIDs.insert(assetLocalID)
+        runsByDeviceID[deviceID] = run
+    }
+
+    func snapshot(activeSessions: [UploadSessionRecord]) -> Snapshot? {
+        let activeDeviceIDs = Set(activeSessions.map(\.deviceId))
+        guard !activeDeviceIDs.isEmpty else { return nil }
+
+        var totalBytes: Int64 = 0
+        var completedBytes: Int64 = 0
+
+        for deviceID in activeDeviceIDs {
+            guard let run = runsByDeviceID[deviceID] else { continue }
+
+            totalBytes += run.totalBytes
+            completedBytes += run.alreadyBackedUpBytes
+            completedBytes += run.uploadedAssetIDs.reduce(Int64(0)) { partial, assetID in
+                partial + (run.candidateBytesByAssetID[assetID] ?? 0)
+            }
+        }
+
+        let activeSessionBytes = activeSessions.reduce(Int64(0)) { partial, session in
+            partial + max(session.receivedBytes, 0)
+        }
+        completedBytes += activeSessionBytes
+
+        guard totalBytes > 0 else { return nil }
+        return Snapshot(totalBytes: totalBytes, completedBytes: min(completedBytes, totalBytes))
+    }
+}
+
 @MainActor
 final class AppCoordinator: NSObject, ObservableObject {
     static let shared = AppCoordinator()
@@ -19,6 +93,7 @@ final class AppCoordinator: NSObject, ObservableObject {
     
     private var sessionManager: SessionManager?
     private var commitProcessor: FileCommitProcessor?
+    let backupRunProgressStore = BackupRunProgressStore()
     
     private var routeService: ReceiverRouteService?
     
@@ -75,7 +150,10 @@ final class AppCoordinator: NSObject, ObservableObject {
             
             // Handlers
             let queryProcessor = CheckBatchProcessor(index: DatabaseManager.shared)
-            let checkBatchHandler = CheckBatchHandler(processor: queryProcessor)
+            let checkBatchHandler = CheckBatchHandler(
+                processor: queryProcessor,
+                progressStore: backupRunProgressStore
+            )
             let uploadHandler = UploadHandler(sessionManager: manager, incomingDir: tmpDir)
             let uploadStatusHandler = UploadStatusHandler(sessionManager: manager)
             let routeService = ReceiverRouteService(
@@ -322,6 +400,10 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
             switch result {
             case .success(let backupID, let displayPath):
                 try await sessionManager.completeSession(uploadID: uploadID)
+                await AppCoordinator.shared.backupRunProgressStore.markUploaded(
+                    deviceID: session.deviceID,
+                    assetLocalID: session.assetLocalID
+                )
                 await MainActor.run {
                     NotificationCenter.default.post(name: .receiverDataDidChange, object: nil)
                 }

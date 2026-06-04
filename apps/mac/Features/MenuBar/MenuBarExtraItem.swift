@@ -28,7 +28,7 @@ public struct MenuBarExtraItem: Scene {
                 Image(systemName: state.menuBarSymbolName)
             }
             if state.isReceiving {
-                Text("\(Int(state.receivingProgress * 100))%")
+                Text("\(Int(state.overallBackupProgress * 100))%")
                     .font(.caption2.monospacedDigit())
             }
         }
@@ -90,10 +90,14 @@ struct MenuBarPopoverContent: View {
                 statusRow(icon: "arrow.up.circle", text: uploadSummary)
             }
 
+            if let progressSummary = state.backupProgressSummary {
+                statusRow(icon: "chart.bar.xaxis", text: progressSummary)
+            }
+
             statusRow(icon: "folder", text: state.backupFolderPath)
 
             if state.isReceiving {
-                ProgressView(value: state.receivingProgress)
+                ProgressView(value: state.overallBackupProgress)
                     .tint(.accentColor)
                     .padding(.top, 2)
             }
@@ -160,12 +164,13 @@ final class MenuBarState: ObservableObject {
 
     @Published var status: Status = .offline
     @Published var isReceiving = false
-    @Published var receivingProgress: Double = 0
+    @Published var overallBackupProgress: Double = 0
     @Published var connectedDeviceName: String?
     @Published var activeUploadCount = 0
     @Published var activeDeviceCount = 0
     @Published var backupFolderPath = AppCoordinator.shared.backupFolder.path
     @Published var isDashboardOpen = false
+    @Published var backupProgressSummary: String?
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -269,13 +274,22 @@ final class MenuBarState: ObservableObject {
             let activeDeviceIDs = Array(Set(sessions.map(\.deviceId))).sorted()
             let totalExpected = sessions.reduce(Int64(0)) { $0 + max($1.expectedByteSize, 0) }
             let totalReceived = sessions.reduce(Int64(0)) { $0 + max($1.receivedBytes, 0) }
+            let coverageSnapshot = await AppCoordinator.shared.backupRunProgressStore.snapshot(activeSessions: sessions)
 
             await MainActor.run {
                 self.activeUploadCount = sessions.count
                 self.activeDeviceCount = activeDeviceIDs.count
                 self.connectedDeviceName = activeDeviceIDs.count == 1 ? deviceNames[activeDeviceIDs[0]] : nil
                 self.isReceiving = !sessions.isEmpty
-                self.receivingProgress = totalExpected > 0 ? min(max(Double(totalReceived) / Double(totalExpected), 0), 1) : 0
+
+                if let snapshot = coverageSnapshot {
+                    self.overallBackupProgress = snapshot.fractionCompleted
+                    self.backupProgressSummary = "\(Self.formatBytes(snapshot.completedBytes)) / \(Self.formatBytes(snapshot.totalBytes)) backed up"
+                } else {
+                    let fallbackProgress = totalExpected > 0 ? min(max(Double(totalReceived) / Double(totalExpected), 0), 1) : 0
+                    self.overallBackupProgress = fallbackProgress
+                    self.backupProgressSummary = nil
+                }
 
                 if self.isReceiving {
                     self.status = .receiving
@@ -286,6 +300,10 @@ final class MenuBarState: ObservableObject {
                 }
             }
         }
+    }
+
+    private static func formatBytes(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
 
