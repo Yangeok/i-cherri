@@ -4,6 +4,19 @@ import ICherriProtocol
 
 // Manages the full lifecycle of a resumable upload: init → chunk send → (resume on abort) → commit.
 public actor ResumableUploadManager {
+    private final class PreparedVideoStreamBox: @unchecked Sendable {
+        let stream: InputStream
+
+        init(stream: InputStream) {
+            self.stream = stream
+        }
+    }
+
+    private enum PreparedUpload {
+        case image(data: Data, metadata: AssetMetadata, contentHash: String)
+        case video(streamBox: PreparedVideoStreamBox, metadata: AssetMetadata, contentHash: String)
+    }
+
     private let backupClient: BackupClient
     private let chunkSender: ChunkUploadSender
     private let scanner: PhotoLibraryScanner
@@ -25,41 +38,70 @@ public actor ResumableUploadManager {
         assetLocalID: String,
         metadata: AssetMetadata
     ) async throws -> UploadResult {
-        if metadata.mediaType == .video {
-            return try await uploadVideo(assetLocalID: assetLocalID, metadata: metadata)
+        let preparedUpload = try await prepareUpload(assetLocalID: assetLocalID, metadata: metadata)
+        switch preparedUpload {
+        case .image(let data, let normalizedMetadata, let contentHash):
+            return try await uploadPreparedImage(
+                assetLocalID: assetLocalID,
+                data: data,
+                metadata: normalizedMetadata,
+                contentHash: contentHash
+            )
+        case .video(let streamBox, let normalizedMetadata, let contentHash):
+            return try await uploadPreparedVideo(
+                assetLocalID: assetLocalID,
+                stream: streamBox.stream,
+                metadata: normalizedMetadata,
+                contentHash: contentHash
+            )
         }
-        return try await uploadImage(assetLocalID: assetLocalID, metadata: metadata)
     }
 
-    private func uploadImage(assetLocalID: String, metadata: AssetMetadata) async throws -> UploadResult {
+    private func prepareUpload(assetLocalID: String, metadata: AssetMetadata) async throws -> PreparedUpload {
+        if metadata.mediaType == .video {
+            let (stream, totalSize) = try await scanner.openInputStreamWithSize(for: assetLocalID)
+            let contentHash = try await hashStream(assetLocalID: assetLocalID)
+            let normalizedMetadata = normalized(from: metadata, byteSize: totalSize)
+            return .video(streamBox: PreparedVideoStreamBox(stream: stream), metadata: normalizedMetadata, contentHash: contentHash)
+        }
+
         let data = try await scanner.fetchData(for: assetLocalID)
         let contentHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let normalizedMetadata = normalized(from: metadata, byteSize: Int64(data.count))
+        return .image(data: data, metadata: normalizedMetadata, contentHash: contentHash)
+    }
 
-        let (uploadID, startOffset, chunkSize) = try await initOrResumeSession(metadata: normalizedMetadata)
+    private func uploadPreparedImage(
+        assetLocalID: String,
+        data: Data,
+        metadata: AssetMetadata,
+        contentHash: String
+    ) async throws -> UploadResult {
+        let (uploadID, startOffset, chunkSize) = try await initOrResumeSession(metadata: metadata)
         try await chunkSender.send(
             data: data,
             uploadID: uploadID,
             chunkSize: chunkSize,
             startingOffset: startOffset
         )
-        return try await commitAndReturn(uploadID: uploadID, assetLocalID: assetLocalID, metadata: normalizedMetadata, contentHash: contentHash)
+        return try await commitAndReturn(uploadID: uploadID, assetLocalID: assetLocalID, metadata: metadata, contentHash: contentHash)
     }
 
-    private func uploadVideo(assetLocalID: String, metadata: AssetMetadata) async throws -> UploadResult {
-        let (stream, totalSize) = try await scanner.openInputStreamWithSize(for: assetLocalID)
-        let contentHash = try await hashStream(assetLocalID: assetLocalID)
-        let normalizedMetadata = normalized(from: metadata, byteSize: totalSize)
-
-        let (uploadID, startOffset, chunkSize) = try await initOrResumeSession(metadata: normalizedMetadata)
+    private func uploadPreparedVideo(
+        assetLocalID: String,
+        stream: InputStream,
+        metadata: AssetMetadata,
+        contentHash: String
+    ) async throws -> UploadResult {
+        let (uploadID, startOffset, chunkSize) = try await initOrResumeSession(metadata: metadata)
         try await chunkSender.send(
             stream: stream,
             uploadID: uploadID,
-            totalSize: totalSize,
+            totalSize: metadata.byteSize,
             chunkSize: chunkSize,
             startingOffset: startOffset
         )
-        return try await commitAndReturn(uploadID: uploadID, assetLocalID: assetLocalID, metadata: normalizedMetadata, contentHash: contentHash)
+        return try await commitAndReturn(uploadID: uploadID, assetLocalID: assetLocalID, metadata: metadata, contentHash: contentHash)
     }
 
     private func normalized(from metadata: AssetMetadata, byteSize: Int64) -> AssetMetadata {

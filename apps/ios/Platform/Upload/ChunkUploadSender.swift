@@ -108,7 +108,6 @@ public actor ChunkUploadSender {
     }
 }
 
-@MainActor
 public protocol ChunkUploadProgressDelegate: AnyObject {
     func didSendBytes(_ bytes: Int64, totalSent: Int64, totalExpected: Int64) async
 }

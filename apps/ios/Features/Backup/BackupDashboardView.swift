@@ -520,7 +520,8 @@ final class BackupDashboardViewModel: ObservableObject {
                 let progressCoordinator = await MainActor.run {
                     BackupUploadProgressCoordinator(
                         viewModel: progressViewModel,
-                        totalExpectedBytes: scanPlan.totalAssetBytes
+                        totalExpectedBytes: scanPlan.totalAssetBytes,
+                        totalCount: progressViewModel.totalCount
                     )
                 }
 
@@ -621,7 +622,7 @@ final class BackupDashboardViewModel: ObservableObject {
                                 device: device,
                                 trustToken: trustToken
                             )
-                            let taskProgress = await AssetUploadProgressReporter(
+                            let taskProgress = AssetUploadProgressReporter(
                                 assetLocalID: metadata.assetLocalID,
                                 filename: metadata.originalFilename,
                                 coordinator: progressCoordinator
@@ -668,8 +669,9 @@ final class BackupDashboardViewModel: ObservableObject {
                         case .success(let assetLocalID, let filename):
                             success += 1
                             completed += 1
+                            let overallBackedUpCount = duplicates + success
                             await MainActor.run {
-                                self.updateBackupCoverage(backedUpCount: duplicates + success, totalCount: scanPlan.totalAssetCount)
+                                self.updateBackupCoverage(backedUpCount: overallBackedUpCount, totalCount: scanPlan.totalAssetCount)
                                 self.scanIndexStore.markSucceeded(assetIDs: [assetLocalID])
                             }
                             await progressCoordinator.finishAsset(
@@ -679,7 +681,7 @@ final class BackupDashboardViewModel: ObservableObject {
                                 success: success,
                                 duplicates: duplicates,
                                 failed: failed,
-                                overallBackedUpCount: duplicates + success
+                                overallBackedUpCount: overallBackedUpCount
                             )
                         case .failure(let assetLocalID, let filename, let reason):
                             failed += 1
@@ -714,9 +716,10 @@ final class BackupDashboardViewModel: ObservableObject {
                     progressViewModel.setPhase(.complete)
                 }
             } catch is CancellationError {
+                let scanMode = executedScanMode
                 await MainActor.run {
                     self.backupStatusMessage = "Backup canceled."
-                    self.scanIndexStore.finishBackupRun(mode: executedScanMode)
+                    self.scanIndexStore.finishBackupRun(mode: scanMode)
                     self.activeBackupProgressViewModel = nil
                 }
             } catch {
@@ -907,8 +910,7 @@ private func backupFailureReason(_ error: Error) -> String {
     return error.localizedDescription
 }
 
-@MainActor
-private final class BackupUploadProgressCoordinator {
+private actor BackupUploadProgressCoordinator {
     private struct ActiveUploadState {
         var filename: String
         var sentBytes: Int64 = 0
@@ -918,6 +920,8 @@ private final class BackupUploadProgressCoordinator {
 
     private let viewModel: BackupProgressViewModel
     private let totalExpectedBytes: Int64
+    private let totalCount: Int
+    private let throttleIntervalNanoseconds: UInt64 = 150_000_000
     private var currentFilename: String = "Preparing uploads..."
     private var acknowledgedBytes: Int64 = 0
     private var completed: Int = 0
@@ -927,10 +931,13 @@ private final class BackupUploadProgressCoordinator {
     private var overallBackedUpCount: Int = 0
     private var activeUploads: [String: ActiveUploadState] = [:]
     private var failedUploads: [FailedUploadProgressItem] = []
+    private var lastEmissionUptime: UInt64 = 0
+    private var pendingEmissionTask: Task<Void, Never>?
 
-    init(viewModel: BackupProgressViewModel, totalExpectedBytes: Int64) {
+    init(viewModel: BackupProgressViewModel, totalExpectedBytes: Int64, totalCount: Int) {
         self.viewModel = viewModel
         self.totalExpectedBytes = totalExpectedBytes
+        self.totalCount = totalCount
     }
 
     func beginAsset(assetLocalID: String, filename: String, expectedByteSize: Int64) {
@@ -958,12 +965,12 @@ private final class BackupUploadProgressCoordinator {
         self.duplicates = duplicates
         self.failed = failed
         self.overallBackedUpCount = overallBackedUpCount
-        pushUpdate(bytesPerSecond: bytesPerSecond, phase: phase)
+        pushUpdate(bytesPerSecond: bytesPerSecond, phase: phase, immediate: phase == .complete || phase == .failed)
     }
 
     func setInitialFailures(_ failures: [FailedUploadProgressItem]) {
         failedUploads = failures
-        pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
+        pushUpdate(bytesPerSecond: aggregateBytesPerSecond, immediate: true)
     }
 
     func setAcknowledgedBytes(_ bytes: Int64) {
@@ -1000,8 +1007,8 @@ private final class BackupUploadProgressCoordinator {
         self.duplicates = duplicates
         self.failed = failed
         self.overallBackedUpCount = overallBackedUpCount
-        let phase: BackupProgressPhase = activeUploads.isEmpty && completed >= viewModel.totalCount ? .complete : .uploading
-        pushUpdate(bytesPerSecond: aggregateBytesPerSecond, phase: phase)
+        let phase: BackupProgressPhase = activeUploads.isEmpty && completed >= totalCount ? .complete : .uploading
+        pushUpdate(bytesPerSecond: aggregateBytesPerSecond, phase: phase, immediate: phase == .complete)
     }
 
     func recordFailure(assetLocalID: String, filename: String, reason: String) {
@@ -1015,14 +1022,47 @@ private final class BackupUploadProgressCoordinator {
             )
         )
         failedUploads.sort { $0.filename.localizedStandardCompare($1.filename) == .orderedAscending }
-        pushUpdate(bytesPerSecond: aggregateBytesPerSecond, phase: viewModel.phase)
+        pushUpdate(bytesPerSecond: aggregateBytesPerSecond, phase: .failed, immediate: true)
     }
 
     private var aggregateBytesPerSecond: Double {
         activeUploads.values.reduce(0) { $0 + $1.bytesPerSecond }
     }
 
-    private func pushUpdate(bytesPerSecond: Double, phase: BackupProgressPhase = .uploading) {
+    private func pushUpdate(
+        bytesPerSecond: Double,
+        phase: BackupProgressPhase = .uploading,
+        immediate: Bool = false
+    ) {
+        if immediate {
+            pendingEmissionTask?.cancel()
+            pendingEmissionTask = nil
+            Task { await emitUpdate(bytesPerSecond: bytesPerSecond, phase: phase) }
+            return
+        }
+
+        let now = DispatchTime.now().uptimeNanoseconds
+        let elapsed = now &- lastEmissionUptime
+        if lastEmissionUptime == 0 || elapsed >= throttleIntervalNanoseconds {
+            Task { await emitUpdate(bytesPerSecond: bytesPerSecond, phase: phase) }
+            return
+        }
+
+        guard pendingEmissionTask == nil else { return }
+        let remaining = throttleIntervalNanoseconds - elapsed
+        pendingEmissionTask = Task { [self] in
+            try? await Task.sleep(nanoseconds: remaining)
+            await emitPendingUpdate()
+        }
+    }
+
+    private func emitPendingUpdate() async {
+        pendingEmissionTask = nil
+        await emitUpdate(bytesPerSecond: aggregateBytesPerSecond, phase: .uploading)
+    }
+
+    private func emitUpdate(bytesPerSecond: Double, phase: BackupProgressPhase) async {
+        lastEmissionUptime = DispatchTime.now().uptimeNanoseconds
         let activeBytesSent = activeUploads.values.reduce(Int64(0)) { $0 + $1.sentBytes }
         let activeBytesTotal = activeUploads.values.reduce(Int64(0)) { $0 + $1.totalBytes }
         let activeUploadItems = activeUploads
@@ -1038,21 +1078,35 @@ private final class BackupUploadProgressCoordinator {
             }
             .sorted { $0.filename.localizedStandardCompare($1.filename) == .orderedAscending }
 
-        viewModel.update(
-            filename: currentFilename,
-            completed: completed,
-            success: success,
-            duplicates: duplicates,
-            failed: failed,
-            overallBackedUpCount: overallBackedUpCount,
-            phase: phase,
-            bytesPerSecond: bytesPerSecond,
-            sentBytes: acknowledgedBytes + activeBytesSent,
-            totalBytes: max(totalExpectedBytes, acknowledgedBytes + activeBytesTotal),
-            activeUploads: activeUploads.count,
-            activeUploadItems: activeUploadItems,
-            failedUploadItems: failedUploads
-        )
+        let snapshotFilename = currentFilename
+        let snapshotCompleted = completed
+        let snapshotSuccess = success
+        let snapshotDuplicates = duplicates
+        let snapshotFailed = failed
+        let snapshotOverallBackedUpCount = overallBackedUpCount
+        let snapshotSentBytes = acknowledgedBytes + activeBytesSent
+        let snapshotTotalBytes = max(totalExpectedBytes, acknowledgedBytes + activeBytesTotal)
+        let snapshotActiveCount = activeUploads.count
+        let snapshotFailedUploads = failedUploads
+        let snapshotViewModel = viewModel
+
+        await MainActor.run {
+            snapshotViewModel.update(
+                filename: snapshotFilename,
+                completed: snapshotCompleted,
+                success: snapshotSuccess,
+                duplicates: snapshotDuplicates,
+                failed: snapshotFailed,
+                overallBackedUpCount: snapshotOverallBackedUpCount,
+                phase: phase,
+                bytesPerSecond: bytesPerSecond,
+                sentBytes: snapshotSentBytes,
+                totalBytes: snapshotTotalBytes,
+                activeUploads: snapshotActiveCount,
+                activeUploadItems: activeUploadItems,
+                failedUploadItems: snapshotFailedUploads
+            )
+        }
     }
 }
 
@@ -1061,8 +1115,7 @@ private enum UploadTaskOutcome: Sendable {
     case failure(assetLocalID: String, filename: String, reason: String)
 }
 
-@MainActor
-private final class AssetUploadProgressReporter: ChunkUploadProgressDelegate {
+private actor AssetUploadProgressReporter: ChunkUploadProgressDelegate {
     private let assetLocalID: String
     private let filename: String
     private let coordinator: BackupUploadProgressCoordinator
@@ -1077,7 +1130,7 @@ private final class AssetUploadProgressReporter: ChunkUploadProgressDelegate {
     func didSendBytes(_ bytes: Int64, totalSent: Int64, totalExpected: Int64) async {
         let elapsed = max(Date().timeIntervalSince(startedAt), 0.001)
         let bytesPerSecond = Double(totalSent) / elapsed
-        coordinator.didSendBytes(
+        await coordinator.didSendBytes(
             assetLocalID: assetLocalID,
             filename: filename,
             totalSent: totalSent,
