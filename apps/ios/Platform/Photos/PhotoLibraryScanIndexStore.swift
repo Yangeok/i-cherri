@@ -14,7 +14,7 @@ struct PhotoLibraryScanPlan {
     let totalAssetBytes: Int64
 }
 
-private struct PhotoLibraryScanIndexState: Codable {
+struct PhotoLibraryScanIndexState: Codable {
     static let currentSchemaVersion = 2
 
     var schemaVersion = currentSchemaVersion

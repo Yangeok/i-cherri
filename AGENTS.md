@@ -9,6 +9,7 @@
 ## Git & Workflow Rules
 
 - **Pre-commit Hook**: 모든 커밋 전 macOS/iOS 앱 빌드 성공 여부를 자동으로 검증한다.
+- **Test Discipline**: 백업/세션/진행률/스캔처럼 상태 전이가 있는 로직을 수정하면 관련 unit/integration test를 함께 추가하거나 갱신하고, 작업 중 해당 테스트를 직접 실행해 깨지지 않는지 확인한다.
 - **Commit Convention**: 커밋 메시지는 Commitizen (cz) 스타일의 영문을 사용한다. (예: `feat: add backup feature`, `fix: resolve crash in sync`)
 - **Finalization**: 작업이 완료되면 반드시 커밋을 수행하여 상태를 보존한다. 답변 시 변경된 컴포넌트(macOS 앱, iOS 앱, shared package 등)와 실행해야 할 `make` 명령어를 짧게 안내한다.
 
