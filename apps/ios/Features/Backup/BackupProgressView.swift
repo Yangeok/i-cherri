@@ -87,7 +87,7 @@ public struct BackupProgressView: View {
                 .frame(height: 16)
 
             HStack {
-                Text("\(viewModel.completedCount) / \(viewModel.totalCount) files")
+                Text("\(viewModel.backedUpCount) / \(viewModel.totalCount) backed up")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -109,7 +109,7 @@ public struct BackupProgressView: View {
 
     private var statsSection: some View {
         HStack(spacing: 12) {
-            GlowBadge(label: "Uploaded", value: "\(viewModel.successCount)", color: .green)
+            GlowBadge(label: "Backed Up", value: "\(viewModel.backedUpCount)", color: .green)
             GlowBadge(label: "Failed", value: "\(viewModel.failedCount)", color: .red)
         }
     }
@@ -246,6 +246,12 @@ public final class BackupProgressViewModel: ObservableObject {
         if completedCount < count {
             isComplete = false
         }
+        formattedTransfer = formatTransfer(sentBytes: sentBytes, totalBytes: totalBytes)
+    }
+
+    public func setTotalBytes(_ bytes: Int64) {
+        totalBytes = max(bytes, 0)
+        formattedTransfer = formatTransfer(sentBytes: sentBytes, totalBytes: totalBytes)
     }
 
     public func update(
@@ -298,6 +304,10 @@ public final class BackupProgressViewModel: ObservableObject {
         !isComplete && errorMessage == nil
     }
 
+    public var backedUpCount: Int {
+        successCount + duplicateCount
+    }
+
     public var headerTitle: String {
         if errorMessage != nil { return "Backup Failed" }
         if isComplete { return "Backup Complete" }
@@ -329,9 +339,14 @@ public final class BackupProgressViewModel: ObservableObject {
     private func formatTransfer(sentBytes: Int64, totalBytes: Int64) -> String {
         guard totalBytes > 0 else { return "0 B / —" }
 
-        let sent = ByteCountFormatter.string(fromByteCount: sentBytes, countStyle: .file)
-        let total = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+        let sent = formatByteCount(sentBytes)
+        let total = formatByteCount(totalBytes)
         return "\(sent) / \(total)"
+    }
+
+    private func formatByteCount(_ bytes: Int64) -> String {
+        guard bytes > 0 else { return "0 B" }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
 
@@ -350,8 +365,8 @@ public struct ActiveUploadProgressItem: Identifiable, Equatable {
 
     public var formattedTransfer: String {
         guard totalBytes > 0 else { return "0 B / —" }
-        let sent = ByteCountFormatter.string(fromByteCount: sentBytes, countStyle: .file)
-        let total = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+        let sent = formatByteCount(sentBytes)
+        let total = formatByteCount(totalBytes)
         return "\(sent) / \(total)"
     }
 
@@ -359,6 +374,11 @@ public struct ActiveUploadProgressItem: Identifiable, Equatable {
         if bytesPerSecond >= 1_000_000 { return String(format: "%.1f MB/s", bytesPerSecond / 1_000_000) }
         if bytesPerSecond >= 1_000 { return String(format: "%.0f KB/s", bytesPerSecond / 1_000) }
         return String(format: "%.0f B/s", bytesPerSecond)
+    }
+
+    private func formatByteCount(_ bytes: Int64) -> String {
+        guard bytes > 0 else { return "0 B" }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
 

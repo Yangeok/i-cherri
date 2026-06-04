@@ -136,7 +136,7 @@ public final class PhotoLibraryScanner {
         let mediaType = resolveMediaType(asset)
         let creation = asset.creationDate ?? Date()
         let modification = asset.modificationDate ?? creation
-        let byteSize: Int64 = 0
+        let byteSize = resolveByteSize(for: asset)
         let fingerprint = FingerprintBuilder.build(
             creationDate: creation,
             modificationDate: modification,
@@ -174,6 +174,35 @@ public final class PhotoLibraryScanner {
     private static func inferFilename(from asset: PHAsset) -> String? {
         let resources = PHAssetResource.assetResources(for: asset)
         return resources.first?.originalFilename
+    }
+
+    private static func resolveByteSize(for asset: PHAsset) -> Int64 {
+        let resources = PHAssetResource.assetResources(for: asset)
+        let resource = preferredResource(from: resources, mediaType: asset.mediaType) ?? resources.first
+        guard let resource else { return 0 }
+
+        if let size = resource.value(forKey: "fileSize") as? Int64 {
+            return size
+        }
+        if let size = resource.value(forKey: "fileSize") as? NSNumber {
+            return size.int64Value
+        }
+        return 0
+    }
+
+    private static func preferredResource(from resources: [PHAssetResource], mediaType: PHAssetMediaType) -> PHAssetResource? {
+        switch mediaType {
+        case .image:
+            return resources.first {
+                $0.type == .photo || $0.type == .fullSizePhoto || $0.type == .alternatePhoto
+            }
+        case .video:
+            return resources.first {
+                $0.type == .video || $0.type == .fullSizeVideo
+            }
+        default:
+            return resources.first
+        }
     }
 
     private func mapStatus(_ status: PHAuthorizationStatus) -> PhotoLibraryAuthStatus {

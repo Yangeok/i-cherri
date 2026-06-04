@@ -11,6 +11,7 @@ struct PhotoLibraryScanPlan {
     let mode: Mode
     let assets: [AssetMetadata]
     let totalAssetCount: Int
+    let totalAssetBytes: Int64
 }
 
 private struct PhotoLibraryScanIndexState: Codable {
@@ -66,12 +67,22 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
             state.fullScanCompleted = true
             state.incrementalRunsSinceReconcile = 0
             persist()
-            return PhotoLibraryScanPlan(mode: .full, assets: assets, totalAssetCount: totalCount)
+            return PhotoLibraryScanPlan(
+                mode: .full,
+                assets: assets,
+                totalAssetCount: totalCount,
+                totalAssetBytes: sumOfCachedAssetBytes()
+            )
         }
 
         let candidateIDs = Array(state.pendingAssetIDs.union(state.retryAssetIDs))
         guard !candidateIDs.isEmpty else {
-            return PhotoLibraryScanPlan(mode: .incremental, assets: [], totalAssetCount: totalCount)
+            return PhotoLibraryScanPlan(
+                mode: .incremental,
+                assets: [],
+                totalAssetCount: totalCount,
+                totalAssetBytes: sumOfCachedAssetBytes()
+            )
         }
 
         let assets = await scanner.scanAssets(localIdentifiers: candidateIDs, deviceID: deviceID)
@@ -90,7 +101,12 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
         }
 
         persist()
-        return PhotoLibraryScanPlan(mode: .incremental, assets: assets, totalAssetCount: totalCount)
+        return PhotoLibraryScanPlan(
+            mode: .incremental,
+            assets: assets,
+            totalAssetCount: totalCount,
+            totalAssetBytes: sumOfCachedAssetBytes()
+        )
     }
 
     func markRetryRequired(assetIDs: [String]) {
@@ -181,5 +197,11 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
         return PHAsset.fetchAssets(with: options)
+    }
+
+    private func sumOfCachedAssetBytes() -> Int64 {
+        state.cachedAssetsByID.values.reduce(Int64(0)) { partialResult, asset in
+            partialResult + max(asset.byteSize, 0)
+        }
     }
 }

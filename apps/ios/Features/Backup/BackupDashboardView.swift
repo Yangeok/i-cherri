@@ -475,6 +475,7 @@ final class BackupDashboardViewModel: ObservableObject {
 
                 await MainActor.run {
                     progressViewModel.setTotalCount(scanPlan.totalAssetCount)
+                    progressViewModel.setTotalBytes(scanPlan.totalAssetBytes)
                 }
 
                 try Task.checkCancellation()
@@ -487,7 +488,8 @@ final class BackupDashboardViewModel: ObservableObject {
                             success: 0,
                             duplicates: 0,
                             failed: 0,
-                            bytesPerSecond: 0
+                            bytesPerSecond: 0,
+                            totalBytes: scanPlan.totalAssetBytes
                         )
                         self.updateBackupCoverage(backedUpCount: 0, totalCount: scanPlan.totalAssetCount)
                         self.backupStatusMessage = scanPlan.mode == .incremental
@@ -499,7 +501,10 @@ final class BackupDashboardViewModel: ObservableObject {
                 }
 
                 let progressCoordinator = await MainActor.run {
-                    BackupUploadProgressCoordinator(viewModel: progressViewModel)
+                    BackupUploadProgressCoordinator(
+                        viewModel: progressViewModel,
+                        totalExpectedBytes: scanPlan.totalAssetBytes
+                    )
                 }
 
                 await progressCoordinator.updateSnapshot(
@@ -527,6 +532,9 @@ final class BackupDashboardViewModel: ObservableObject {
                 let duplicates = batchResponse.alreadyBackedUp.count + batchResponse.duplicates.count
                 var failed = batchResponse.unsupported.count
                 var pendingAssets: [AssetMetadata] = []
+                let duplicateBytes = (batchResponse.alreadyBackedUp + batchResponse.duplicates)
+                    .compactMap { assetIndex[$0]?.byteSize }
+                    .reduce(Int64(0), +)
                 await MainActor.run {
                     self.updateBackupCoverage(backedUpCount: duplicates, totalCount: scanPlan.totalAssetCount)
                     self.scanIndexStore.markSucceeded(assetIDs: batchResponse.alreadyBackedUp + batchResponse.duplicates)
@@ -561,6 +569,7 @@ final class BackupDashboardViewModel: ObservableObject {
                 }
 
                 await progressCoordinator.setInitialFailures(initialFailures)
+                await progressCoordinator.setAcknowledgedBytes(duplicateBytes)
                 await progressCoordinator.updateSnapshot(
                     filename: "Preparing uploads...",
                     completed: completed,
@@ -603,7 +612,8 @@ final class BackupDashboardViewModel: ObservableObject {
 
                             await progressCoordinator.beginAsset(
                                 assetLocalID: metadata.assetLocalID,
-                                filename: metadata.originalFilename
+                                filename: metadata.originalFilename,
+                                expectedByteSize: metadata.byteSize
                             )
 
                             do {
@@ -870,9 +880,9 @@ private final class BackupUploadProgressCoordinator {
     }
 
     private let viewModel: BackupProgressViewModel
+    private let totalExpectedBytes: Int64
     private var currentFilename: String = "Preparing uploads..."
-    private var archivedSentBytes: Int64 = 0
-    private var archivedTotalBytes: Int64 = 0
+    private var acknowledgedBytes: Int64 = 0
     private var completed: Int = 0
     private var success: Int = 0
     private var duplicates: Int = 0
@@ -880,13 +890,17 @@ private final class BackupUploadProgressCoordinator {
     private var activeUploads: [String: ActiveUploadState] = [:]
     private var failedUploads: [FailedUploadProgressItem] = []
 
-    init(viewModel: BackupProgressViewModel) {
+    init(viewModel: BackupProgressViewModel, totalExpectedBytes: Int64) {
         self.viewModel = viewModel
+        self.totalExpectedBytes = totalExpectedBytes
     }
 
-    func beginAsset(assetLocalID: String, filename: String) {
+    func beginAsset(assetLocalID: String, filename: String, expectedByteSize: Int64) {
         currentFilename = filename
-        activeUploads[assetLocalID] = ActiveUploadState(filename: filename)
+        activeUploads[assetLocalID] = ActiveUploadState(
+            filename: filename,
+            totalBytes: max(expectedByteSize, 0)
+        )
         pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
     }
 
@@ -911,6 +925,11 @@ private final class BackupUploadProgressCoordinator {
         pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
     }
 
+    func setAcknowledgedBytes(_ bytes: Int64) {
+        acknowledgedBytes = max(bytes, 0)
+        pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
+    }
+
     func didSendBytes(assetLocalID: String, filename: String, totalSent: Int64, totalExpected: Int64, bytesPerSecond: Double) {
         currentFilename = filename
         activeUploads[assetLocalID] = ActiveUploadState(
@@ -932,8 +951,7 @@ private final class BackupUploadProgressCoordinator {
     ) {
         currentFilename = filename
         if let state = activeUploads.removeValue(forKey: assetLocalID) {
-            archivedSentBytes += max(state.sentBytes, state.totalBytes)
-            archivedTotalBytes += max(state.totalBytes, state.sentBytes)
+            acknowledgedBytes += max(state.sentBytes, state.totalBytes)
         }
         self.completed = completed
         self.success = success
@@ -975,22 +993,15 @@ private final class BackupUploadProgressCoordinator {
             }
             .sorted { $0.filename.localizedStandardCompare($1.filename) == .orderedAscending }
 
-        let displayFilename: String
-        if activeUploads.count > 1 {
-            displayFilename = "\(currentFilename) + \(activeUploads.count - 1) more"
-        } else {
-            displayFilename = currentFilename
-        }
-
         viewModel.update(
-            filename: displayFilename,
+            filename: currentFilename,
             completed: completed,
             success: success,
             duplicates: duplicates,
             failed: failed,
             bytesPerSecond: bytesPerSecond,
-            sentBytes: archivedSentBytes + activeBytesSent,
-            totalBytes: archivedTotalBytes + activeBytesTotal,
+            sentBytes: acknowledgedBytes + activeBytesSent,
+            totalBytes: max(totalExpectedBytes, acknowledgedBytes + activeBytesTotal),
             activeUploads: activeUploads.count,
             activeUploadItems: activeUploadItems,
             failedUploadItems: failedUploads
