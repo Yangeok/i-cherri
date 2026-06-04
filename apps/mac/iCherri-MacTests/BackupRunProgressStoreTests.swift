@@ -14,7 +14,11 @@ struct BackupRunProgressStoreTests {
             asset(id: "a2", bytes: 200),
             asset(id: "a3", bytes: 300)
         ]
-        let request = CheckBatchRequest(device: device, candidates: candidates)
+        let request = CheckBatchRequest(
+            device: device,
+            candidates: candidates,
+            librarySnapshot: CheckBatchLibrarySnapshot(totalAssetCount: 10, totalAssetBytes: 1_000)
+        )
         let response = CheckBatchResponse(
             requiredUploads: [UploadRequirement(assetLocalID: "a3", uploadReason: .notFound)],
             alreadyBackedUp: ["a1"],
@@ -39,11 +43,14 @@ struct BackupRunProgressStoreTests {
             lastError: nil
         )
 
-        let snapshot = await store.snapshot(activeSessions: [activeSession])
+        let snapshot = await store.snapshot(
+            activeSessions: [activeSession],
+            coveredBytesByDeviceID: [device.deviceID: 700]
+        )
 
-        #expect(snapshot?.totalBytes == 600)
-        #expect(snapshot?.completedBytes == 420)
-        #expect(snapshot?.fractionCompleted == 0.7)
+        #expect(snapshot?.totalBytes == 1_000)
+        #expect(snapshot?.completedBytes == 820)
+        #expect(snapshot?.fractionCompleted == 0.82)
     }
 
     @Test("Given a committed upload, when active sessions disappear, then completed bytes stay counted")
@@ -54,7 +61,11 @@ struct BackupRunProgressStoreTests {
             asset(id: "a1", bytes: 150),
             asset(id: "a2", bytes: 250)
         ]
-        let request = CheckBatchRequest(device: device, candidates: candidates)
+        let request = CheckBatchRequest(
+            device: device,
+            candidates: candidates,
+            librarySnapshot: CheckBatchLibrarySnapshot(totalAssetCount: 4, totalAssetBytes: 1_000)
+        )
         let response = CheckBatchResponse(
             requiredUploads: [
                 UploadRequirement(assetLocalID: "a1", uploadReason: .notFound),
@@ -81,11 +92,14 @@ struct BackupRunProgressStoreTests {
             lastError: nil
         )
 
-        let snapshot = await store.snapshot(activeSessions: [remainingSession])
+        let snapshot = await store.snapshot(
+            activeSessions: [remainingSession],
+            coveredBytesByDeviceID: [device.deviceID: 600]
+        )
 
-        #expect(snapshot?.totalBytes == 400)
-        #expect(snapshot?.completedBytes == 200)
-        #expect(snapshot?.fractionCompleted == 0.5)
+        #expect(snapshot?.totalBytes == 1_000)
+        #expect(snapshot?.completedBytes == 800)
+        #expect(snapshot?.fractionCompleted == 0.8)
     }
 
     private func asset(id: String, bytes: Int64) -> AssetMetadata {

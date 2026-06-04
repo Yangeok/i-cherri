@@ -24,8 +24,19 @@ public actor BackupClient {
     }
 
     // Runs check-batch and returns which assets need uploading.
-    public func checkBatch(candidates: [AssetMetadata]) async throws -> CheckBatchResponse {
-        let request = CheckBatchRequest(device: device, candidates: candidates)
+    public func checkBatch(
+        candidates: [AssetMetadata],
+        totalAssetCount: Int,
+        totalAssetBytes: Int64
+    ) async throws -> CheckBatchResponse {
+        let request = CheckBatchRequest(
+            device: device,
+            candidates: candidates,
+            librarySnapshot: CheckBatchLibrarySnapshot(
+                totalAssetCount: totalAssetCount,
+                totalAssetBytes: totalAssetBytes
+            )
+        )
         return try await post(path: "/backup/check-batch", body: request)
     }
 

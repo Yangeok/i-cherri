@@ -578,7 +578,11 @@ final class BackupDashboardViewModel: ObservableObject {
                 )
 
                 let backupClient = BackupClient(receiverBaseURL: receiverURL, device: device, trustToken: trustToken)
-                let batchResponse = try await backupClient.checkBatch(candidates: scannedAssets)
+                let batchResponse = try await backupClient.checkBatch(
+                    candidates: scannedAssets,
+                    totalAssetCount: scanPlan.totalAssetCount,
+                    totalAssetBytes: scanPlan.totalAssetBytes
+                )
                 let assetIndex = Dictionary(uniqueKeysWithValues: scannedAssets.map { ($0.assetLocalID, $0) })
 
                 var completed = batchResponse.alreadyBackedUp.count + batchResponse.duplicates.count + batchResponse.unsupported.count

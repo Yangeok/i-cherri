@@ -482,6 +482,32 @@ actor DatabaseManager {
         }
     }
 
+    func fetchCoveredBytesByDevice(deviceIDs: [String]) throws -> [String: Int64] {
+        guard !deviceIDs.isEmpty else { return [:] }
+
+        return try queue.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                SELECT device_id, COALESCE(SUM(byte_size), 0) AS covered_bytes
+                FROM backup_assets
+                WHERE device_id IN \(deviceIDs)
+                  AND status IN ('completed', 'duplicate')
+                GROUP BY device_id
+                """
+            )
+
+            var result: [String: Int64] = [:]
+            result.reserveCapacity(deviceIDs.count)
+            for row in rows {
+                let deviceID: String = row["device_id"]
+                let coveredBytes: Int64 = row["covered_bytes"]
+                result[deviceID] = coveredBytes
+            }
+            return result
+        }
+    }
+
     func fetchAssets(
         deviceId: String,
         searchQuery: String,

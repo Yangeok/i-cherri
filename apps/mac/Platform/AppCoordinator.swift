@@ -17,7 +17,6 @@ actor BackupRunProgressStore {
 
     private struct DeviceRunProgress: Sendable {
         var totalBytes: Int64
-        var alreadyBackedUpBytes: Int64
         var uploadedAssetIDs: Set<String>
         var candidateBytesByAssetID: [String: Int64]
     }
@@ -28,17 +27,15 @@ actor BackupRunProgressStore {
         let unsupportedIDs = Set(response.unsupported)
         let supportedCandidates = request.candidates.filter { !unsupportedIDs.contains($0.assetLocalID) }
         let candidateBytesByAssetID = Dictionary(uniqueKeysWithValues: supportedCandidates.map { ($0.assetLocalID, max($0.byteSize, 0)) })
-        let alreadyBackedUpIDs = Set(response.alreadyBackedUp).union(response.duplicates)
-        let alreadyBackedUpBytes = alreadyBackedUpIDs.reduce(Int64(0)) { partial, assetID in
-            partial + (candidateBytesByAssetID[assetID] ?? 0)
-        }
-        let totalBytes = supportedCandidates.reduce(Int64(0)) { partial, asset in
-            partial + max(asset.byteSize, 0)
-        }
+        let totalBytes = max(
+            request.librarySnapshot?.totalAssetBytes ?? 0,
+            supportedCandidates.reduce(Int64(0)) { partial, asset in
+                partial + max(asset.byteSize, 0)
+            }
+        )
 
         runsByDeviceID[request.device.deviceID] = DeviceRunProgress(
             totalBytes: totalBytes,
-            alreadyBackedUpBytes: alreadyBackedUpBytes,
             uploadedAssetIDs: [],
             candidateBytesByAssetID: candidateBytesByAssetID
         )
@@ -51,7 +48,7 @@ actor BackupRunProgressStore {
         runsByDeviceID[deviceID] = run
     }
 
-    func snapshot(activeSessions: [UploadSessionRecord]) -> Snapshot? {
+    func snapshot(activeSessions: [UploadSessionRecord], coveredBytesByDeviceID: [String: Int64] = [:]) -> Snapshot? {
         let activeDeviceIDs = Set(activeSessions.map(\.deviceId))
         guard !activeDeviceIDs.isEmpty else { return nil }
 
@@ -62,7 +59,7 @@ actor BackupRunProgressStore {
             guard let run = runsByDeviceID[deviceID] else { continue }
 
             totalBytes += run.totalBytes
-            completedBytes += run.alreadyBackedUpBytes
+            completedBytes += max(coveredBytesByDeviceID[deviceID] ?? 0, 0)
             completedBytes += run.uploadedAssetIDs.reduce(Int64(0)) { partial, assetID in
                 partial + (run.candidateBytesByAssetID[assetID] ?? 0)
             }

@@ -50,15 +50,31 @@ public struct PairingConfirmResponse: Codable, Sendable {
 
 // MARK: - Check Batch
 
+public struct CheckBatchLibrarySnapshot: Codable, Sendable {
+    public let totalAssetCount: Int
+    public let totalAssetBytes: Int64
+
+    public init(totalAssetCount: Int, totalAssetBytes: Int64) {
+        self.totalAssetCount = totalAssetCount
+        self.totalAssetBytes = totalAssetBytes
+    }
+}
+
 public struct CheckBatchRequest: Codable, Sendable {
     public let protocolVersion: ProtocolVersion
     public let device: DeviceInfo
     public let candidates: [AssetMetadata]
+    public let librarySnapshot: CheckBatchLibrarySnapshot?
 
-    public init(device: DeviceInfo, candidates: [AssetMetadata]) {
+    public init(
+        device: DeviceInfo,
+        candidates: [AssetMetadata],
+        librarySnapshot: CheckBatchLibrarySnapshot? = nil
+    ) {
         self.protocolVersion = .current
         self.device = device
         self.candidates = candidates
+        self.librarySnapshot = librarySnapshot
     }
 }
 

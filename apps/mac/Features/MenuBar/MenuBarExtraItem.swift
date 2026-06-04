@@ -274,7 +274,11 @@ final class MenuBarState: ObservableObject {
             let activeDeviceIDs = Array(Set(sessions.map(\.deviceId))).sorted()
             let totalExpected = sessions.reduce(Int64(0)) { $0 + max($1.expectedByteSize, 0) }
             let totalReceived = sessions.reduce(Int64(0)) { $0 + max($1.receivedBytes, 0) }
-            let coverageSnapshot = await AppCoordinator.shared.backupRunProgressStore.snapshot(activeSessions: sessions)
+            let coveredBytesByDevice = (try? await DatabaseManager.shared.fetchCoveredBytesByDevice(deviceIDs: activeDeviceIDs)) ?? [:]
+            let coverageSnapshot = await AppCoordinator.shared.backupRunProgressStore.snapshot(
+                activeSessions: sessions,
+                coveredBytesByDeviceID: coveredBytesByDevice
+            )
 
             await MainActor.run {
                 self.activeUploadCount = sessions.count
