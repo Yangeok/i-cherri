@@ -15,8 +15,12 @@ MAC_RELEASE_ARM64_APP_PATH=$(MAC_RELEASE_ARM64_DERIVED_DATA)/Build/Products/Rele
 MAC_RELEASE_X86_64_APP_PATH=$(MAC_RELEASE_X86_64_DERIVED_DATA)/Build/Products/Release/$(MAC_SCHEME).app
 MAC_RELEASE_ARM64_ZIP=$(MAC_RELEASE_DIST)/iCherri-Mac-$(MAC_RELEASE_VERSION)-arm64.zip
 MAC_RELEASE_X86_64_ZIP=$(MAC_RELEASE_DIST)/iCherri-Mac-$(MAC_RELEASE_VERSION)-x86_64.zip
+MAC_RELEASE_ARM64_DMG=$(MAC_RELEASE_DIST)/iCherri-Mac-$(MAC_RELEASE_VERSION)-arm64.dmg
+MAC_RELEASE_X86_64_DMG=$(MAC_RELEASE_DIST)/iCherri-Mac-$(MAC_RELEASE_VERSION)-x86_64.dmg
+MAC_RELEASE_DMG_VOLUME_NAME=iCherri-Mac
+MAC_RELEASE_DMG_STAGING=$(CURDIR)/.build/mac-dmg-staging
 
-.PHONY: all clean help mac-app mac-run mac-dev mac-logs ios-app ios-run ios-console ios-dev mac-release-arm64 mac-release-x86_64 mac-release-assets
+.PHONY: all clean help mac-app mac-run mac-dev mac-logs ios-app ios-run ios-console ios-dev mac-release-arm64 mac-release-x86_64 mac-release-assets mac-dmg-arm64 mac-dmg-x86_64 mac-dmg-assets
 
 all: mac-app ios-app
 
@@ -51,6 +55,27 @@ mac-release-x86_64:
 
 mac-release-assets: mac-release-arm64 mac-release-x86_64
 	@echo "✅ Release assets ready in $(MAC_RELEASE_DIST)"
+
+mac-dmg-arm64: mac-release-arm64
+	@echo "📀 Packaging macOS DMG (arm64)..."
+	rm -rf "$(MAC_RELEASE_DMG_STAGING)/arm64"
+	mkdir -p "$(MAC_RELEASE_DMG_STAGING)/arm64"
+	cp -R "$(MAC_RELEASE_ARM64_APP_PATH)" "$(MAC_RELEASE_DMG_STAGING)/arm64/"
+	ln -s /Applications "$(MAC_RELEASE_DMG_STAGING)/arm64/Applications"
+	rm -f "$(MAC_RELEASE_ARM64_DMG)"
+	hdiutil create -volname "$(MAC_RELEASE_DMG_VOLUME_NAME)" -srcfolder "$(MAC_RELEASE_DMG_STAGING)/arm64" -ov -format UDZO "$(MAC_RELEASE_ARM64_DMG)"
+
+mac-dmg-x86_64: mac-release-x86_64
+	@echo "📀 Packaging macOS DMG (x86_64)..."
+	rm -rf "$(MAC_RELEASE_DMG_STAGING)/x86_64"
+	mkdir -p "$(MAC_RELEASE_DMG_STAGING)/x86_64"
+	cp -R "$(MAC_RELEASE_X86_64_APP_PATH)" "$(MAC_RELEASE_DMG_STAGING)/x86_64/"
+	ln -s /Applications "$(MAC_RELEASE_DMG_STAGING)/x86_64/Applications"
+	rm -f "$(MAC_RELEASE_X86_64_DMG)"
+	hdiutil create -volname "$(MAC_RELEASE_DMG_VOLUME_NAME)" -srcfolder "$(MAC_RELEASE_DMG_STAGING)/x86_64" -ov -format UDZO "$(MAC_RELEASE_X86_64_DMG)"
+
+mac-dmg-assets: mac-dmg-arm64 mac-dmg-x86_64
+	@echo "✅ DMG assets ready in $(MAC_RELEASE_DIST)"
 
 ios-app:
 	@echo "📱 Building iOS App..."
@@ -97,6 +122,9 @@ help:
 	@echo "  make mac-release-arm64  - Build and zip macOS Release app for Apple Silicon"
 	@echo "  make mac-release-x86_64 - Build and zip macOS Release app for Intel Mac"
 	@echo "  make mac-release-assets - Build both macOS Release zip assets"
+	@echo "  make mac-dmg-arm64      - Build and package Apple Silicon macOS DMG"
+	@echo "  make mac-dmg-x86_64     - Build and package Intel macOS DMG"
+	@echo "  make mac-dmg-assets     - Build both macOS DMG assets"
 	@echo "  make ios-app     - Build iOS SwiftUI App"
 	@echo "  make ios-run     - Build, install, and launch iOS app on a connected device"
 	@echo "  make ios-console - Attach terminal to iOS app console on a connected device"
