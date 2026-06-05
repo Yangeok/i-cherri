@@ -7,6 +7,7 @@ import Inject
 // Onboarding + pairing + backup trigger dashboard for iOS.
 public struct BackupDashboardView: View {
     @ObserveInjection var inject
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel = BackupDashboardViewModel()
     @State private var isTargetPickerPresented = false
     @State private var backupSheetDetent: PresentationDetent = .large
@@ -32,6 +33,10 @@ public struct BackupDashboardView: View {
             .navigationBarTitleDisplayMode(.large)
         }
         .task { await viewModel.onAppear() }
+        .onChange(of: scenePhase) { newPhase in
+            guard newPhase == .active else { return }
+            Task { await viewModel.refreshReceivers() }
+        }
         .sheet(
             isPresented: Binding(
                 get: { viewModel.activeBackupProgressViewModel != nil },
@@ -98,6 +103,21 @@ public struct BackupDashboardView: View {
     private var pairingSection: some View {
         GroupBox {
             VStack(spacing: 16) {
+                HStack {
+                    Text("Nearby Mac receivers")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        Task { await viewModel.refreshReceivers() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isPairing || viewModel.isBackingUp)
+                }
+
                 if let receiverName = viewModel.pairedReceiverName {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
@@ -379,6 +399,16 @@ final class BackupDashboardViewModel: ObservableObject {
         photoPermissionStatus = permissionStatus(for: status)
     }
 
+    func refreshReceivers() async {
+        bonjourBrowser.refreshBrowsing()
+        if localNetworkStatus != .granted {
+            localNetworkStatus = .unknown
+        }
+        pairingStatusMessage = isPaired
+            ? pairedReceiverName.map { "Connected to \($0)." }
+            : "Refreshing available receivers..."
+    }
+
     func pair(with receiver: DiscoveredReceiver) async {
         let previousReceiver = pairedReceiver
         let previousReceiverName = pairedReceiverName
@@ -456,6 +486,7 @@ final class BackupDashboardViewModel: ObservableObject {
         backupStatusMessage = nil
         backupCoverageSummary = nil
         backupCoverageProgress = nil
+        bonjourBrowser.refreshBrowsing()
     }
 
     func startBackup() async {

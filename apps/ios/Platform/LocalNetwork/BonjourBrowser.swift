@@ -32,6 +32,8 @@ public final class BonjourBrowser: ObservableObject {
     public init() {}
 
     public func startBrowsing() {
+        browser?.cancel()
+        browser = nil
         status = .browsing
         let params = NWParameters()
         params.includePeerToPeer = true
@@ -57,6 +59,11 @@ public final class BonjourBrowser: ObservableObject {
 
         browser.start(queue: queue)
         self.browser = browser
+    }
+
+    public func refreshBrowsing() {
+        stopBrowsing()
+        startBrowsing()
     }
 
     public func stopBrowsing() {
