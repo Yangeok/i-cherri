@@ -300,7 +300,27 @@ actor DatabaseManager {
 
     func upsertDevice(_ record: PairedDeviceRecord) throws {
         try queue.write { db in
-            try record.save(db)
+            try db.execute(
+                sql: """
+                INSERT INTO paired_devices
+                    (device_id, device_name, pairing_status, created_at, last_seen_at, trust_token)
+                VALUES
+                    (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(device_id) DO UPDATE SET
+                    device_name = excluded.device_name,
+                    pairing_status = excluded.pairing_status,
+                    last_seen_at = excluded.last_seen_at,
+                    trust_token = excluded.trust_token
+                """,
+                arguments: [
+                    record.deviceId,
+                    record.deviceName,
+                    record.pairingStatus,
+                    record.createdAt,
+                    record.lastSeenAt,
+                    record.trustToken
+                ]
+            )
         }
     }
 
