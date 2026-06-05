@@ -94,6 +94,10 @@ struct MenuBarPopoverContent: View {
                 statusRow(icon: "chart.bar.xaxis", text: progressSummary)
             }
 
+            if let statusIssue = state.statusIssue {
+                statusRow(icon: "exclamationmark.triangle", text: statusIssue)
+            }
+
             statusRow(icon: "folder", text: state.backupFolderPath)
 
             if state.isReceiving {
@@ -171,6 +175,7 @@ final class MenuBarState: ObservableObject {
     @Published var backupFolderPath = AppCoordinator.shared.backupFolder.path
     @Published var isDashboardOpen = false
     @Published var backupProgressSummary: String?
+    @Published var serverIssue: String?
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -189,6 +194,13 @@ final class MenuBarState: ObservableObject {
             }
             .store(in: &cancellables)
 
+        AppCoordinator.shared.$serverIssue
+            .receive(on: RunLoop.main)
+            .sink { [weak self] issue in
+                self?.serverIssue = Self.normalizedIssue(issue)
+            }
+            .store(in: &cancellables)
+
         NotificationCenter.default.publisher(for: .receiverDataDidChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -202,7 +214,7 @@ final class MenuBarState: ObservableObject {
     var statusDescription: String {
         switch status {
         case .offline:
-            return "Receiver offline"
+            return serverIssue == nil ? "Receiver offline" : "Receiver failed to start"
         case .ready:
             return "Ready to receive"
         case .receiving:
@@ -231,12 +243,17 @@ final class MenuBarState: ObservableObject {
     var statusHeadline: String? {
         switch status {
         case .offline:
-            return "Receiver is stopped"
+            return serverIssue == nil ? "Receiver is stopped" : "Startup failed"
         case .ready:
             return "Waiting for backup"
         case .receiving:
             return "Backup in progress"
         }
+    }
+
+    var statusIssue: String? {
+        guard status == .offline else { return nil }
+        return serverIssue
     }
 
     var deviceSummary: String? {
@@ -266,6 +283,7 @@ final class MenuBarState: ObservableObject {
 
     private func reloadSnapshot() {
         backupFolderPath = AppCoordinator.shared.backupFolder.path
+        serverIssue = Self.normalizedIssue(AppCoordinator.shared.serverIssue)
 
         Task {
             let sessions = (try? await DatabaseManager.shared.fetchAllSessions()) ?? []
@@ -308,6 +326,12 @@ final class MenuBarState: ObservableObject {
 
     private static func formatBytes(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    nonisolated static func normalizedIssue(_ issue: String?) -> String? {
+        guard let issue else { return nil }
+        let trimmed = issue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

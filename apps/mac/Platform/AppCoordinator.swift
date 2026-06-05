@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AppKit
+import Network
 import ICherriProtocol
 import ICherriCore
 
@@ -81,6 +82,7 @@ final class AppCoordinator: NSObject, ObservableObject {
     
     @Published var backupFolder: URL
     @Published var isServerRunning = false
+    @Published var serverIssue: String?
     @Published var port: UInt16 = 8787 // Using 8787 as in the original Go project
     
     private var server: ReceiverHTTPServer?
@@ -129,6 +131,9 @@ final class AppCoordinator: NSObject, ObservableObject {
     }
     
     func start() async {
+        isServerRunning = false
+        serverIssue = nil
+
         do {
             let backupDir = self.backupFolder
             let tmpDir = backupDir.appendingPathComponent(".tmp")
@@ -171,8 +176,16 @@ final class AppCoordinator: NSObject, ObservableObject {
                     switch state {
                     case .ready:
                         self.isServerRunning = true
-                    case .failed, .cancelled:
+                        self.serverIssue = nil
+                    case .waiting(let error):
                         self.isServerRunning = false
+                        self.serverIssue = Self.listenerIssueDescription(prefix: "Listener waiting", error: error)
+                    case .failed(let error):
+                        self.isServerRunning = false
+                        self.serverIssue = Self.listenerIssueDescription(prefix: "Listener failed", error: error)
+                    case .cancelled:
+                        self.isServerRunning = false
+                        self.serverIssue = "Listener cancelled before becoming ready."
                     default:
                         break
                     }
@@ -187,6 +200,8 @@ final class AppCoordinator: NSObject, ObservableObject {
             self.cleanupScheduler = scheduler
             
         } catch {
+            isServerRunning = false
+            serverIssue = Self.startFailureDescription(error)
             print("[AppCoordinator] Initialization failed: \(error)")
             
             // Self-healing fallback: if we failed and were using a custom folder, revert to sandbox-safe default
@@ -265,6 +280,22 @@ final class AppCoordinator: NSObject, ObservableObject {
         
         await cleanupScheduler?.stop()
         cleanupScheduler = nil
+    }
+
+    private static func listenerIssueDescription(prefix: String, error: NWError) -> String {
+        let detail = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !detail.isEmpty else {
+            return "\(prefix)."
+        }
+        return "\(prefix): \(detail)"
+    }
+
+    private static func startFailureDescription(_ error: Error) -> String {
+        let detail = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !detail.isEmpty else {
+            return "Receiver initialization failed."
+        }
+        return "Receiver initialization failed: \(detail)"
     }
 }
 
