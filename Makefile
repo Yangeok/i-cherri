@@ -20,13 +20,18 @@ MAC_RELEASE_X86_64_DMG=$(MAC_RELEASE_DIST)/iCherri-Mac-$(MAC_RELEASE_VERSION)-x8
 MAC_RELEASE_DMG_VOLUME_NAME=iCherri-Mac
 MAC_RELEASE_DMG_STAGING=$(CURDIR)/.build/mac-dmg-staging
 
-.PHONY: all clean help mac-app mac-run mac-dev mac-logs ios-app ios-run ios-console ios-dev mac-release-arm64 mac-release-x86_64 mac-release-assets mac-dmg-arm64 mac-dmg-x86_64 mac-dmg-assets
+.PHONY: all clean help mac-app mac-run mac-dev mac-logs ios-app ios-run ios-console ios-dev dist-reset-release mac-release-arm64 mac-release-x86_64 mac-release-assets mac-dmg-arm64 mac-dmg-x86_64 mac-dmg-assets
 
 all: mac-app ios-app
 
 clean:
 	@echo "🧹 Cleaning app build artifacts..."
 	rm -rf .build dist
+
+dist-reset-release:
+	@echo "🧹 Resetting release artifacts..."
+	rm -rf "$(MAC_RELEASE_DIST)"
+	mkdir -p "$(MAC_RELEASE_DIST)"
 
 mac-app:
 	@echo "🖥️  Building macOS App..."
@@ -53,7 +58,10 @@ mac-release-x86_64:
 	rm -f "$(MAC_RELEASE_X86_64_ZIP)"
 	ditto -c -k --sequesterRsrc --keepParent "$(MAC_RELEASE_X86_64_APP_PATH)" "$(MAC_RELEASE_X86_64_ZIP)"
 
-mac-release-assets: mac-release-arm64 mac-release-x86_64
+mac-release-assets:
+	@$(MAKE) dist-reset-release
+	@$(MAKE) mac-release-arm64
+	@$(MAKE) mac-release-x86_64
 	@echo "✅ Release assets ready in $(MAC_RELEASE_DIST)"
 
 mac-dmg-arm64: mac-release-arm64
@@ -74,7 +82,10 @@ mac-dmg-x86_64: mac-release-x86_64
 	rm -f "$(MAC_RELEASE_X86_64_DMG)"
 	hdiutil create -volname "$(MAC_RELEASE_DMG_VOLUME_NAME)" -srcfolder "$(MAC_RELEASE_DMG_STAGING)/x86_64" -ov -format UDZO "$(MAC_RELEASE_X86_64_DMG)"
 
-mac-dmg-assets: mac-dmg-arm64 mac-dmg-x86_64
+mac-dmg-assets:
+	@$(MAKE) dist-reset-release
+	@$(MAKE) mac-dmg-arm64
+	@$(MAKE) mac-dmg-x86_64
 	@echo "✅ DMG assets ready in $(MAC_RELEASE_DIST)"
 
 ios-app:
