@@ -342,6 +342,7 @@ final class BackupDashboardViewModel: ObservableObject {
     private let scanner = PhotoLibraryScanner()
     private let scanIndexStore = PhotoLibraryScanIndexStore.shared
     private let bonjourBrowser = BonjourBrowser()
+    private let keychainStore = KeychainStore()
     private let trustTokenKey = "iCherriTrustToken"
     private let receiverIDKey = "iCherriReceiverID"
     private let receiverURLKey = "iCherriReceiverURL"
@@ -987,11 +988,21 @@ final class BackupDashboardViewModel: ObservableObject {
     
     private func currentDeviceInfo() -> DeviceInfo {
         DeviceInfo(
-            deviceID: UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString,
+            deviceID: persistentDeviceID(),
             deviceName: UIDevice.current.name,
             platform: "iOS",
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         )
+    }
+
+    private func persistentDeviceID() -> String {
+        if let stored = try? keychainStore.loadDeviceID(), !stored.isEmpty {
+            return stored
+        }
+
+        let generated = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+        try? keychainStore.saveDeviceID(generated)
+        return generated
     }
 
     private static func resolveReceiverURLForBackup(

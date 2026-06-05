@@ -64,7 +64,10 @@ public actor ChunkUploadSender {
             while skipped < startingOffset {
                 let toRead = min(chunkSize, Int(startingOffset - skipped))
                 let n = stream.read(skipBuffer, maxLength: toRead)
-                guard n > 0 else { break }
+                if n < 0 {
+                    throw ChunkUploadError.streamError
+                }
+                guard n > 0 else { throw ChunkUploadError.streamError }
                 skipped += Int64(n)
             }
         }
@@ -76,9 +79,13 @@ public actor ChunkUploadSender {
 
         await progressDelegate?.didSendBytes(0, totalSent: offset, totalExpected: totalSize)
 
-        while stream.hasBytesAvailable {
-            let n = stream.read(buffer, maxLength: chunkSize)
-            guard n > 0 else { break }
+        while offset < totalSize {
+            let maxLength = min(chunkSize, Int(totalSize - offset))
+            let n = stream.read(buffer, maxLength: maxLength)
+            if n < 0 {
+                throw ChunkUploadError.streamError
+            }
+            guard n > 0 else { throw ChunkUploadError.streamError }
             let chunk = Data(bytes: buffer, count: n)
             try await uploadChunk(chunk, uploadID: uploadID, index: chunkIndex, offset: offset, total: totalSize)
             offset += Int64(n)

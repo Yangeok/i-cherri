@@ -4,6 +4,7 @@ import Security
 // Securely stores and retrieves pairing trust tokens using the iOS Keychain.
 public final class KeychainStore {
     private let service: String
+    private let deviceIDAccount = "primary-device-id"
 
     public init(service: String = "com.icherri.pairing") {
         self.service = service
@@ -60,6 +61,48 @@ public final class KeychainStore {
         let status = SecItemDelete(query as CFDictionary)
         if status != errSecSuccess && status != errSecItemNotFound {
             throw KeychainError.deleteFailed(status)
+        }
+    }
+
+    public func loadDeviceID() throws -> String? {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: deviceIDAccount,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw KeychainError.loadFailed(status)
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    public func saveDeviceID(_ deviceID: String) throws {
+        let data = Data(deviceID.utf8)
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: deviceIDAccount,
+            kSecValueData: data,
+            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+
+        let deleteQuery: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: deviceIDAccount
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        let status = SecItemAdd(query as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw KeychainError.saveFailed(status)
         }
     }
 }
