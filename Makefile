@@ -7,14 +7,22 @@ MAC_PROJECT=apps/mac/iCherri-Mac.xcodeproj
 MAC_SCHEME=iCherri-Mac
 MAC_DERIVED_DATA=$(CURDIR)/.build/mac-derived
 MAC_APP_PATH=$(MAC_DERIVED_DATA)/Build/Products/Debug/$(MAC_SCHEME).app
+MAC_RELEASE_VERSION ?= v0.1.3
+MAC_RELEASE_DIST=$(CURDIR)/dist
+MAC_RELEASE_ARM64_DERIVED_DATA=$(CURDIR)/.build/mac-release-arm64-derived
+MAC_RELEASE_X86_64_DERIVED_DATA=$(CURDIR)/.build/mac-release-x86_64-derived
+MAC_RELEASE_ARM64_APP_PATH=$(MAC_RELEASE_ARM64_DERIVED_DATA)/Build/Products/Release/$(MAC_SCHEME).app
+MAC_RELEASE_X86_64_APP_PATH=$(MAC_RELEASE_X86_64_DERIVED_DATA)/Build/Products/Release/$(MAC_SCHEME).app
+MAC_RELEASE_ARM64_ZIP=$(MAC_RELEASE_DIST)/iCherri-Mac-$(MAC_RELEASE_VERSION)-arm64.zip
+MAC_RELEASE_X86_64_ZIP=$(MAC_RELEASE_DIST)/iCherri-Mac-$(MAC_RELEASE_VERSION)-x86_64.zip
 
-.PHONY: all clean help mac-app mac-run mac-dev mac-logs ios-app ios-run ios-console ios-dev
+.PHONY: all clean help mac-app mac-run mac-dev mac-logs ios-app ios-run ios-console ios-dev mac-release-arm64 mac-release-x86_64 mac-release-assets
 
 all: mac-app ios-app
 
 clean:
 	@echo "🧹 Cleaning app build artifacts..."
-	rm -rf .build
+	rm -rf .build dist
 
 mac-app:
 	@echo "🖥️  Building macOS App..."
@@ -24,6 +32,25 @@ mac-run:
 	@echo "🖥️  Building and launching macOS App..."
 	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -destination 'platform=macOS' -derivedDataPath $(MAC_DERIVED_DATA)
 	open $(MAC_APP_PATH)
+
+mac-release-arm64:
+	@echo "📦 Building macOS Release App (arm64)..."
+	rm -rf "$(MAC_RELEASE_ARM64_DERIVED_DATA)"
+	mkdir -p "$(MAC_RELEASE_DIST)"
+	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -configuration Release -destination 'platform=macOS,arch=arm64' -derivedDataPath "$(MAC_RELEASE_ARM64_DERIVED_DATA)" ONLY_ACTIVE_ARCH=NO ARCHS=arm64
+	rm -f "$(MAC_RELEASE_ARM64_ZIP)"
+	ditto -c -k --sequesterRsrc --keepParent "$(MAC_RELEASE_ARM64_APP_PATH)" "$(MAC_RELEASE_ARM64_ZIP)"
+
+mac-release-x86_64:
+	@echo "📦 Building macOS Release App (x86_64)..."
+	rm -rf "$(MAC_RELEASE_X86_64_DERIVED_DATA)"
+	mkdir -p "$(MAC_RELEASE_DIST)"
+	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -configuration Release -destination 'platform=macOS,arch=x86_64' -derivedDataPath "$(MAC_RELEASE_X86_64_DERIVED_DATA)" ONLY_ACTIVE_ARCH=NO ARCHS=x86_64
+	rm -f "$(MAC_RELEASE_X86_64_ZIP)"
+	ditto -c -k --sequesterRsrc --keepParent "$(MAC_RELEASE_X86_64_APP_PATH)" "$(MAC_RELEASE_X86_64_ZIP)"
+
+mac-release-assets: mac-release-arm64 mac-release-x86_64
+	@echo "✅ Release assets ready in $(MAC_RELEASE_DIST)"
 
 ios-app:
 	@echo "📱 Building iOS App..."
@@ -67,6 +94,9 @@ help:
 	@echo "  make mac-app     - Build macOS SwiftUI App"
 	@echo "  make mac-run     - Build and launch macOS SwiftUI App"
 	@echo "  make mac-dev     - Build, launch, and stream macOS logs"
+	@echo "  make mac-release-arm64  - Build and zip macOS Release app for Apple Silicon"
+	@echo "  make mac-release-x86_64 - Build and zip macOS Release app for Intel Mac"
+	@echo "  make mac-release-assets - Build both macOS Release zip assets"
 	@echo "  make ios-app     - Build iOS SwiftUI App"
 	@echo "  make ios-run     - Build, install, and launch iOS app on a connected device"
 	@echo "  make ios-console - Attach terminal to iOS app console on a connected device"
