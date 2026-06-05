@@ -14,7 +14,7 @@ public struct DiscoveredReceiver: Sendable, Identifiable {
     public let endpoint: NWEndpoint
 
     public init(name: String, endpoint: NWEndpoint) {
-        self.id = name
+        self.id = "\(name)|\(endpoint.debugDescription)"
         self.name = name
         self.endpoint = endpoint
     }

@@ -323,6 +323,7 @@ final class BackupDashboardViewModel: ObservableObject {
     private let scanIndexStore = PhotoLibraryScanIndexStore.shared
     private let bonjourBrowser = BonjourBrowser()
     private let trustTokenKey = "iCherriTrustToken"
+    private let receiverIDKey = "iCherriReceiverID"
     private let receiverURLKey = "iCherriReceiverURL"
     private let receiverNameKey = "iCherriReceiverName"
 
@@ -350,7 +351,9 @@ final class BackupDashboardViewModel: ObservableObject {
             for await receivers in bonjourBrowser.$discoveredReceivers.values {
                 self.discoveredReceivers = receivers
                 self.localNetworkStatus = receivers.isEmpty ? self.localNetworkStatus : .granted
-                if let pairedReceiverName {
+                if let pairedReceiverID = UserDefaults.standard.string(forKey: self.receiverIDKey) {
+                    self.pairedReceiver = receivers.first(where: { $0.id == pairedReceiverID })
+                } else if let pairedReceiverName {
                     self.pairedReceiver = receivers.first(where: { $0.name == pairedReceiverName })
                 }
             }
@@ -412,6 +415,7 @@ final class BackupDashboardViewModel: ObservableObject {
                 
                 // Store trust token for future requests
                 UserDefaults.standard.set(confirmResponse.trustToken, forKey: trustTokenKey)
+                UserDefaults.standard.set(receiver.id, forKey: receiverIDKey)
                 UserDefaults.standard.set(baseURL.absoluteString, forKey: receiverURLKey)
                 UserDefaults.standard.set(receiver.name, forKey: receiverNameKey)
 
@@ -441,6 +445,7 @@ final class BackupDashboardViewModel: ObservableObject {
     func clearPairedReceiver() {
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: trustTokenKey)
+        defaults.removeObject(forKey: receiverIDKey)
         defaults.removeObject(forKey: receiverURLKey)
         defaults.removeObject(forKey: receiverNameKey)
 
@@ -503,6 +508,7 @@ final class BackupDashboardViewModel: ObservableObject {
         activeBackupProgressViewModel = progressViewModel
 
         let pairedReceiverSnapshot = pairedReceiver
+        let pairedReceiverIDSnapshot = UserDefaults.standard.string(forKey: receiverIDKey)
         let pairedReceiverNameSnapshot = pairedReceiverName
         let discoveredReceiversSnapshot = discoveredReceivers
         let storedReceiverURLString = UserDefaults.standard.string(forKey: receiverURLKey)
@@ -572,6 +578,7 @@ final class BackupDashboardViewModel: ObservableObject {
 
                 let receiverURL = try await Self.resolveReceiverURLForBackup(
                     pairedReceiver: pairedReceiverSnapshot,
+                    pairedReceiverID: pairedReceiverIDSnapshot,
                     pairedReceiverName: pairedReceiverNameSnapshot,
                     discoveredReceivers: discoveredReceiversSnapshot,
                     storedReceiverURLString: storedReceiverURLString
@@ -865,12 +872,18 @@ final class BackupDashboardViewModel: ObservableObject {
 
     private static func resolveReceiverURLForBackup(
         pairedReceiver: DiscoveredReceiver?,
+        pairedReceiverID: String?,
         pairedReceiverName: String?,
         discoveredReceivers: [DiscoveredReceiver],
         storedReceiverURLString: String?
     ) async throws -> URL {
         if let pairedReceiver {
             return try await resolveEndpoint(pairedReceiver.endpoint)
+        }
+
+        if let pairedReceiverID,
+           let discoveredReceiver = discoveredReceivers.first(where: { $0.id == pairedReceiverID }) {
+            return try await resolveEndpoint(discoveredReceiver.endpoint)
         }
 
         if let pairedReceiverName,
