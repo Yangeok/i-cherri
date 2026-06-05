@@ -116,10 +116,17 @@ actor ReceiverHTTPServer {
 
     private func handleListenerStateChange(_ state: NWListener.State) {
         onStateChange?(state)
-        if case .failed(let err) = state {
+        switch state {
+        case .ready:
+            print("[ReceiverHTTPServer] Listener ready on port \(port)")
+        case .waiting(let err):
+            print("[ReceiverHTTPServer] Listener waiting: \(err)")
+        case .failed(let err):
             print("[ReceiverHTTPServer] Listener failed: \(err)")
-        } else if state == .ready {
-            print("[ReceiverHTTPServer] Listener ready on port \(port) and advertising Bonjour service")
+        case .cancelled:
+            print("[ReceiverHTTPServer] Listener cancelled")
+        default:
+            break
         }
     }
 
