@@ -630,17 +630,20 @@ final class BackupDashboardViewModel: ObservableObject {
                 var uploadedAssetIDs: Set<String> = []
                 var failedAssetIDs = Set(batchResponse.unsupported)
                 var pendingAssetIDs: Set<String> = []
+                var receiverCompletedAssetCount: Int?
 
                 func snapshotCounts() -> (completed: Int, success: Int, duplicates: Int, failed: Int, overallBackedUpCount: Int) {
                     let success = uploadedAssetIDs.count
                     let duplicates = duplicateAssetIDs.count
                     let failed = failedAssetIDs.count
+                    let receiverBackedUpCount = receiverCompletedAssetCount ?? 0
+                    let overallBackedUpCount = max(success + duplicates, receiverBackedUpCount)
                     return (
                         completed: success + duplicates + failed,
                         success: success,
                         duplicates: duplicates,
                         failed: failed,
-                        overallBackedUpCount: success + duplicates
+                        overallBackedUpCount: overallBackedUpCount
                     )
                 }
 
@@ -769,6 +772,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     )
 
                     let finalizeResponse = try await backupClient.finalizeBackupRun(backupRunID: backupRunID)
+                    receiverCompletedAssetCount = finalizeResponse.completedAssetCount
                     let missingAssetIDs = Set(finalizeResponse.missingAssetIDs)
                         .subtracting(duplicateAssetIDs)
                         .subtracting(uploadedAssetIDs)

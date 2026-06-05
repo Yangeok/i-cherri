@@ -121,7 +121,7 @@ public struct BackupProgressView: View {
 
     private var statsSection: some View {
         HStack(spacing: 12) {
-            GlowBadge(label: "Uploaded", value: "\(viewModel.sessionUploadedCount)", color: .green)
+            GlowBadge(label: "This Run", value: "\(viewModel.sessionUploadedCount)", color: .green)
             GlowBadge(label: "Failed", value: "\(viewModel.failedCount)", color: .red)
         }
     }

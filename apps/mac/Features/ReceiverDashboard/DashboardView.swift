@@ -723,6 +723,9 @@ struct DashboardView: View {
     }
 
     private func historySummary(for device: PairedDeviceRecord) -> String {
+        if let coverageSummary = viewModel.latestCoverageSummary(for: device.deviceId) {
+            return "\(coverageSummary.completedAssetCount.formatted()) / \(coverageSummary.totalAssetCount.formatted()) in library • \(coverageSummary.pendingAssetCount.formatted()) pending"
+        }
         let backedUp = viewModel.assetCount(for: device.deviceId)
         let duplicates = viewModel.duplicateCount(for: device.deviceId)
         let failed = viewModel.failedCount(for: device.deviceId)
@@ -845,6 +848,7 @@ final class DashboardViewModel: ObservableObject {
     private var filteredAssets: [BackupAssetRecord] = []
     private var visibleAssetWindowRange: Range<Int> = 0..<0
     private var lastThumbnailBackfillSignature: String?
+    private var latestCoverageSummariesByDevice: [String: BackupRunCoverageSummary] = [:]
 
     var selectedDeviceInfo: PairedDeviceRecord? {
         pairedDevices.first { $0.deviceId == selectedDevice }
@@ -858,9 +862,13 @@ final class DashboardViewModel: ObservableObject {
             let devices = try await DatabaseManager.shared.fetchAllDevices()
             let assets = try await DatabaseManager.shared.fetchAllAssets()
             let sessions = try await DatabaseManager.shared.fetchAllSessions()
+            let coverageSummaries = try await DatabaseManager.shared.fetchLatestBackupCoverageSummaries()
             
             self.pairedDevices = devices
             self.allAssets = assets
+            self.latestCoverageSummariesByDevice = Dictionary(
+                uniqueKeysWithValues: coverageSummaries.map { ($0.deviceId, $0) }
+            )
             let deviceNames = Dictionary(uniqueKeysWithValues: devices.map { ($0.deviceId, $0.deviceName) })
             self.activeUploads = sessions.map { r in
                 var filename = "Upload"
@@ -971,6 +979,10 @@ final class DashboardViewModel: ObservableObject {
             .filter { $0.deviceId == deviceId && ($0.status == "completed" || $0.status == "duplicate") }
             .compactMap(\.completedAt)
             .max()
+    }
+
+    func latestCoverageSummary(for deviceId: String) -> BackupRunCoverageSummary? {
+        latestCoverageSummariesByDevice[deviceId]
     }
 
     func selectBackupFolder() {

@@ -236,6 +236,21 @@ struct BackupRunReconcileSnapshot: Sendable {
     let missingAssetIDs: [String]
 }
 
+struct BackupRunCoverageSummary: Sendable {
+    let runId: String
+    let deviceId: String
+    let totalAssetCount: Int
+    let completedAssetCount: Int
+    let status: String
+    let createdAt: Date
+    let updatedAt: Date
+    let finalizedAt: Date?
+
+    var pendingAssetCount: Int {
+        max(totalAssetCount - completedAssetCount, 0)
+    }
+}
+
 // MARK: - Database Manager
 
 actor DatabaseManager {
@@ -619,6 +634,71 @@ actor DatabaseManager {
                 completedAssetCount: completedAssetCount,
                 missingAssetIDs: missingAssetIDs
             )
+        }
+    }
+
+    func fetchLatestBackupCoverageSummaries() throws -> [BackupRunCoverageSummary] {
+        try queue.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                SELECT
+                    r.run_id,
+                    r.device_id,
+                    r.total_asset_count,
+                    r.status,
+                    r.created_at,
+                    r.updated_at,
+                    r.finalized_at,
+                    SUM(
+                        CASE
+                            WHEN EXISTS (
+                                SELECT 1
+                                FROM backup_assets AS b
+                                WHERE b.status IN ('completed', 'duplicate')
+                                  AND (
+                                      (b.device_id = s.device_id AND b.asset_local_id = s.asset_local_id)
+                                      OR b.quick_fingerprint = s.quick_fingerprint
+                                  )
+                            )
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS completed_asset_count
+                FROM backup_runs AS r
+                LEFT JOIN backup_run_assets AS s
+                  ON s.run_id = r.run_id
+                 AND s.device_id = r.device_id
+                WHERE r.run_id = (
+                    SELECT r2.run_id
+                    FROM backup_runs AS r2
+                    WHERE r2.device_id = r.device_id
+                    ORDER BY r2.created_at DESC, r2.updated_at DESC, r2.run_id DESC
+                    LIMIT 1
+                )
+                GROUP BY
+                    r.run_id,
+                    r.device_id,
+                    r.total_asset_count,
+                    r.status,
+                    r.created_at,
+                    r.updated_at,
+                    r.finalized_at
+                """
+            )
+
+            return rows.map { row in
+                BackupRunCoverageSummary(
+                    runId: row["run_id"],
+                    deviceId: row["device_id"],
+                    totalAssetCount: row["total_asset_count"],
+                    completedAssetCount: row["completed_asset_count"] ?? 0,
+                    status: row["status"],
+                    createdAt: row["created_at"],
+                    updatedAt: row["updated_at"],
+                    finalizedAt: row["finalized_at"]
+                )
+            }
         }
     }
 
