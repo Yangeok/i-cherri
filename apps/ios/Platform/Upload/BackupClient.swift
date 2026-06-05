@@ -25,11 +25,13 @@ public actor BackupClient {
 
     // Runs check-batch and returns which assets need uploading.
     public func checkBatch(
+        backupRunID: String? = nil,
         candidates: [AssetMetadata],
         totalAssetCount: Int,
         totalAssetBytes: Int64
     ) async throws -> CheckBatchResponse {
         let request = CheckBatchRequest(
+            backupRunID: backupRunID,
             device: device,
             candidates: candidates,
             librarySnapshot: CheckBatchLibrarySnapshot(
@@ -38,6 +40,11 @@ public actor BackupClient {
             )
         )
         return try await post(path: "/backup/check-batch", body: request)
+    }
+
+    public func finalizeBackupRun(backupRunID: String) async throws -> FinalizeBackupRunResponse {
+        let request = FinalizeBackupRunRequest(backupRunID: backupRunID, device: device)
+        return try await post(path: "/backup/finalize-run", body: request)
     }
 
     // Fetches receiver info (no auth required).

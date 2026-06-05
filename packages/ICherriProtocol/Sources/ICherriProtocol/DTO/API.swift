@@ -62,16 +62,19 @@ public struct CheckBatchLibrarySnapshot: Codable, Sendable {
 
 public struct CheckBatchRequest: Codable, Sendable {
     public let protocolVersion: ProtocolVersion
+    public let backupRunID: String?
     public let device: DeviceInfo
     public let candidates: [AssetMetadata]
     public let librarySnapshot: CheckBatchLibrarySnapshot?
 
     public init(
+        backupRunID: String? = nil,
         device: DeviceInfo,
         candidates: [AssetMetadata],
         librarySnapshot: CheckBatchLibrarySnapshot? = nil
     ) {
         self.protocolVersion = .current
+        self.backupRunID = backupRunID
         self.device = device
         self.candidates = candidates
         self.librarySnapshot = librarySnapshot
@@ -115,6 +118,34 @@ public struct CheckBatchResponse: Codable, Sendable {
         self.alreadyBackedUp = alreadyBackedUp
         self.duplicates = duplicates
         self.unsupported = unsupported
+    }
+}
+
+// MARK: - Backup Run Reconcile
+
+public struct FinalizeBackupRunRequest: Codable, Sendable {
+    public let protocolVersion: ProtocolVersion
+    public let backupRunID: String
+    public let device: DeviceInfo
+
+    public init(backupRunID: String, device: DeviceInfo) {
+        self.protocolVersion = .current
+        self.backupRunID = backupRunID
+        self.device = device
+    }
+}
+
+public struct FinalizeBackupRunResponse: Codable, Sendable {
+    public let status: String
+    public let totalAssetCount: Int
+    public let completedAssetCount: Int
+    public let missingAssetIDs: [String]
+
+    public init(status: String, totalAssetCount: Int, completedAssetCount: Int, missingAssetIDs: [String]) {
+        self.status = status
+        self.totalAssetCount = totalAssetCount
+        self.completedAssetCount = completedAssetCount
+        self.missingAssetIDs = missingAssetIDs
     }
 }
 

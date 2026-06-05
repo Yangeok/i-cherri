@@ -154,7 +154,8 @@ final class AppCoordinator: NSObject, ObservableObject {
             let queryProcessor = CheckBatchProcessor(index: DatabaseManager.shared)
             let checkBatchHandler = CheckBatchHandler(
                 processor: queryProcessor,
-                progressStore: backupRunProgressStore
+                progressStore: backupRunProgressStore,
+                databaseManager: DatabaseManager.shared
             )
             let uploadHandler = UploadHandler(sessionManager: manager, incomingDir: tmpDir)
             let uploadStatusHandler = UploadStatusHandler(sessionManager: manager)
@@ -330,6 +331,10 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
             return await checkBatchHandler.handle(request)
         }
 
+        if method == "POST" && path == "/backup/finalize-run" {
+            return await handleFinalizeBackupRunRequest(request)
+        }
+
         if method == "POST" && path == "/uploads/init" {
             return await uploadHandler.handleInit(request)
         }
@@ -397,6 +402,31 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
             return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
         } catch {
             return .error(code: "pair_error", message: error.localizedDescription, status: 500)
+        }
+    }
+
+    private func handleFinalizeBackupRunRequest(_ request: HTTPRequest) async -> HTTPResponse {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        guard let body = try? decoder.decode(FinalizeBackupRunRequest.self, from: request.body) else {
+            return .error(code: "invalid_body", message: "Failed to parse FinalizeBackupRunRequest")
+        }
+
+        do {
+            let snapshot = try await DatabaseManager.shared.finalizeBackupRun(
+                runID: body.backupRunID,
+                deviceID: body.device.deviceID
+            )
+            let response = FinalizeBackupRunResponse(
+                status: snapshot.missingAssetIDs.isEmpty ? "complete" : "needs_uploads",
+                totalAssetCount: snapshot.totalAssetCount,
+                completedAssetCount: snapshot.completedAssetCount,
+                missingAssetIDs: snapshot.missingAssetIDs
+            )
+            return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
+        } catch {
+            return .error(code: "finalize_backup_run_error", message: error.localizedDescription, status: 500)
         }
     }
     

@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import ICherriCore
+import ICherriProtocol
 
 // MARK: - Database Records
 
@@ -191,6 +192,50 @@ struct UploadFailureLogRecord: Codable, FetchableRecord, PersistableRecord {
     }
 }
 
+struct BackupRunRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "backup_runs"
+
+    var runId: String
+    var deviceId: String
+    var totalAssetCount: Int
+    var totalAssetBytes: Int64
+    var status: String
+    var createdAt: Date
+    var updatedAt: Date
+    var finalizedAt: Date?
+
+    enum Columns: String, ColumnExpression {
+        case runId = "run_id", deviceId = "device_id"
+        case totalAssetCount = "total_asset_count", totalAssetBytes = "total_asset_bytes"
+        case status, createdAt = "created_at", updatedAt = "updated_at"
+        case finalizedAt = "finalized_at"
+    }
+}
+
+struct BackupRunAssetRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "backup_run_assets"
+
+    var runId: String
+    var deviceId: String
+    var assetLocalId: String
+    var quickFingerprint: String
+    var byteSize: Int64
+    var metadataJson: String
+    var createdAt: Date
+
+    enum Columns: String, ColumnExpression {
+        case runId = "run_id", deviceId = "device_id"
+        case assetLocalId = "asset_local_id", quickFingerprint = "quick_fingerprint", byteSize = "byte_size"
+        case metadataJson = "metadata_json", createdAt = "created_at"
+    }
+}
+
+struct BackupRunReconcileSnapshot: Sendable {
+    let totalAssetCount: Int
+    let completedAssetCount: Int
+    let missingAssetIDs: [String]
+}
+
 // MARK: - Database Manager
 
 actor DatabaseManager {
@@ -291,6 +336,33 @@ actor DatabaseManager {
             }
 
             try db.create(index: "idx_upload_failure_logs_created_at", on: "upload_failure_logs", columns: ["created_at"])
+        }
+
+        migrator.registerMigration("v3_backup_run_snapshots") { db in
+            try db.create(table: "backup_runs") { t in
+                t.column("run_id", .text).primaryKey()
+                t.column("device_id", .text).notNull().references("paired_devices", column: "device_id")
+                t.column("total_asset_count", .integer).notNull()
+                t.column("total_asset_bytes", .integer).notNull()
+                t.column("status", .text).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+                t.column("finalized_at", .datetime)
+            }
+
+            try db.create(table: "backup_run_assets") { t in
+                t.column("run_id", .text).notNull().references("backup_runs", column: "run_id", onDelete: .cascade)
+                t.column("device_id", .text).notNull()
+                t.column("asset_local_id", .text).notNull()
+                t.column("quick_fingerprint", .text).notNull()
+                t.column("byte_size", .integer).notNull()
+                t.column("metadata_json", .text).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.primaryKey(["run_id", "asset_local_id"])
+            }
+
+            try db.create(index: "idx_backup_run_assets_device_asset", on: "backup_run_assets", columns: ["device_id", "asset_local_id"])
+            try db.create(index: "idx_backup_run_assets_fingerprint", on: "backup_run_assets", columns: ["quick_fingerprint"])
         }
 
         try migrator.migrate(queue)
@@ -422,6 +494,131 @@ actor DatabaseManager {
         )
         try queue.write { db in
             try record.insert(db)
+        }
+    }
+
+    // MARK: - Backup Runs
+
+    func replaceBackupRunSnapshot(
+        runID: String,
+        device: DeviceInfo,
+        librarySnapshot: CheckBatchLibrarySnapshot?,
+        candidates: [AssetMetadata]
+    ) throws {
+        let now = Date()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+
+        try queue.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO backup_runs
+                    (run_id, device_id, total_asset_count, total_asset_bytes, status, created_at, updated_at, finalized_at)
+                VALUES
+                    (?, ?, ?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    total_asset_count = excluded.total_asset_count,
+                    total_asset_bytes = excluded.total_asset_bytes,
+                    status = excluded.status,
+                    updated_at = excluded.updated_at,
+                    finalized_at = NULL
+                """,
+                arguments: [
+                    runID,
+                    device.deviceID,
+                    librarySnapshot?.totalAssetCount ?? candidates.count,
+                    librarySnapshot?.totalAssetBytes ?? candidates.reduce(Int64(0)) { partial, asset in
+                        partial + max(asset.byteSize, 0)
+                    },
+                    "snapshot_recorded",
+                    now,
+                    now
+                ]
+            )
+
+            try db.execute(sql: "DELETE FROM backup_run_assets WHERE run_id = ?", arguments: [runID])
+
+            for candidate in candidates {
+                let metadataData = try encoder.encode(candidate)
+                guard let metadataJSON = String(data: metadataData, encoding: .utf8) else {
+                    throw DatabaseError.invalidMetadataEncoding
+                }
+
+                try db.execute(
+                    sql: """
+                    INSERT INTO backup_run_assets
+                        (run_id, device_id, asset_local_id, quick_fingerprint, byte_size, metadata_json, created_at)
+                    VALUES
+                        (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        runID,
+                        device.deviceID,
+                        candidate.assetLocalID,
+                        candidate.quickFingerprint,
+                        max(candidate.byteSize, 0),
+                        metadataJSON,
+                        now
+                    ]
+                )
+            }
+        }
+    }
+
+    func finalizeBackupRun(runID: String, deviceID: String) throws -> BackupRunReconcileSnapshot {
+        try queue.write { db in
+            let missingAssetIDs = try String.fetchAll(
+                db,
+                sql: """
+                SELECT s.asset_local_id
+                FROM backup_run_assets AS s
+                WHERE s.run_id = ?
+                  AND s.device_id = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM backup_assets AS b
+                      WHERE b.status IN ('completed', 'duplicate')
+                        AND (
+                            (b.device_id = s.device_id AND b.asset_local_id = s.asset_local_id)
+                            OR b.quick_fingerprint = s.quick_fingerprint
+                        )
+                  )
+                ORDER BY s.created_at DESC, s.asset_local_id DESC
+                """,
+                arguments: [runID, deviceID]
+            )
+
+            let totalAssetCount = try Int.fetchOne(
+                db,
+                sql: """
+                SELECT COUNT(*)
+                FROM backup_run_assets
+                WHERE run_id = ? AND device_id = ?
+                """,
+                arguments: [runID, deviceID]
+            ) ?? 0
+
+            let completedAssetCount = max(totalAssetCount - missingAssetIDs.count, 0)
+            try db.execute(
+                sql: """
+                UPDATE backup_runs
+                SET status = ?, updated_at = ?, finalized_at = ?
+                WHERE run_id = ? AND device_id = ?
+                """,
+                arguments: [
+                    missingAssetIDs.isEmpty ? "complete" : "needs_uploads",
+                    Date(),
+                    Date(),
+                    runID,
+                    deviceID
+                ]
+            )
+
+            return BackupRunReconcileSnapshot(
+                totalAssetCount: totalAssetCount,
+                completedAssetCount: completedAssetCount,
+                missingAssetIDs: missingAssetIDs
+            )
         }
     }
 
@@ -598,25 +795,26 @@ actor DatabaseManager {
 
 enum DatabaseError: Error {
     case notOpen
+    case invalidMetadataEncoding
 }
 
 extension DatabaseManager: BackupIndexQuerying {
     public func findByDeviceAndAssetID(deviceID: String, assetLocalID: String) async throws -> BackupIndexEntry? {
-        if let record = try await fetchAsset(deviceId: deviceID, assetLocalId: assetLocalID) {
+        if let record = try fetchAsset(deviceId: deviceID, assetLocalId: assetLocalID) {
             return BackupIndexEntry(backupID: record.backupId, status: record.status, contentSHA256: record.contentSha256)
         }
         return nil
     }
 
     public func findByFingerprint(_ fingerprint: String) async throws -> BackupIndexEntry? {
-        if let record = try await fetchAsset(fingerprint: fingerprint) {
+        if let record = try fetchAsset(fingerprint: fingerprint) {
             return BackupIndexEntry(backupID: record.backupId, status: record.status, contentSHA256: record.contentSha256)
         }
         return nil
     }
 
     public func findBySHA256(_ sha256: String) async throws -> BackupIndexEntry? {
-        if let record = try await fetchAsset(sha256: sha256) {
+        if let record = try fetchAsset(sha256: sha256) {
             return BackupIndexEntry(backupID: record.backupId, status: record.status, contentSHA256: record.contentSha256)
         }
         return nil
