@@ -29,6 +29,11 @@ vendor/
 com.local.cherri-sync.plist
 .gemini/
 .antigravitycli/
+.agent/
+.agents/
+.claude
+.codex
+specs
 
 # Swift / Xcode
 .build/
