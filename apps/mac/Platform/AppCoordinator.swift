@@ -165,10 +165,22 @@ final class AppCoordinator: NSObject, ObservableObject {
             // HTTP Server
             let srv = ReceiverHTTPServer(port: port)
             await srv.setRouteHandler(routeService)
+            await srv.setStateHandler { [weak self] state in
+                Task { @MainActor in
+                    guard let self else { return }
+                    switch state {
+                    case .ready:
+                        self.isServerRunning = true
+                    case .failed, .cancelled:
+                        self.isServerRunning = false
+                    default:
+                        break
+                    }
+                }
+            }
             try await srv.start()
             self.server = srv
-            self.isServerRunning = true
-            print("[AppCoordinator] HTTP Server running on port \(port)")
+            print("[AppCoordinator] HTTP Server start requested on port \(port)")
             // Cleanup Scheduler
             let scheduler = CleanupScheduler(sessionManager: manager, incomingDir: tmpDir)
             await scheduler.start()

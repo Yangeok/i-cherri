@@ -69,9 +69,14 @@ actor ReceiverHTTPServer {
 
     // Injected route handlers
     var routeHandler: ReceiverRouteHandler?
+    private var onStateChange: ((NWListener.State) -> Void)?
 
     func setRouteHandler(_ handler: ReceiverRouteHandler) {
         self.routeHandler = handler
+    }
+
+    func setStateHandler(_ handler: @escaping (NWListener.State) -> Void) {
+        self.onStateChange = handler
     }
 
     init(port: UInt16 = 48372) {
@@ -92,12 +97,8 @@ actor ReceiverHTTPServer {
         )
         listener.service = service
 
-        listener.stateUpdateHandler = { state in
-            if case .failed(let err) = state {
-                print("[ReceiverHTTPServer] Listener failed: \(err)")
-            } else if state == .ready {
-                print("[ReceiverHTTPServer] Listener ready on port \(self.port) and advertising Bonjour service")
-            }
+        listener.stateUpdateHandler = { [weak self] state in
+            Task { await self?.handleListenerStateChange(state) }
         }
 
         listener.newConnectionHandler = { [weak self] connection in
@@ -111,6 +112,15 @@ actor ReceiverHTTPServer {
     func stop() {
         listener?.cancel()
         listener = nil
+    }
+
+    private func handleListenerStateChange(_ state: NWListener.State) {
+        onStateChange?(state)
+        if case .failed(let err) = state {
+            print("[ReceiverHTTPServer] Listener failed: \(err)")
+        } else if state == .ready {
+            print("[ReceiverHTTPServer] Listener ready on port \(port) and advertising Bonjour service")
+        }
     }
 
     // MARK: - Connection Handling
