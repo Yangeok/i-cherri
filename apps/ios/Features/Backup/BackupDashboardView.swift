@@ -939,6 +939,28 @@ final class BackupDashboardViewModel: ObservableObject {
     private static func resolveEndpoint(_ endpoint: NWEndpoint) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
             let connection = NWConnection(to: endpoint, using: .tcp)
+            let lock = NSLock()
+            var hasResumed = false
+
+            func finish(_ result: Result<URL, Error>) {
+                lock.lock()
+                let shouldResume = !hasResumed
+                if shouldResume {
+                    hasResumed = true
+                }
+                lock.unlock()
+
+                guard shouldResume else { return }
+
+                connection.cancel()
+                switch result {
+                case .success(let url):
+                    continuation.resume(returning: url)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
@@ -953,24 +975,30 @@ final class BackupDashboardViewModel: ObservableObject {
                         default:
                             hostStr = "\(host)"
                         }
-                        connection.cancel()
                         if let url = URL(string: "http://\(hostStr):\(port)") {
-                            continuation.resume(returning: url)
+                            finish(.success(url))
                         } else {
-                            continuation.resume(throwing: URLError(.badURL))
+                            finish(.failure(URLError(.badURL)))
                         }
                     } else {
-                        connection.cancel()
-                        continuation.resume(throwing: URLError(.cannotFindHost))
+                        finish(.failure(URLError(.cannotFindHost)))
                     }
+                case .waiting(let error):
+                    finish(.failure(error))
                 case .failed(let error):
-                    connection.cancel()
-                    continuation.resume(throwing: error)
+                    finish(.failure(error))
+                case .cancelled:
+                    finish(.failure(URLError(.cancelled)))
                 default:
                     break
                 }
             }
             connection.start(queue: .global(qos: .userInitiated))
+
+            Task.detached(priority: .userInitiated) {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                finish(.failure(URLError(.timedOut)))
+            }
         }
     }
 }
