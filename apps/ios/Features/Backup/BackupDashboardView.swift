@@ -706,18 +706,14 @@ final class BackupDashboardViewModel: ObservableObject {
                             throw BackupRunReconcileError.unresolvedAssets(unresolvedAssetIDs.sorted())
                         }
 
-                        let outcomes = try await self.uploadAssets(
+                        try await self.uploadAssets(
                             pendingAssets: roundAssets,
                             receiverURL: receiverURL,
                             device: device,
                             trustToken: trustToken,
                             progressCoordinator: progressCoordinator,
                             maxConcurrentUploads: maxConcurrentUploads
-                        )
-
-                        for outcome in outcomes {
-                            let countsBeforeUpdate = snapshotCounts()
-
+                        ) { outcome in
                             switch outcome {
                             case .success(let assetLocalID, let filename):
                                 uploadedAssetIDs.insert(assetLocalID)
@@ -748,13 +744,11 @@ final class BackupDashboardViewModel: ObservableObject {
                                     failed: counts.failed,
                                     overallBackedUpCount: counts.overallBackedUpCount
                                 )
-                                if counts.failed >= countsBeforeUpdate.failed {
-                                    await progressCoordinator.recordFailure(
-                                        assetLocalID: assetLocalID,
-                                        filename: filename,
-                                        reason: reason
-                                    )
-                                }
+                                await progressCoordinator.recordFailure(
+                                    assetLocalID: assetLocalID,
+                                    filename: filename,
+                                    reason: reason
+                                )
                             }
                         }
 
@@ -903,14 +897,14 @@ final class BackupDashboardViewModel: ObservableObject {
         device: DeviceInfo,
         trustToken: String,
         progressCoordinator: BackupUploadProgressCoordinator,
-        maxConcurrentUploads: Int
-    ) async throws -> [UploadTaskOutcome] {
-        guard !pendingAssets.isEmpty else { return [] }
+        maxConcurrentUploads: Int,
+        onOutcome: @escaping @Sendable (UploadTaskOutcome) async -> Void
+    ) async throws {
+        guard !pendingAssets.isEmpty else { return }
 
-        return try await withThrowingTaskGroup(of: UploadTaskOutcome.self) { group in
+        try await withThrowingTaskGroup(of: UploadTaskOutcome.self) { group in
             var nextIndex = 0
             var activeTaskCount = 0
-            var outcomes: [UploadTaskOutcome] = []
 
             func enqueueNextUpload() {
                 guard nextIndex < pendingAssets.count else { return }
@@ -978,7 +972,7 @@ final class BackupDashboardViewModel: ObservableObject {
             while let outcome = try await group.next() {
                 try Task.checkCancellation()
                 activeTaskCount = max(activeTaskCount - 1, 0)
-                outcomes.append(outcome)
+                await onOutcome(outcome)
 
                 let desiredConcurrency = UploadConcurrencyPolicy.recommendedConcurrency(
                     for: pendingAssets[nextIndex...],
@@ -988,8 +982,6 @@ final class BackupDashboardViewModel: ObservableObject {
                     enqueueNextUpload()
                 }
             }
-
-            return outcomes
         }
     }
     
