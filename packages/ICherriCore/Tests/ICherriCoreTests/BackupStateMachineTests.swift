@@ -160,6 +160,10 @@ struct MockBackupIndex: BackupIndexQuerying {
         fingerprintEntries[fingerprint]
     }
 
+    func findByCandidate(_ candidate: AssetMetadata) async throws -> BackupIndexEntry? {
+        fingerprintEntries[candidate.quickFingerprint]
+    }
+
     func findBySHA256(_ sha256: String) async throws -> BackupIndexEntry? {
         sha256Entries[sha256]
     }

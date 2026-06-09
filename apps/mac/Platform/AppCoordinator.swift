@@ -151,7 +151,8 @@ final class AppCoordinator: NSObject, ObservableObject {
             self.commitProcessor = processor
             
             // Handlers
-            let queryProcessor = CheckBatchProcessor(index: DatabaseManager.shared)
+            let backupIndex = DiskBackedBackupIndex(databaseManager: DatabaseManager.shared, backupRootURL: backupDir)
+            let queryProcessor = CheckBatchProcessor(index: backupIndex)
             let checkBatchHandler = CheckBatchHandler(
                 processor: queryProcessor,
                 progressStore: backupRunProgressStore,

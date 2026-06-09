@@ -893,6 +893,10 @@ extension DatabaseManager: BackupIndexQuerying {
         return nil
     }
 
+    public func findByCandidate(_ candidate: AssetMetadata) async throws -> BackupIndexEntry? {
+        try await findByFingerprint(candidate.quickFingerprint)
+    }
+
     public func findBySHA256(_ sha256: String) async throws -> BackupIndexEntry? {
         if let record = try fetchAsset(sha256: sha256) {
             return BackupIndexEntry(backupID: record.backupId, status: record.status, contentSHA256: record.contentSha256)

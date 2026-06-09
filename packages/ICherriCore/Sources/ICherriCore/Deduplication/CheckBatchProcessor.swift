@@ -6,6 +6,7 @@ import ICherriProtocol
 public protocol BackupIndexQuerying: Sendable {
     func findByDeviceAndAssetID(deviceID: String, assetLocalID: String) async throws -> BackupIndexEntry?
     func findByFingerprint(_ fingerprint: String) async throws -> BackupIndexEntry?
+    func findByCandidate(_ candidate: AssetMetadata) async throws -> BackupIndexEntry?
     func findBySHA256(_ sha256: String) async throws -> BackupIndexEntry?
 }
 
@@ -67,7 +68,7 @@ public actor CheckBatchProcessor {
             deviceID: candidate.deviceID,
             assetLocalID: candidate.assetLocalID
         )
-        let fingerprintEntry = try await index.findByFingerprint(candidate.quickFingerprint)
+        let fingerprintEntry = try await index.findByCandidate(candidate)
 
         let verdict = DeduplicationPolicy.evaluate(
             exactMatch: exactEntry,

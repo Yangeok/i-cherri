@@ -303,6 +303,72 @@ struct DatabaseManagerBackupRunTests {
         #expect(FileManager.default.fileExists(atPath: existingDir.appendingPathComponent("IMG_0001_1.JPG").path))
     }
 
+    @Test("Given only an on-disk backup file remains when check-batch runs then disk fallback skips upload and rebuilds the asset index")
+    func diskFallbackRehydratesDeletedIndexFromExistingFile() async throws {
+        let manager = DatabaseManager.shared
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("icherri-disk-fallback-tests-\(UUID().uuidString)", isDirectory: true)
+        let backupRoot = tempDirectory.appendingPathComponent("backup-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: backupRoot, withIntermediateDirectories: true)
+
+        let databasePath = tempDirectory.appendingPathComponent("receiver.sqlite").path
+        try await manager.open(at: databasePath)
+
+        let device = DeviceInfo(deviceID: "device-1", deviceName: "Test iPhone", platform: "iOS", appVersion: "1.0")
+        try await manager.upsertDevice(
+            PairedDeviceRecord(
+                id: nil,
+                deviceId: device.deviceID,
+                deviceName: device.deviceName,
+                pairingStatus: "paired",
+                createdAt: .now,
+                lastSeenAt: .now,
+                trustToken: "token-1"
+            )
+        )
+
+        let creationDate = iso8601("2026-06-08T12:00:00Z")
+        let existingDir = backupRoot.appendingPathComponent("2026/06", isDirectory: true)
+        try FileManager.default.createDirectory(at: existingDir, withIntermediateDirectories: true)
+        let existingURL = existingDir.appendingPathComponent("IMG_9000.PNG")
+        let pngData = try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5xL0YAAAAASUVORK5CYII="))
+        try pngData.write(to: existingURL)
+
+        let candidate = AssetMetadata(
+            deviceID: device.deviceID,
+            assetLocalID: "asset-disk",
+            originalFilename: "IMG_9000.PNG",
+            mediaType: .photo,
+            creationDate: creationDate,
+            modificationDate: creationDate,
+            byteSize: Int64(pngData.count),
+            pixelWidth: 1,
+            pixelHeight: 1,
+            quickFingerprint: FingerprintGenerator.generate(
+                creationDate: creationDate,
+                byteSize: Int64(pngData.count),
+                pixelWidth: 1,
+                pixelHeight: 1
+            )
+        )
+
+        let processor = CheckBatchProcessor(
+            index: DiskBackedBackupIndex(databaseManager: manager, backupRootURL: backupRoot)
+        )
+        let response = try await processor.process(
+            request: CheckBatchRequest(device: device, candidates: [candidate])
+        )
+
+        #expect(response.requiredUploads.isEmpty)
+        #expect(response.alreadyBackedUp.isEmpty)
+        #expect(response.duplicates == ["asset-disk"])
+
+        let rehydrated = try #require(try await manager.fetchAsset(deviceId: device.deviceID, assetLocalId: "asset-disk"))
+        #expect(rehydrated.finalPath == "2026/06/IMG_9000.PNG")
+        #expect(rehydrated.status == "completed")
+        #expect(!rehydrated.contentSha256.isEmpty)
+    }
+
     private func asset(id: String, fingerprint: String, bytes: Int64) -> AssetMetadata {
         AssetMetadata(
             deviceID: "device-1",
