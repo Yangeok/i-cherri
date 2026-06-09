@@ -19,8 +19,15 @@ MAC_RELEASE_ARM64_DMG=$(MAC_RELEASE_DIST)/iCherri-Mac-$(MAC_RELEASE_VERSION)-arm
 MAC_RELEASE_X86_64_DMG=$(MAC_RELEASE_DIST)/iCherri-Mac-$(MAC_RELEASE_VERSION)-x86_64.dmg
 MAC_RELEASE_DMG_VOLUME_NAME=iCherri-Mac
 MAC_RELEASE_DMG_STAGING=$(CURDIR)/.build/mac-dmg-staging
+MAC_RELEASE_SIGN_IDENTITY ?=
+MAC_RELEASE_TEAM_ID ?=
+MAC_NOTARYTOOL_PROFILE ?=
+MAC_NOTARY_APPLE_ID ?=
+MAC_NOTARY_TEAM_ID ?=
+MAC_NOTARY_APP_PASSWORD ?=
+MAC_NOTARY_PRIMARY_BUNDLE_ID ?= com.yangeok.iCherri-Mac
 
-.PHONY: all clean help mac-app mac-run mac-dev mac-logs ios-app ios-run ios-console ios-dev dist-reset-release mac-release-arm64 mac-release-x86_64 mac-release-assets mac-dmg-arm64 mac-dmg-x86_64 mac-dmg-assets
+.PHONY: all clean help mac-app mac-run mac-dev mac-logs ios-app ios-run ios-console ios-dev dist-reset-release mac-release-arm64 mac-release-x86_64 mac-release-assets mac-notarize-arm64 mac-notarize-x86_64 mac-notarized-release-assets mac-package-dmg-arm64 mac-package-dmg-x86_64 mac-dmg-arm64 mac-dmg-x86_64 mac-dmg-assets mac-dmg-notarized-arm64 mac-dmg-notarized-x86_64 mac-dmg-notarized-assets
 
 all: mac-app ios-app
 
@@ -46,7 +53,7 @@ mac-release-arm64:
 	@echo "📦 Building macOS Release App (arm64)..."
 	rm -rf "$(MAC_RELEASE_ARM64_DERIVED_DATA)"
 	mkdir -p "$(MAC_RELEASE_DIST)"
-	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -configuration Release -destination 'platform=macOS,arch=arm64' -derivedDataPath "$(MAC_RELEASE_ARM64_DERIVED_DATA)" ONLY_ACTIVE_ARCH=NO ARCHS=arm64
+	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -configuration Release -destination 'platform=macOS,arch=arm64' -derivedDataPath "$(MAC_RELEASE_ARM64_DERIVED_DATA)" ONLY_ACTIVE_ARCH=NO ARCHS=arm64 $(if $(MAC_RELEASE_SIGN_IDENTITY),CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$(MAC_RELEASE_SIGN_IDENTITY)") $(if $(MAC_RELEASE_TEAM_ID),DEVELOPMENT_TEAM="$(MAC_RELEASE_TEAM_ID)")
 	rm -f "$(MAC_RELEASE_ARM64_ZIP)"
 	ditto -c -k --sequesterRsrc --keepParent "$(MAC_RELEASE_ARM64_APP_PATH)" "$(MAC_RELEASE_ARM64_ZIP)"
 
@@ -54,7 +61,7 @@ mac-release-x86_64:
 	@echo "📦 Building macOS Release App (x86_64)..."
 	rm -rf "$(MAC_RELEASE_X86_64_DERIVED_DATA)"
 	mkdir -p "$(MAC_RELEASE_DIST)"
-	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -configuration Release -destination 'platform=macOS,arch=x86_64' -derivedDataPath "$(MAC_RELEASE_X86_64_DERIVED_DATA)" ONLY_ACTIVE_ARCH=NO ARCHS=x86_64
+	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -configuration Release -destination 'platform=macOS,arch=x86_64' -derivedDataPath "$(MAC_RELEASE_X86_64_DERIVED_DATA)" ONLY_ACTIVE_ARCH=NO ARCHS=x86_64 $(if $(MAC_RELEASE_SIGN_IDENTITY),CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$(MAC_RELEASE_SIGN_IDENTITY)") $(if $(MAC_RELEASE_TEAM_ID),DEVELOPMENT_TEAM="$(MAC_RELEASE_TEAM_ID)")
 	rm -f "$(MAC_RELEASE_X86_64_ZIP)"
 	ditto -c -k --sequesterRsrc --keepParent "$(MAC_RELEASE_X86_64_APP_PATH)" "$(MAC_RELEASE_X86_64_ZIP)"
 
@@ -64,7 +71,35 @@ mac-release-assets:
 	@$(MAKE) mac-release-x86_64
 	@echo "✅ Release assets ready in $(MAC_RELEASE_DIST)"
 
-mac-dmg-arm64: mac-release-arm64
+mac-notarize-arm64: mac-release-arm64
+	@echo "🔐 Notarizing macOS Release App (arm64)..."
+	@if [ -z "$(MAC_RELEASE_SIGN_IDENTITY)" ]; then \
+		echo "❌ Set MAC_RELEASE_SIGN_IDENTITY to your Developer ID Application certificate."; \
+		exit 1; \
+	fi
+	@$(MAKE) mac-notarize-file FILE="$(MAC_RELEASE_ARM64_APP_PATH)" KIND=app
+	rm -f "$(MAC_RELEASE_ARM64_ZIP)"
+	ditto -c -k --sequesterRsrc --keepParent "$(MAC_RELEASE_ARM64_APP_PATH)" "$(MAC_RELEASE_ARM64_ZIP)"
+	@echo "✅ Notarized app + zip ready: $(MAC_RELEASE_ARM64_APP_PATH)"
+
+mac-notarize-x86_64: mac-release-x86_64
+	@echo "🔐 Notarizing macOS Release App (x86_64)..."
+	@if [ -z "$(MAC_RELEASE_SIGN_IDENTITY)" ]; then \
+		echo "❌ Set MAC_RELEASE_SIGN_IDENTITY to your Developer ID Application certificate."; \
+		exit 1; \
+	fi
+	@$(MAKE) mac-notarize-file FILE="$(MAC_RELEASE_X86_64_APP_PATH)" KIND=app
+	rm -f "$(MAC_RELEASE_X86_64_ZIP)"
+	ditto -c -k --sequesterRsrc --keepParent "$(MAC_RELEASE_X86_64_APP_PATH)" "$(MAC_RELEASE_X86_64_ZIP)"
+	@echo "✅ Notarized app + zip ready: $(MAC_RELEASE_X86_64_APP_PATH)"
+
+mac-notarized-release-assets:
+	@$(MAKE) dist-reset-release
+	@$(MAKE) mac-notarize-arm64
+	@$(MAKE) mac-notarize-x86_64
+	@echo "✅ Notarized release assets ready in $(MAC_RELEASE_DIST)"
+
+mac-package-dmg-arm64:
 	@echo "📀 Packaging macOS DMG (arm64)..."
 	rm -rf "$(MAC_RELEASE_DMG_STAGING)/arm64"
 	mkdir -p "$(MAC_RELEASE_DMG_STAGING)/arm64"
@@ -73,7 +108,7 @@ mac-dmg-arm64: mac-release-arm64
 	rm -f "$(MAC_RELEASE_ARM64_DMG)"
 	hdiutil create -volname "$(MAC_RELEASE_DMG_VOLUME_NAME)" -srcfolder "$(MAC_RELEASE_DMG_STAGING)/arm64" -ov -format UDZO "$(MAC_RELEASE_ARM64_DMG)"
 
-mac-dmg-x86_64: mac-release-x86_64
+mac-package-dmg-x86_64:
 	@echo "📀 Packaging macOS DMG (x86_64)..."
 	rm -rf "$(MAC_RELEASE_DMG_STAGING)/x86_64"
 	mkdir -p "$(MAC_RELEASE_DMG_STAGING)/x86_64"
@@ -82,11 +117,62 @@ mac-dmg-x86_64: mac-release-x86_64
 	rm -f "$(MAC_RELEASE_X86_64_DMG)"
 	hdiutil create -volname "$(MAC_RELEASE_DMG_VOLUME_NAME)" -srcfolder "$(MAC_RELEASE_DMG_STAGING)/x86_64" -ov -format UDZO "$(MAC_RELEASE_X86_64_DMG)"
 
+mac-dmg-arm64: mac-release-arm64
+	@$(MAKE) mac-package-dmg-arm64
+
+mac-dmg-x86_64: mac-release-x86_64
+	@$(MAKE) mac-package-dmg-x86_64
+
 mac-dmg-assets:
 	@$(MAKE) dist-reset-release
 	@$(MAKE) mac-dmg-arm64
 	@$(MAKE) mac-dmg-x86_64
 	@echo "✅ DMG assets ready in $(MAC_RELEASE_DIST)"
+
+mac-dmg-notarized-arm64: mac-notarize-arm64
+	@$(MAKE) mac-package-dmg-arm64
+	@echo "📀 Notarizing macOS DMG (arm64)..."
+	@$(MAKE) mac-notarize-file FILE="$(MAC_RELEASE_ARM64_DMG)" KIND=dmg
+	@echo "✅ Notarized DMG ready: $(MAC_RELEASE_ARM64_DMG)"
+
+mac-dmg-notarized-x86_64: mac-notarize-x86_64
+	@$(MAKE) mac-package-dmg-x86_64
+	@echo "📀 Notarizing macOS DMG (x86_64)..."
+	@$(MAKE) mac-notarize-file FILE="$(MAC_RELEASE_X86_64_DMG)" KIND=dmg
+	@echo "✅ Notarized DMG ready: $(MAC_RELEASE_X86_64_DMG)"
+
+mac-dmg-notarized-assets:
+	@$(MAKE) dist-reset-release
+	@$(MAKE) mac-dmg-notarized-arm64
+	@$(MAKE) mac-dmg-notarized-x86_64
+	@echo "✅ Notarized DMG assets ready in $(MAC_RELEASE_DIST)"
+
+mac-notarize-file:
+	@echo "📨 Submitting $(FILE) for notarization..."
+	@if [ -z "$(FILE)" ]; then \
+		echo "❌ FILE is required."; \
+		exit 1; \
+	fi
+	@if [ -n "$(MAC_NOTARYTOOL_PROFILE)" ]; then \
+		xcrun notarytool submit "$(FILE)" $(if $(MAC_NOTARY_PRIMARY_BUNDLE_ID),--primary-bundle-id "$(MAC_NOTARY_PRIMARY_BUNDLE_ID)") --keychain-profile "$(MAC_NOTARYTOOL_PROFILE)" --wait; \
+	elif [ -n "$(MAC_NOTARY_APPLE_ID)" ] && [ -n "$(MAC_NOTARY_TEAM_ID)" ] && [ -n "$(MAC_NOTARY_APP_PASSWORD)" ]; then \
+		xcrun notarytool submit "$(FILE)" $(if $(MAC_NOTARY_PRIMARY_BUNDLE_ID),--primary-bundle-id "$(MAC_NOTARY_PRIMARY_BUNDLE_ID)") --apple-id "$(MAC_NOTARY_APPLE_ID)" --team-id "$(MAC_NOTARY_TEAM_ID)" --password "$(MAC_NOTARY_APP_PASSWORD)" --wait; \
+	else \
+		echo "❌ Configure MAC_NOTARYTOOL_PROFILE or MAC_NOTARY_APPLE_ID + MAC_NOTARY_TEAM_ID + MAC_NOTARY_APP_PASSWORD."; \
+		exit 1; \
+	fi
+	@echo "📎 Stapling $(FILE)..."
+	xcrun stapler staple -v "$(FILE)"
+	@echo "🔎 Validating stapled $(FILE)..."
+	xcrun stapler validate -v "$(FILE)"
+	@if [ "$(KIND)" = "app" ]; then \
+		spctl -a -vv -t exec "$(FILE)"; \
+	elif [ "$(KIND)" = "dmg" ]; then \
+		spctl -a -vv -t open --context context:primary-signature "$(FILE)"; \
+	else \
+		echo "❌ KIND must be app or dmg."; \
+		exit 1; \
+	fi
 
 ios-app:
 	@echo "📱 Building iOS App..."
@@ -133,9 +219,15 @@ help:
 	@echo "  make mac-release-arm64  - Build and zip macOS Release app for Apple Silicon"
 	@echo "  make mac-release-x86_64 - Build and zip macOS Release app for Intel Mac"
 	@echo "  make mac-release-assets - Build both macOS Release zip assets"
+	@echo "  make mac-notarize-arm64 - Build, notarize, staple, and re-zip Apple Silicon macOS app"
+	@echo "  make mac-notarize-x86_64 - Build, notarize, staple, and re-zip Intel macOS app"
+	@echo "  make mac-notarized-release-assets - Build notarized zip assets for both macOS arches"
 	@echo "  make mac-dmg-arm64      - Build and package Apple Silicon macOS DMG"
 	@echo "  make mac-dmg-x86_64     - Build and package Intel macOS DMG"
 	@echo "  make mac-dmg-assets     - Build both macOS DMG assets"
+	@echo "  make mac-dmg-notarized-arm64 - Build, notarize, staple, and verify Apple Silicon DMG"
+	@echo "  make mac-dmg-notarized-x86_64 - Build, notarize, staple, and verify Intel DMG"
+	@echo "  make mac-dmg-notarized-assets - Build notarized DMG assets for both macOS arches"
 	@echo "  make ios-app     - Build iOS SwiftUI App"
 	@echo "  make ios-run     - Build, install, and launch iOS app on a connected device"
 	@echo "  make ios-console - Attach terminal to iOS app console on a connected device"

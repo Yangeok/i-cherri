@@ -44,8 +44,31 @@ Common workflows:
 
 - `make mac-run`: build and launch the macOS receiver app
 - `make mac-dev`: build, launch, then stream macOS logs
+- `make mac-dmg-notarized-arm64`: build, notarize, staple, and verify an Apple Silicon DMG
+- `make mac-dmg-notarized-x86_64`: build, notarize, staple, and verify an Intel DMG
+- `make mac-dmg-notarized-assets`: build notarized DMGs for both macOS architectures
 - `make ios-run`: build, install, and launch on a connected iPhone
 - `make ios-dev`: build, launch, then attach iOS console output
+
+Notarized macOS release targets require:
+
+- `MAC_RELEASE_SIGN_IDENTITY`: your `Developer ID Application: ...` certificate name
+- One notarization auth mode:
+  - `MAC_NOTARYTOOL_PROFILE`: keychain profile created with `xcrun notarytool store-credentials`
+  - or `MAC_NOTARY_APPLE_ID`, `MAC_NOTARY_TEAM_ID`, `MAC_NOTARY_APP_PASSWORD`
+
+Example:
+
+```bash
+MAC_RELEASE_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+MAC_NOTARYTOOL_PROFILE="icherri-notary" \
+make mac-dmg-notarized-arm64
+```
+
+Release cleanup:
+
+- `make dist-reset-release`: remove and recreate only `dist/`
+- `make clean`: remove both `.build/` and `dist/`
 
 ---
 
