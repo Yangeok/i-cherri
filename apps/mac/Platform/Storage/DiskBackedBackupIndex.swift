@@ -112,18 +112,6 @@ actor DiskBackedBackupIndex: BackupIndexQuerying {
             return match
         }
 
-        let urls = try FileManager.default.contentsOfDirectory(
-            at: monthDirectory,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-
-        for url in urls where url.lastPathComponent != candidate.originalFilename {
-            if let match = try inspect(url: url, candidate: candidate) {
-                return match
-            }
-        }
-
         return nil
     }
 
