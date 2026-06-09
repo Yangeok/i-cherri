@@ -53,7 +53,7 @@ mac-release-arm64:
 	@echo "📦 Building macOS Release App (arm64)..."
 	rm -rf "$(MAC_RELEASE_ARM64_DERIVED_DATA)"
 	mkdir -p "$(MAC_RELEASE_DIST)"
-	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -configuration Release -destination 'platform=macOS,arch=arm64' -derivedDataPath "$(MAC_RELEASE_ARM64_DERIVED_DATA)" ONLY_ACTIVE_ARCH=NO ARCHS=arm64 $(if $(MAC_RELEASE_SIGN_IDENTITY),CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$(MAC_RELEASE_SIGN_IDENTITY)") $(if $(MAC_RELEASE_TEAM_ID),DEVELOPMENT_TEAM="$(MAC_RELEASE_TEAM_ID)")
+	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -configuration Release -destination 'platform=macOS,arch=arm64' -derivedDataPath "$(MAC_RELEASE_ARM64_DERIVED_DATA)" ONLY_ACTIVE_ARCH=NO ARCHS=arm64 CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO OTHER_CODE_SIGN_FLAGS=--timestamp $(if $(MAC_RELEASE_SIGN_IDENTITY),CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$(MAC_RELEASE_SIGN_IDENTITY)") $(if $(MAC_RELEASE_TEAM_ID),DEVELOPMENT_TEAM="$(MAC_RELEASE_TEAM_ID)")
 	rm -f "$(MAC_RELEASE_ARM64_ZIP)"
 	ditto -c -k --sequesterRsrc --keepParent "$(MAC_RELEASE_ARM64_APP_PATH)" "$(MAC_RELEASE_ARM64_ZIP)"
 
@@ -61,7 +61,7 @@ mac-release-x86_64:
 	@echo "📦 Building macOS Release App (x86_64)..."
 	rm -rf "$(MAC_RELEASE_X86_64_DERIVED_DATA)"
 	mkdir -p "$(MAC_RELEASE_DIST)"
-	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -configuration Release -destination 'platform=macOS,arch=x86_64' -derivedDataPath "$(MAC_RELEASE_X86_64_DERIVED_DATA)" ONLY_ACTIVE_ARCH=NO ARCHS=x86_64 $(if $(MAC_RELEASE_SIGN_IDENTITY),CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$(MAC_RELEASE_SIGN_IDENTITY)") $(if $(MAC_RELEASE_TEAM_ID),DEVELOPMENT_TEAM="$(MAC_RELEASE_TEAM_ID)")
+	xcodebuild build -project $(MAC_PROJECT) -scheme $(MAC_SCHEME) -configuration Release -destination 'platform=macOS,arch=x86_64' -derivedDataPath "$(MAC_RELEASE_X86_64_DERIVED_DATA)" ONLY_ACTIVE_ARCH=NO ARCHS=x86_64 CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO OTHER_CODE_SIGN_FLAGS=--timestamp $(if $(MAC_RELEASE_SIGN_IDENTITY),CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$(MAC_RELEASE_SIGN_IDENTITY)") $(if $(MAC_RELEASE_TEAM_ID),DEVELOPMENT_TEAM="$(MAC_RELEASE_TEAM_ID)")
 	rm -f "$(MAC_RELEASE_X86_64_ZIP)"
 	ditto -c -k --sequesterRsrc --keepParent "$(MAC_RELEASE_X86_64_APP_PATH)" "$(MAC_RELEASE_X86_64_ZIP)"
 
@@ -77,7 +77,20 @@ mac-notarize-arm64: mac-release-arm64
 		echo "❌ Set MAC_RELEASE_SIGN_IDENTITY to your Developer ID Application certificate."; \
 		exit 1; \
 	fi
-	@$(MAKE) mac-notarize-file FILE="$(MAC_RELEASE_ARM64_APP_PATH)" KIND=app
+	@echo "📨 Submitting zip for notarization..."
+	@if [ -n "$(MAC_NOTARYTOOL_PROFILE)" ]; then \
+		xcrun notarytool submit "$(MAC_RELEASE_ARM64_ZIP)" --keychain-profile "$(MAC_NOTARYTOOL_PROFILE)" --wait; \
+	elif [ -n "$(MAC_NOTARY_APPLE_ID)" ] && [ -n "$(MAC_NOTARY_TEAM_ID)" ] && [ -n "$(MAC_NOTARY_APP_PASSWORD)" ]; then \
+		xcrun notarytool submit "$(MAC_RELEASE_ARM64_ZIP)" --apple-id "$(MAC_NOTARY_APPLE_ID)" --team-id "$(MAC_NOTARY_TEAM_ID)" --password "$(MAC_NOTARY_APP_PASSWORD)" --wait; \
+	else \
+		echo "❌ Configure MAC_NOTARYTOOL_PROFILE or MAC_NOTARY_APPLE_ID + MAC_NOTARY_TEAM_ID + MAC_NOTARY_APP_PASSWORD."; \
+		exit 1; \
+	fi
+	@echo "📎 Stapling app..."
+	xcrun stapler staple -v "$(MAC_RELEASE_ARM64_APP_PATH)"
+	@echo "🔎 Validating stapled app..."
+	xcrun stapler validate -v "$(MAC_RELEASE_ARM64_APP_PATH)"
+	spctl -a -vv -t exec "$(MAC_RELEASE_ARM64_APP_PATH)"
 	rm -f "$(MAC_RELEASE_ARM64_ZIP)"
 	ditto -c -k --sequesterRsrc --keepParent "$(MAC_RELEASE_ARM64_APP_PATH)" "$(MAC_RELEASE_ARM64_ZIP)"
 	@echo "✅ Notarized app + zip ready: $(MAC_RELEASE_ARM64_APP_PATH)"
@@ -88,7 +101,20 @@ mac-notarize-x86_64: mac-release-x86_64
 		echo "❌ Set MAC_RELEASE_SIGN_IDENTITY to your Developer ID Application certificate."; \
 		exit 1; \
 	fi
-	@$(MAKE) mac-notarize-file FILE="$(MAC_RELEASE_X86_64_APP_PATH)" KIND=app
+	@echo "📨 Submitting zip for notarization..."
+	@if [ -n "$(MAC_NOTARYTOOL_PROFILE)" ]; then \
+		xcrun notarytool submit "$(MAC_RELEASE_X86_64_ZIP)" --keychain-profile "$(MAC_NOTARYTOOL_PROFILE)" --wait; \
+	elif [ -n "$(MAC_NOTARY_APPLE_ID)" ] && [ -n "$(MAC_NOTARY_TEAM_ID)" ] && [ -n "$(MAC_NOTARY_APP_PASSWORD)" ]; then \
+		xcrun notarytool submit "$(MAC_RELEASE_X86_64_ZIP)" --apple-id "$(MAC_NOTARY_APPLE_ID)" --team-id "$(MAC_NOTARY_TEAM_ID)" --password "$(MAC_NOTARY_APP_PASSWORD)" --wait; \
+	else \
+		echo "❌ Configure MAC_NOTARYTOOL_PROFILE or MAC_NOTARY_APPLE_ID + MAC_NOTARY_TEAM_ID + MAC_NOTARY_APP_PASSWORD."; \
+		exit 1; \
+	fi
+	@echo "📎 Stapling app..."
+	xcrun stapler staple -v "$(MAC_RELEASE_X86_64_APP_PATH)"
+	@echo "🔎 Validating stapled app..."
+	xcrun stapler validate -v "$(MAC_RELEASE_X86_64_APP_PATH)"
+	spctl -a -vv -t exec "$(MAC_RELEASE_X86_64_APP_PATH)"
 	rm -f "$(MAC_RELEASE_X86_64_ZIP)"
 	ditto -c -k --sequesterRsrc --keepParent "$(MAC_RELEASE_X86_64_APP_PATH)" "$(MAC_RELEASE_X86_64_ZIP)"
 	@echo "✅ Notarized app + zip ready: $(MAC_RELEASE_X86_64_APP_PATH)"
@@ -131,12 +157,16 @@ mac-dmg-assets:
 
 mac-dmg-notarized-arm64: mac-notarize-arm64
 	@$(MAKE) mac-package-dmg-arm64
+	@echo "🔏 Signing DMG (arm64)..."
+	codesign --force --sign "$(MAC_RELEASE_SIGN_IDENTITY)" --timestamp "$(MAC_RELEASE_ARM64_DMG)"
 	@echo "📀 Notarizing macOS DMG (arm64)..."
 	@$(MAKE) mac-notarize-file FILE="$(MAC_RELEASE_ARM64_DMG)" KIND=dmg
 	@echo "✅ Notarized DMG ready: $(MAC_RELEASE_ARM64_DMG)"
 
 mac-dmg-notarized-x86_64: mac-notarize-x86_64
 	@$(MAKE) mac-package-dmg-x86_64
+	@echo "🔏 Signing DMG (x86_64)..."
+	codesign --force --sign "$(MAC_RELEASE_SIGN_IDENTITY)" --timestamp "$(MAC_RELEASE_X86_64_DMG)"
 	@echo "📀 Notarizing macOS DMG (x86_64)..."
 	@$(MAKE) mac-notarize-file FILE="$(MAC_RELEASE_X86_64_DMG)" KIND=dmg
 	@echo "✅ Notarized DMG ready: $(MAC_RELEASE_X86_64_DMG)"
@@ -154,9 +184,9 @@ mac-notarize-file:
 		exit 1; \
 	fi
 	@if [ -n "$(MAC_NOTARYTOOL_PROFILE)" ]; then \
-		xcrun notarytool submit "$(FILE)" $(if $(MAC_NOTARY_PRIMARY_BUNDLE_ID),--primary-bundle-id "$(MAC_NOTARY_PRIMARY_BUNDLE_ID)") --keychain-profile "$(MAC_NOTARYTOOL_PROFILE)" --wait; \
+		xcrun notarytool submit "$(FILE)" --keychain-profile "$(MAC_NOTARYTOOL_PROFILE)" --wait; \
 	elif [ -n "$(MAC_NOTARY_APPLE_ID)" ] && [ -n "$(MAC_NOTARY_TEAM_ID)" ] && [ -n "$(MAC_NOTARY_APP_PASSWORD)" ]; then \
-		xcrun notarytool submit "$(FILE)" $(if $(MAC_NOTARY_PRIMARY_BUNDLE_ID),--primary-bundle-id "$(MAC_NOTARY_PRIMARY_BUNDLE_ID)") --apple-id "$(MAC_NOTARY_APPLE_ID)" --team-id "$(MAC_NOTARY_TEAM_ID)" --password "$(MAC_NOTARY_APP_PASSWORD)" --wait; \
+		xcrun notarytool submit "$(FILE)" --apple-id "$(MAC_NOTARY_APPLE_ID)" --team-id "$(MAC_NOTARY_TEAM_ID)" --password "$(MAC_NOTARY_APP_PASSWORD)" --wait; \
 	else \
 		echo "❌ Configure MAC_NOTARYTOOL_PROFILE or MAC_NOTARY_APPLE_ID + MAC_NOTARY_TEAM_ID + MAC_NOTARY_APP_PASSWORD."; \
 		exit 1; \
