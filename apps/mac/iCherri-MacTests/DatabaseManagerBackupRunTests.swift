@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ICherriCore
 import ICherriProtocol
 @testable import iCherri_Mac
 
@@ -156,6 +157,152 @@ struct DatabaseManagerBackupRunTests {
         #expect(summary.status == "snapshot_recorded")
     }
 
+    @Test("Given an identical file already exists at the canonical destination when committing then the processor reuses it without creating a suffixed duplicate")
+    func fileCommitReusesIdenticalExistingFile() async throws {
+        let manager = DatabaseManager.shared
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("icherri-file-commit-reuse-tests-\(UUID().uuidString)", isDirectory: true)
+        let backupRoot = tempDirectory.appendingPathComponent("backup-root", isDirectory: true)
+        let uploadRoot = tempDirectory.appendingPathComponent("incoming", isDirectory: true)
+        try FileManager.default.createDirectory(at: backupRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: uploadRoot, withIntermediateDirectories: true)
+
+        let databasePath = tempDirectory.appendingPathComponent("receiver.sqlite").path
+        try await manager.open(at: databasePath)
+
+        let now = Date()
+        try await manager.upsertDevice(
+            PairedDeviceRecord(
+                id: nil,
+                deviceId: "device-1",
+                deviceName: "Test iPhone",
+                pairingStatus: "paired",
+                createdAt: now,
+                lastSeenAt: now,
+                trustToken: "token-1"
+            )
+        )
+
+        let existingDir = backupRoot.appendingPathComponent("2026/06", isDirectory: true)
+        try FileManager.default.createDirectory(at: existingDir, withIntermediateDirectories: true)
+        let existingURL = existingDir.appendingPathComponent("IMG_0001.JPG")
+        let contents = Data("same-bytes".utf8)
+        try contents.write(to: existingURL)
+
+        let tempURL = uploadRoot.appendingPathComponent("upload.tmp")
+        try contents.write(to: tempURL)
+        let sha256 = try StreamingHasher().hash(fileURL: tempURL)
+
+        let processor = FileCommitProcessor(backupRootURL: backupRoot, dbManager: manager)
+        let result = try await processor.commit(
+            .init(
+                uploadID: "upload-1",
+                deviceID: "device-1",
+                assetLocalID: "asset-1",
+                originalFilename: "IMG_0001.JPG",
+                mediaType: .photo,
+                creationDate: iso8601("2026-06-08T12:00:00Z"),
+                modificationDate: iso8601("2026-06-08T12:00:00Z"),
+                byteSize: Int64(contents.count),
+                pixelWidth: 100,
+                pixelHeight: 100,
+                quickFingerprint: "fp-1",
+                durationSeconds: nil,
+                tempPath: tempURL.path,
+                expectedByteSize: Int64(contents.count),
+                expectedSHA256: sha256
+            )
+        )
+
+        let displayPath: String
+        switch result {
+        case .success(_, let path):
+            displayPath = path
+        default:
+            Issue.record("Expected commit success")
+            return
+        }
+
+        #expect(displayPath == "2026/06/IMG_0001.JPG")
+        #expect(FileManager.default.fileExists(atPath: existingURL.path))
+        #expect(!FileManager.default.fileExists(atPath: existingDir.appendingPathComponent("IMG_0001_1.JPG").path))
+        #expect(!FileManager.default.fileExists(atPath: tempURL.path))
+
+        let record = try #require(try await manager.fetchAsset(deviceId: "device-1", assetLocalId: "asset-1"))
+        #expect(record.finalPath == "2026/06/IMG_0001.JPG")
+        #expect(record.contentSha256 == sha256)
+    }
+
+    @Test("Given a conflicting filename with different bytes when committing then the processor still creates a suffixed file to avoid overwrite")
+    func fileCommitKeepsSuffixForDifferentContentCollision() async throws {
+        let manager = DatabaseManager.shared
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("icherri-file-commit-collision-tests-\(UUID().uuidString)", isDirectory: true)
+        let backupRoot = tempDirectory.appendingPathComponent("backup-root", isDirectory: true)
+        let uploadRoot = tempDirectory.appendingPathComponent("incoming", isDirectory: true)
+        try FileManager.default.createDirectory(at: backupRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: uploadRoot, withIntermediateDirectories: true)
+
+        let databasePath = tempDirectory.appendingPathComponent("receiver.sqlite").path
+        try await manager.open(at: databasePath)
+
+        let now = Date()
+        try await manager.upsertDevice(
+            PairedDeviceRecord(
+                id: nil,
+                deviceId: "device-1",
+                deviceName: "Test iPhone",
+                pairingStatus: "paired",
+                createdAt: now,
+                lastSeenAt: now,
+                trustToken: "token-1"
+            )
+        )
+
+        let existingDir = backupRoot.appendingPathComponent("2026/06", isDirectory: true)
+        try FileManager.default.createDirectory(at: existingDir, withIntermediateDirectories: true)
+        let existingURL = existingDir.appendingPathComponent("IMG_0001.JPG")
+        try Data("old-bytes".utf8).write(to: existingURL)
+
+        let tempURL = uploadRoot.appendingPathComponent("upload.tmp")
+        let newContents = Data("new-bytes".utf8)
+        try newContents.write(to: tempURL)
+        let sha256 = try StreamingHasher().hash(fileURL: tempURL)
+
+        let processor = FileCommitProcessor(backupRootURL: backupRoot, dbManager: manager)
+        let result = try await processor.commit(
+            .init(
+                uploadID: "upload-2",
+                deviceID: "device-1",
+                assetLocalID: "asset-2",
+                originalFilename: "IMG_0001.JPG",
+                mediaType: .photo,
+                creationDate: iso8601("2026-06-08T12:00:00Z"),
+                modificationDate: iso8601("2026-06-08T12:00:00Z"),
+                byteSize: Int64(newContents.count),
+                pixelWidth: 100,
+                pixelHeight: 100,
+                quickFingerprint: "fp-2",
+                durationSeconds: nil,
+                tempPath: tempURL.path,
+                expectedByteSize: Int64(newContents.count),
+                expectedSHA256: sha256
+            )
+        )
+
+        let displayPath: String
+        switch result {
+        case .success(_, let path):
+            displayPath = path
+        default:
+            Issue.record("Expected commit success")
+            return
+        }
+
+        #expect(displayPath == "2026/06/IMG_0001_1.JPG")
+        #expect(FileManager.default.fileExists(atPath: existingDir.appendingPathComponent("IMG_0001_1.JPG").path))
+    }
+
     private func asset(id: String, fingerprint: String, bytes: Int64) -> AssetMetadata {
         AssetMetadata(
             deviceID: "device-1",
@@ -199,5 +346,10 @@ struct DatabaseManagerBackupRunTests {
             completedAt: .now,
             lastError: nil
         )
+    }
+
+    private func iso8601(_ value: String) -> Date {
+        let formatter = ISO8601DateFormatter()
+        return formatter.date(from: value) ?? .distantPast
     }
 }

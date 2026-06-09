@@ -61,11 +61,18 @@ actor FileCommitProcessor {
         let destDir = backupRootURL.appendingPathComponent(relativeDir)
         try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
 
-        let destURL = uniqueDestURL(dir: destDir, filename: input.originalFilename)
+        let canonicalDestURL = destDir.appendingPathComponent(input.originalFilename)
+        let reusedExistingFile = try shouldReuseExistingFile(
+            at: canonicalDestURL,
+            matchingSHA256: computedHash
+        )
+        let destURL = reusedExistingFile ? canonicalDestURL : uniqueDestURL(dir: destDir, filename: input.originalFilename)
         let displayPath = "\(relativeDir)/\(destURL.lastPathComponent)"
 
-        // Atomic move
-        try FileManager.default.moveItem(at: tempURL, to: destURL)
+        if !reusedExistingFile {
+            // Atomic move
+            try FileManager.default.moveItem(at: tempURL, to: destURL)
+        }
 
         // Register in DB
         let backupID = UUID().uuidString
@@ -92,8 +99,17 @@ actor FileCommitProcessor {
             lastError: nil
         )
         try await dbManager.insertBackupAsset(record)
+        if reusedExistingFile {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
 
         return .success(backupID: backupID, displayPath: displayPath)
+    }
+
+    // Reuse an identical on-disk file so reindexed assets do not create suffixed duplicates.
+    private func shouldReuseExistingFile(at url: URL, matchingSHA256 expectedHash: String) throws -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        return try hasher.hash(fileURL: url) == expectedHash
     }
 
     // Returns a destination URL that doesn't collide with existing files.
