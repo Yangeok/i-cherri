@@ -9,9 +9,11 @@ struct PhotoLibraryScanPlan {
     }
 
     let mode: Mode
-    let assets: [AssetMetadata]
-    let totalAssetCount: Int
-    let totalAssetBytes: Int64
+    let runAssets: [AssetMetadata]
+    let runAssetCount: Int
+    let runAssetBytes: Int64
+    let libraryAssetCount: Int
+    let libraryAssetBytes: Int64
 }
 
 struct PhotoLibraryScanIndexState: Codable {
@@ -83,11 +85,15 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
             state.fullScanCompleted = true
             state.incrementalRunsSinceReconcile = 0
             persist()
+            let libraryAssets = allKnownAssetsSorted()
+            let libraryBytes = sumOfCachedAssetBytes()
             return PhotoLibraryScanPlan(
                 mode: .full,
-                assets: allKnownAssetsSorted(),
-                totalAssetCount: totalCount,
-                totalAssetBytes: sumOfCachedAssetBytes()
+                runAssets: libraryAssets,
+                runAssetCount: libraryAssets.count,
+                runAssetBytes: libraryBytes,
+                libraryAssetCount: totalCount,
+                libraryAssetBytes: libraryBytes
             )
         }
 
@@ -95,9 +101,11 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
         guard !candidateIDs.isEmpty else {
             return PhotoLibraryScanPlan(
                 mode: .incremental,
-                assets: allKnownAssetsSorted(),
-                totalAssetCount: totalCount,
-                totalAssetBytes: sumOfCachedAssetBytes()
+                runAssets: [],
+                runAssetCount: 0,
+                runAssetBytes: 0,
+                libraryAssetCount: totalCount,
+                libraryAssetBytes: sumOfCachedAssetBytes()
             )
         }
 
@@ -117,11 +125,18 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
         }
 
         persist()
+        let runAssets = assets.sorted { lhs, rhs in
+            lhs.creationDate > rhs.creationDate
+        }
         return PhotoLibraryScanPlan(
             mode: .incremental,
-            assets: allKnownAssetsSorted(),
-            totalAssetCount: totalCount,
-            totalAssetBytes: sumOfCachedAssetBytes()
+            runAssets: runAssets,
+            runAssetCount: runAssets.count,
+            runAssetBytes: runAssets.reduce(Int64(0)) { partialResult, asset in
+                partialResult + max(asset.byteSize, 0)
+            },
+            libraryAssetCount: totalCount,
+            libraryAssetBytes: sumOfCachedAssetBytes()
         )
     }
 

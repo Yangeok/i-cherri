@@ -505,8 +505,6 @@ final class BackupDashboardViewModel: ObservableObject {
 
         isBackingUp = true
         backupStatusMessage = "Scanning photo library..."
-        backupCoverageSummary = nil
-        backupCoverageProgress = nil
         let device = currentDeviceInfo()
         let progressViewModel = BackupProgressViewModel(totalCount: 0)
         progressViewModel.setPhase(.scanning)
@@ -558,29 +556,28 @@ final class BackupDashboardViewModel: ObservableObject {
 
                 let scanPlan = await self.scanIndexStore.makeScanPlan(scanner: self.scanner, deviceID: device.deviceID)
                 executedScanMode = scanPlan.mode
-                let scannedAssets = scanPlan.assets
+                let runAssets = scanPlan.runAssets
 
                 await MainActor.run {
-                    progressViewModel.setTotalCount(scanPlan.totalAssetCount)
-                    progressViewModel.setTotalBytes(scanPlan.totalAssetBytes)
+                    progressViewModel.setTotalCount(scanPlan.runAssetCount)
+                    progressViewModel.setTotalBytes(scanPlan.runAssetBytes)
                 }
 
                 try Task.checkCancellation()
 
-                if scannedAssets.isEmpty {
+                if runAssets.isEmpty {
                     await MainActor.run {
                         progressViewModel.update(
                             filename: scanPlan.mode == .incremental ? "Nothing new to back up" : "No media found",
-                            completed: scanPlan.totalAssetCount,
+                            completed: 0,
                             success: 0,
                             duplicates: 0,
                             failed: 0,
-                            overallBackedUpCount: scanPlan.totalAssetCount,
+                            overallBackedUpCount: 0,
                             phase: .complete,
                             bytesPerSecond: 0,
-                            totalBytes: scanPlan.totalAssetBytes
+                            totalBytes: scanPlan.runAssetBytes
                         )
-                        self.updateBackupCoverage(backedUpCount: 0, totalCount: scanPlan.totalAssetCount)
                         self.backupStatusMessage = scanPlan.mode == .incremental
                             ? "No changed photos or videos need backup."
                             : "No photos or videos found to back up."
@@ -592,7 +589,7 @@ final class BackupDashboardViewModel: ObservableObject {
                 let progressCoordinator = await MainActor.run {
                     BackupUploadProgressCoordinator(
                         viewModel: progressViewModel,
-                        totalExpectedBytes: scanPlan.totalAssetBytes,
+                        totalExpectedBytes: scanPlan.runAssetBytes,
                         totalCount: progressViewModel.totalCount
                     )
                 }
@@ -620,11 +617,11 @@ final class BackupDashboardViewModel: ObservableObject {
                 let backupRunID = UUID().uuidString
                 let batchResponse = try await backupClient.checkBatch(
                     backupRunID: backupRunID,
-                    candidates: scannedAssets,
-                    totalAssetCount: scanPlan.totalAssetCount,
-                    totalAssetBytes: scanPlan.totalAssetBytes
+                    candidates: runAssets,
+                    totalAssetCount: scanPlan.libraryAssetCount,
+                    totalAssetBytes: scanPlan.libraryAssetBytes
                 )
-                let assetIndex = Dictionary(uniqueKeysWithValues: scannedAssets.map { ($0.assetLocalID, $0) })
+                let assetIndex = Dictionary(uniqueKeysWithValues: runAssets.map { ($0.assetLocalID, $0) })
 
                 let duplicateAssetIDs = Set(batchResponse.alreadyBackedUp + batchResponse.duplicates)
                 var uploadedAssetIDs: Set<String> = []
@@ -651,7 +648,9 @@ final class BackupDashboardViewModel: ObservableObject {
                     .compactMap { assetIndex[$0]?.byteSize }
                     .reduce(Int64(0), +)
                 await MainActor.run {
-                    self.updateBackupCoverage(backedUpCount: duplicateAssetIDs.count, totalCount: scanPlan.totalAssetCount)
+                    if scanPlan.mode == .full {
+                        self.updateBackupCoverage(backedUpCount: duplicateAssetIDs.count, totalCount: scanPlan.libraryAssetCount)
+                    }
                     self.scanIndexStore.markSucceeded(assetIDs: batchResponse.alreadyBackedUp + batchResponse.duplicates)
                 }
                 var initialFailures = batchResponse.unsupported.map { assetLocalID in
@@ -724,7 +723,9 @@ final class BackupDashboardViewModel: ObservableObject {
                                 failedAssetIDs.remove(assetLocalID)
                                 let counts = snapshotCounts()
                                 await MainActor.run {
-                                    self.updateBackupCoverage(backedUpCount: counts.overallBackedUpCount, totalCount: scanPlan.totalAssetCount)
+                                    if scanPlan.mode == .full {
+                                        self.updateBackupCoverage(backedUpCount: counts.overallBackedUpCount, totalCount: scanPlan.libraryAssetCount)
+                                    }
                                     self.scanIndexStore.markSucceeded(assetIDs: [assetLocalID])
                                 }
                                 await progressCoordinator.finishAsset(
@@ -805,7 +806,9 @@ final class BackupDashboardViewModel: ObservableObject {
 
                 let finalCounts = snapshotCounts()
                 await MainActor.run {
-                    self.updateBackupCoverage(backedUpCount: finalCounts.overallBackedUpCount, totalCount: scanPlan.totalAssetCount)
+                    if scanPlan.mode == .full {
+                        self.updateBackupCoverage(backedUpCount: finalCounts.overallBackedUpCount, totalCount: scanPlan.libraryAssetCount)
+                    }
                     self.scanIndexStore.finishBackupRun(mode: scanPlan.mode)
                     self.backupStatusMessage = "Backup complete. Uploaded \(finalCounts.success), skipped \(finalCounts.duplicates), failed \(finalCounts.failed)."
                     progressViewModel.setPhase(.complete)
