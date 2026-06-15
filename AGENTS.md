@@ -29,5 +29,5 @@
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan: [plan.md](file:///Users/yangeok/Dev/Test/i-cherri/specs/001-rewrite-to-swift/plan.md)
+shell commands, and other important information, read the current plan: [plan.md](file:///Users/yangeok/Dev/Test/i-cherri/specs/002-background-auto-backup/plan.md)
 <!-- SPECKIT END -->
