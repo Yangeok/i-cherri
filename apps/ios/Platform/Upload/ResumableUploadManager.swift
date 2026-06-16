@@ -4,17 +4,15 @@ import ICherriProtocol
 
 // Manages the full lifecycle of a resumable upload: init → chunk send → (resume on abort) → commit.
 public actor ResumableUploadManager {
-    private final class PreparedVideoStreamBox: @unchecked Sendable {
-        let stream: InputStream
-
-        init(stream: InputStream) {
-            self.stream = stream
-        }
+    enum UploadRecoveryDisposition: Equatable {
+        case retrySameOffset
+        case resumeFrom(Int64)
+        case uploadFinished
     }
 
     private enum PreparedUpload {
         case image(data: Data, metadata: AssetMetadata, contentHash: String)
-        case video(streamBox: PreparedVideoStreamBox, metadata: AssetMetadata, contentHash: String)
+        case video(metadata: AssetMetadata, contentHash: String)
     }
 
     private let backupClient: BackupClient
@@ -49,10 +47,9 @@ public actor ResumableUploadManager {
                 contentHash: contentHash,
                 backupRunContext: backupRunContext
             )
-        case .video(let streamBox, let normalizedMetadata, let contentHash):
+        case .video(let normalizedMetadata, let contentHash):
             return try await uploadPreparedVideo(
                 assetLocalID: assetLocalID,
-                stream: streamBox.stream,
                 metadata: normalizedMetadata,
                 contentHash: contentHash,
                 backupRunContext: backupRunContext
@@ -62,10 +59,10 @@ public actor ResumableUploadManager {
 
     private func prepareUpload(assetLocalID: String, metadata: AssetMetadata) async throws -> PreparedUpload {
         if metadata.mediaType == .video {
-            let (stream, totalSize) = try await scanner.openInputStreamWithSize(for: assetLocalID)
+            let (_, totalSize) = try await scanner.openInputStreamWithSize(for: assetLocalID)
             let contentHash = try await hashStream(assetLocalID: assetLocalID)
             let normalizedMetadata = normalized(from: metadata, byteSize: totalSize)
-            return .video(streamBox: PreparedVideoStreamBox(stream: stream), metadata: normalizedMetadata, contentHash: contentHash)
+            return .video(metadata: normalizedMetadata, contentHash: contentHash)
         }
 
         let data = try await scanner.fetchData(for: assetLocalID)
@@ -85,12 +82,18 @@ public actor ResumableUploadManager {
             metadata: metadata,
             backupRunContext: backupRunContext
         )
-        try await chunkSender.send(
-            data: data,
+        try await sendWithRecovery(
             uploadID: uploadID,
-            chunkSize: chunkSize,
-            startingOffset: startOffset
-        )
+            initialOffset: startOffset,
+            totalSize: Int64(data.count)
+        ) { offset in
+            try await self.chunkSender.send(
+                data: data,
+                uploadID: uploadID,
+                chunkSize: chunkSize,
+                startingOffset: offset
+            )
+        }
         return try await commitAndReturn(
             uploadID: uploadID,
             assetLocalID: assetLocalID,
@@ -102,7 +105,6 @@ public actor ResumableUploadManager {
 
     private func uploadPreparedVideo(
         assetLocalID: String,
-        stream: InputStream,
         metadata: AssetMetadata,
         contentHash: String,
         backupRunContext: AutoBackupRunContext?
@@ -111,13 +113,20 @@ public actor ResumableUploadManager {
             metadata: metadata,
             backupRunContext: backupRunContext
         )
-        try await chunkSender.send(
-            stream: stream,
+        try await sendWithRecovery(
             uploadID: uploadID,
-            totalSize: metadata.byteSize,
-            chunkSize: chunkSize,
-            startingOffset: startOffset
-        )
+            initialOffset: startOffset,
+            totalSize: metadata.byteSize
+        ) { offset in
+            let (stream, _) = try await self.scanner.openInputStreamWithSize(for: assetLocalID)
+            try await self.chunkSender.send(
+                stream: stream,
+                uploadID: uploadID,
+                totalSize: metadata.byteSize,
+                chunkSize: chunkSize,
+                startingOffset: offset
+            )
+        }
         return try await commitAndReturn(
             uploadID: uploadID,
             assetLocalID: assetLocalID,
@@ -205,6 +214,102 @@ public actor ResumableUploadManager {
         return (initResponse.uploadID, 0, initResponse.chunkSize)
     }
 
+    private func sendWithRecovery(
+        uploadID: String,
+        initialOffset: Int64,
+        totalSize: Int64,
+        sendOperation: @escaping @Sendable (Int64) async throws -> Void
+    ) async throws {
+        var currentOffset = initialOffset
+        var recoveryAttempts = 0
+        let maxRecoveryAttempts = 4
+
+        while true {
+            do {
+                try await sendOperation(currentOffset)
+                return
+            } catch {
+                guard recoveryAttempts < maxRecoveryAttempts else {
+                    throw error
+                }
+
+                let disposition = try await recoverDisposition(
+                    uploadID: uploadID,
+                    currentOffset: currentOffset,
+                    totalSize: totalSize,
+                    underlyingError: error
+                )
+                recoveryAttempts += 1
+                switch disposition {
+                case .retrySameOffset:
+                    continue
+                case .resumeFrom(let recoveredOffset):
+                    currentOffset = recoveredOffset
+                case .uploadFinished:
+                    return
+                }
+            }
+        }
+    }
+
+    private func recoverDisposition(
+        uploadID: String,
+        currentOffset: Int64,
+        totalSize: Int64,
+        underlyingError: Error
+    ) async throws -> UploadRecoveryDisposition {
+        let status: UploadStatusResponse
+        do {
+            status = try await backupClient.uploadStatus(uploadID: uploadID)
+        } catch let BackupClientError.httpError(statusCode, _) where statusCode == 410 {
+            throw ResumableUploadError.sessionExpired
+        } catch {
+            throw underlyingError
+        }
+
+        return try Self.recoveryDisposition(
+            currentOffset: currentOffset,
+            totalSize: totalSize,
+            status: status,
+            underlyingError: underlyingError
+        )
+    }
+
+    static func recoveryDisposition(
+        currentOffset: Int64,
+        totalSize: Int64,
+        status: UploadStatusResponse,
+        underlyingError: Error,
+        now: Date = Date()
+    ) throws -> UploadRecoveryDisposition {
+        if status.status == "expired" || status.expiresAt <= now {
+            throw ResumableUploadError.sessionExpired
+        }
+        if status.receivedBytes >= totalSize {
+            return .uploadFinished
+        }
+        if status.receivedBytes > currentOffset {
+            return .resumeFrom(status.receivedBytes)
+        }
+        if status.receivedBytes < currentOffset {
+            throw underlyingError
+        }
+        if isConflictError(underlyingError) {
+            throw underlyingError
+        }
+        return .retrySameOffset
+    }
+
+    private static func isConflictError(_ error: Error) -> Bool {
+        if case ChunkUploadError.serverError(let statusCode) = error {
+            return statusCode == 409
+        }
+        if case BackupClientError.httpError(let statusCode, _) = error {
+            return statusCode == 409
+        }
+        return false
+    }
+
     private func hashStream(assetLocalID: String) async throws -> String {
         let (stream, _) = try await scanner.openInputStreamWithSize(for: assetLocalID)
         stream.open()
@@ -222,7 +327,7 @@ public actor ResumableUploadManager {
     }
 }
 
-public enum ResumableUploadError: Error {
+public enum ResumableUploadError: Error, Equatable, Sendable {
     case commitFailed(String)
     case sessionExpired
 }

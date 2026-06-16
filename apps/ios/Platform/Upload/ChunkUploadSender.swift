@@ -119,7 +119,7 @@ public protocol ChunkUploadProgressDelegate: AnyObject {
     func didSendBytes(_ bytes: Int64, totalSent: Int64, totalExpected: Int64) async
 }
 
-public enum ChunkUploadError: Error {
+public enum ChunkUploadError: Error, Equatable, Sendable {
     case serverError(Int)
     case streamError
 }

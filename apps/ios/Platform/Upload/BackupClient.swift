@@ -77,7 +77,10 @@ public actor BackupClient {
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         attachAuthHeaders(&req)
-        let (data, _) = try await session.data(for: req)
+        let (data, response) = try await session.data(for: req)
+        if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+            throw BackupClientError.httpError(http.statusCode, data)
+        }
         return try decoder.decode(UploadStatusResponse.self, from: data)
     }
 

@@ -80,6 +80,23 @@ Release cleanup:
 4. Start backup from iPhone.
 5. Inspect active sessions and backup history from the macOS dashboard.
 
+## Automatic Backup Operations
+
+- Turn on `Automatic Backup` in the iPhone backup dashboard.
+- Automatic backup prepares runs only when battery is at least `20%` and Wi-Fi is available.
+- The iPhone keeps a local run store with staged upload usage, receiver selection, recent results, and the next scheduled evaluation time.
+- The macOS receiver keeps resumable upload session context and treats replayed chunks idempotently.
+- If the receiver disappears or the iPhone becomes too warm, the run pauses and surfaces the reason in the iPhone UI.
+- Staged upload files are capped at `2 GB` total per automatic run store snapshot.
+
+Recommended targeted verification:
+
+```bash
+xcodebuild test -project apps/ios/iCherri-ios.xcodeproj -scheme iCherri-ios -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY='' -only-testing:iCherri-iosTests/AutoBackupEngineTests -only-testing:iCherri-iosTests/AutoBackupJobStoreTests -only-testing:iCherri-iosTests/AutoBackupStatusViewModelTests -only-testing:iCherri-iosTests/ResumableUploadManagerTests
+
+xcodebuild test -project apps/mac/iCherri-Mac.xcodeproj -scheme iCherri-Mac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY='' -only-testing:iCherri-MacTests/DatabaseManagerBackupRunTests -only-testing:iCherri-MacTests/AutoBackupReceiverContractTests
+```
+
 ---
 
 ## Security

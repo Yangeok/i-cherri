@@ -4,6 +4,15 @@
 
 이 기능은 `자동 시작`, `화면 꺼짐/앱 재실행 후 재개`, `receiver 부재/변경 처리`, `중복 업로드 방지`를 동시에 만족해야 한다.
 
+## 현재 구현 상태
+
+- `AutoBackupScheduler`, `AutoBackupPolicyEvaluator`, `AutoBackupEngine`, `AutoBackupJobStore`가 연결되어 있다.
+- 자동 백업 토글, eligibility 차단 사유, 최근 결과, 마지막 성공, 다음 자동 체크 시간이 iPhone UI에 노출된다.
+- staged upload 파일은 `2 GB` 상한을 넘기면 run이 멈추고 사유가 기록된다.
+- mac receiver는 동일 chunk 재전송을 idempotent 하게 처리하고, gap chunk는 `409`로 거절한다.
+- iOS resumable upload는 세션 상태를 다시 조회해 같은 offset 재시도, 더 앞선 offset 재개, 만료 세션 중단을 구분한다.
+- 남은 실기기 검증 포인트는 `백그라운드 wake 타이밍`, `화면 꺼짐 중 실제 OS 스케줄`, `실제 Mac sleep/wake 조합`이다.
+
 ## 구현 순서
 
 1. `ICherriProtocol`
@@ -66,3 +75,11 @@ xcodebuild test -project apps/ios/iCherri-ios.xcodeproj -scheme iCherri-ios -des
 
 xcodebuild test -project apps/mac/iCherri-Mac.xcodeproj -scheme iCherri-Mac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY=''
 ```
+
+## 운영 메모
+
+- 자동 백업은 `충전 중`이 필수는 아니다.
+- `Low Power Mode`는 현재 차단 조건이 아니다.
+- paired receiver가 바뀌면 기존 run을 handoff 하지 않고 새 Mac에서 새 run을 만든다.
+- 실패한 asset은 이후 automatic run에서 다시 평가 대상으로 돌아간다.
+- run 기록은 `7일` 후 만료된다.
