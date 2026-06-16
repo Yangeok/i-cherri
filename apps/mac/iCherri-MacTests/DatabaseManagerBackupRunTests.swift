@@ -73,6 +73,7 @@ struct DatabaseManagerBackupRunTests {
 
         let result = try await manager.finalizeBackupRun(runID: "run-1", deviceID: device.deviceID)
 
+        #expect(result.status == "partial")
         #expect(result.totalAssetCount == 3)
         #expect(result.completedAssetCount == 2)
         #expect(result.missingAssetIDs == ["missing"])
@@ -439,6 +440,95 @@ struct DatabaseManagerBackupRunTests {
         #expect(fallbackMatch.uploadId == "upload-context")
         #expect(exactMatch.backupRunId == "run-1")
         #expect(exactMatch.clientSessionId == "session-1")
+    }
+
+    @Test("Given an already persisted chunk when replaying the same chunk then the receiver treats it as idempotent and keeps progress unchanged")
+    func replayedChunkKeepsProgressUnchanged() async throws {
+        let manager = DatabaseManager.shared
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("icherri-upload-chunk-replay-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        let databasePath = tempDirectory.appendingPathComponent("receiver.sqlite").path
+        try await manager.open(at: databasePath)
+
+        let sessionManager = SessionManager(dbManager: manager)
+        let handler = UploadHandler(sessionManager: sessionManager, incomingDir: tempDirectory)
+        let uploadID = "upload-replay"
+        let tempPath = tempDirectory.appendingPathComponent("\(uploadID).tmp")
+        FileManager.default.createFile(atPath: tempPath.path, contents: Data(repeating: 0, count: 16))
+
+        try await sessionManager.createSession(
+            uploadID: uploadID,
+            deviceID: "device-1",
+            assetLocalID: "asset-1",
+            backupRunID: "run-1",
+            clientSessionID: "session-1",
+            tempPath: tempPath.path,
+            expectedByteSize: 16,
+            chunkSize: 8,
+            expiresAt: Date().addingTimeInterval(3600),
+            metadataJson: "{}"
+        )
+        try await sessionManager.updateProgress(uploadID: uploadID, receivedBytes: 8, status: "receiving")
+
+        let request = HTTPRequest(
+            method: "PUT",
+            path: "/uploads/\(uploadID)/chunks/0",
+            headers: [:],
+            body: Data(repeating: 0xAB, count: 8)
+        )
+        let response = await handler.handleChunk(request, uploadID: uploadID, chunkIndex: 0)
+        let payload = try JSONDecoder().decode(ChunkUploadResponse.self, from: response.body)
+        let session = try #require(try await sessionManager.fetchSession(uploadID: uploadID))
+
+        #expect(response.statusCode == 200)
+        #expect(payload.receivedBytes == 8)
+        #expect(session.receivedBytes == 8)
+    }
+
+    @Test("Given a chunk offset that skips unread bytes when uploading then the receiver rejects the gap with conflict")
+    func outOfOrderChunkReturnsConflict() async throws {
+        let manager = DatabaseManager.shared
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("icherri-upload-chunk-gap-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        let databasePath = tempDirectory.appendingPathComponent("receiver.sqlite").path
+        try await manager.open(at: databasePath)
+
+        let sessionManager = SessionManager(dbManager: manager)
+        let handler = UploadHandler(sessionManager: sessionManager, incomingDir: tempDirectory)
+        let uploadID = "upload-gap"
+        let tempPath = tempDirectory.appendingPathComponent("\(uploadID).tmp")
+        FileManager.default.createFile(atPath: tempPath.path, contents: Data(repeating: 0, count: 16))
+
+        try await sessionManager.createSession(
+            uploadID: uploadID,
+            deviceID: "device-1",
+            assetLocalID: "asset-1",
+            backupRunID: "run-1",
+            clientSessionID: "session-1",
+            tempPath: tempPath.path,
+            expectedByteSize: 16,
+            chunkSize: 8,
+            expiresAt: Date().addingTimeInterval(3600),
+            metadataJson: "{}"
+        )
+
+        let request = HTTPRequest(
+            method: "PUT",
+            path: "/uploads/\(uploadID)/chunks/1",
+            headers: [:],
+            body: Data(repeating: 0xCD, count: 8)
+        )
+        let response = await handler.handleChunk(request, uploadID: uploadID, chunkIndex: 1)
+        let body = String(data: response.body, encoding: .utf8) ?? ""
+        let session = try #require(try await sessionManager.fetchSession(uploadID: uploadID))
+
+        #expect(response.statusCode == 409)
+        #expect(body.contains("invalid_chunk_offset"))
+        #expect(session.receivedBytes == 0)
     }
 
     private func asset(id: String, fingerprint: String, bytes: Int64) -> AssetMetadata {

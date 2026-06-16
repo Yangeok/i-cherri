@@ -236,6 +236,7 @@ struct BackupRunAssetRecord: Codable, FetchableRecord, PersistableRecord {
 }
 
 struct BackupRunReconcileSnapshot: Sendable {
+    let status: String
     let totalAssetCount: Int
     let completedAssetCount: Int
     let missingAssetIDs: [String]
@@ -632,6 +633,14 @@ actor DatabaseManager {
             ) ?? 0
 
             let completedAssetCount = max(totalAssetCount - missingAssetIDs.count, 0)
+            let status: String
+            if missingAssetIDs.isEmpty {
+                status = "complete"
+            } else if completedAssetCount > 0 {
+                status = "partial"
+            } else {
+                status = "needs_uploads"
+            }
             try db.execute(
                 sql: """
                 UPDATE backup_runs
@@ -639,7 +648,7 @@ actor DatabaseManager {
                 WHERE run_id = ? AND device_id = ?
                 """,
                 arguments: [
-                    missingAssetIDs.isEmpty ? "complete" : "needs_uploads",
+                    status,
                     Date(),
                     Date(),
                     runID,
@@ -648,6 +657,7 @@ actor DatabaseManager {
             )
 
             return BackupRunReconcileSnapshot(
+                status: status,
                 totalAssetCount: totalAssetCount,
                 completedAssetCount: completedAssetCount,
                 missingAssetIDs: missingAssetIDs

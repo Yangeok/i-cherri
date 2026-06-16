@@ -420,7 +420,7 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
                 deviceID: body.device.deviceID
             )
             let response = FinalizeBackupRunResponse(
-                status: snapshot.missingAssetIDs.isEmpty ? "complete" : "needs_uploads",
+                status: snapshot.status,
                 totalAssetCount: snapshot.totalAssetCount,
                 completedAssetCount: snapshot.completedAssetCount,
                 missingAssetIDs: snapshot.missingAssetIDs

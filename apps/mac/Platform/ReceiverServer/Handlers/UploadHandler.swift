@@ -83,18 +83,30 @@ struct UploadHandler: Sendable {
             guard let session = try await sessionManager.fetchSession(uploadID: uploadID) else {
                 return .error(code: "session_not_found", message: "Upload session not found", status: 404)
             }
+            if session.expiresAt < Date() {
+                return .error(code: "session_expired", message: "Upload session has expired", status: 410)
+            }
+
+            let offset = Int64(chunkIndex) * Int64(session.chunkSize)
+            let chunkEnd = min(offset + Int64(request.body.count), session.expectedByteSize)
+            guard offset <= session.receivedBytes else {
+                return .error(code: "invalid_chunk_offset", message: "Chunk offset skips unread bytes", status: 409)
+            }
+            if chunkEnd <= session.receivedBytes {
+                let response = ChunkUploadResponse(uploadID: uploadID, index: chunkIndex, receivedBytes: session.receivedBytes)
+                return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
+            }
 
             let tempURL = URL(fileURLWithPath: session.tempPath)
             guard let fileHandle = FileHandle(forWritingAtPath: tempURL.path) else {
                 return .error(code: "io_error", message: "Cannot open temp file", status: 500)
             }
 
-            let offset = Int64(chunkIndex) * Int64(session.chunkSize)
             fileHandle.seek(toFileOffset: UInt64(offset))
             fileHandle.write(request.body)
             fileHandle.closeFile()
 
-            let newReceived = min(offset + Int64(request.body.count), session.expectedByteSize)
+            let newReceived = max(session.receivedBytes, chunkEnd)
             try await sessionManager.updateProgress(uploadID: uploadID, receivedBytes: newReceived, status: "receiving")
 
             let response = ChunkUploadResponse(uploadID: uploadID, index: chunkIndex, receivedBytes: newReceived)
