@@ -163,14 +163,22 @@ public struct UploadAssetRef: Codable, Sendable {
 
 public struct UploadInitRequest: Codable, Sendable {
     public let protocolVersion: ProtocolVersion
+    public let backupRunContext: AutoBackupRunContext?
     public let device: DeviceInfo
     public let asset: AssetMetadata
     public let filename: String
     public let expectedByteSize: Int64
     public let requestedChunkSize: Int
 
-    public init(device: DeviceInfo, asset: AssetMetadata, filename: String, requestedChunkSize: Int = UploadRequirement.defaultChunkSize) {
+    public init(
+        backupRunContext: AutoBackupRunContext? = nil,
+        device: DeviceInfo,
+        asset: AssetMetadata,
+        filename: String,
+        requestedChunkSize: Int = UploadRequirement.defaultChunkSize
+    ) {
         self.protocolVersion = .current
+        self.backupRunContext = backupRunContext
         self.device = device
         self.asset = asset
         self.filename = filename
@@ -231,14 +239,22 @@ public struct UploadStatusResponse: Codable, Sendable {
 
 public struct CommitUploadRequest: Codable, Sendable {
     public let protocolVersion: ProtocolVersion
+    public let backupRunContext: AutoBackupRunContext?
     public let uploadID: String
     public let assetLocalID: String
     public let finalByteSize: Int64
     public let finalContentHash: String
     public let clientFinishedAt: Date
 
-    public init(uploadID: String, assetLocalID: String, finalByteSize: Int64, finalContentHash: String) {
+    public init(
+        backupRunContext: AutoBackupRunContext? = nil,
+        uploadID: String,
+        assetLocalID: String,
+        finalByteSize: Int64,
+        finalContentHash: String
+    ) {
         self.protocolVersion = .current
+        self.backupRunContext = backupRunContext
         self.uploadID = uploadID
         self.assetLocalID = assetLocalID
         self.finalByteSize = finalByteSize

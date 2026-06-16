@@ -20,9 +20,9 @@
 
 **Purpose**: 자동 백업 구현을 위한 프로젝트 엔트리와 파일 골격 준비
 
-- [ ] T001 백그라운드 자동 백업 task identifier와 실행 진입점을 `apps/ios/Info.plist` 및 `apps/ios/iCherri-ios/iCherri_iosApp.swift`에 추가
-- [ ] T002 [P] 자동 백업 골격 파일을 `apps/ios/Platform/Background/AutoBackupScheduler.swift`, `apps/ios/Platform/Background/AutoBackupEngine.swift`, `apps/ios/Platform/Background/AutoBackupPolicyEvaluator.swift`, `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 생성
-- [ ] T003 [P] 자동 백업 테스트 골격을 `apps/ios/iCherri-iosTests/AutoBackupSchedulerTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupPolicyEvaluatorTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupEngineTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupJobStoreTests.swift`, `apps/mac/iCherri-MacTests/AutoBackupReceiverContractTests.swift`에 생성
+- [x] T001 백그라운드 자동 백업 task identifier와 실행 진입점을 `apps/ios/Info.plist` 및 `apps/ios/iCherri-ios/iCherri_iosApp.swift`에 추가
+- [x] T002 [P] 자동 백업 골격 파일을 `apps/ios/Platform/Background/AutoBackupScheduler.swift`, `apps/ios/Platform/Background/AutoBackupEngine.swift`, `apps/ios/Platform/Background/AutoBackupPolicyEvaluator.swift`, `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 생성
+- [x] T003 [P] 자동 백업 테스트 골격을 `apps/ios/iCherri-iosTests/AutoBackupSchedulerTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupPolicyEvaluatorTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupEngineTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupJobStoreTests.swift`, `apps/mac/iCherri-MacTests/AutoBackupReceiverContractTests.swift`에 생성
 
 ---
 
@@ -30,12 +30,12 @@
 
 **Purpose**: 모든 사용자 스토리의 공통 기반이 되는 상태 모델, 영속 저장소, 프로토콜 확장
 
-- [ ] T004 자동 백업 run/session 문맥 DTO를 `packages/ICherriProtocol/Sources/ICherriProtocol/DTO/API.swift` 및 `packages/ICherriProtocol/Sources/ICherriProtocol/DTO/Models.swift`에 추가
-- [ ] T005 [P] 자동 백업 상태 전이 도메인 로직을 `packages/ICherriCore/Sources/ICherriCore/AutoBackup/AutoBackupStateMachine.swift` 및 `packages/ICherriCore/Tests/ICherriCoreTests/AutoBackupStateMachineTests.swift`에 구현
-- [ ] T006 JSON 기반 run/job 영속 저장소를 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift` 및 `apps/ios/iCherri-iosTests/AutoBackupJobStoreTests.swift`에 구현
-- [ ] T007 mac receiver의 run-scoped idempotency 저장 계층을 `apps/mac/Platform/Storage/SessionManager.swift` 및 `apps/mac/Platform/Storage/DatabaseManager.swift`에 확장
-- [ ] T008 [P] receiver 계약 회귀 테스트를 `apps/mac/iCherri-MacTests/AutoBackupReceiverContractTests.swift` 및 `apps/mac/iCherri-MacTests/DatabaseManagerBackupRunTests.swift`에 추가
-- [ ] T009 iOS 업로드 계층이 run/session 문맥을 전달하도록 `apps/ios/Platform/Upload/BackupClient.swift` 및 `apps/ios/Platform/Upload/ResumableUploadManager.swift`를 확장
+- [x] T004 자동 백업 run/session 문맥 DTO를 `packages/ICherriProtocol/Sources/ICherriProtocol/DTO/API.swift` 및 `packages/ICherriProtocol/Sources/ICherriProtocol/DTO/Models.swift`에 추가
+- [x] T005 [P] 자동 백업 상태 전이 도메인 로직을 `packages/ICherriCore/Sources/ICherriCore/AutoBackup/AutoBackupStateMachine.swift` 및 `packages/ICherriCore/Tests/ICherriCoreTests/AutoBackupStateMachineTests.swift`에 구현
+- [x] T006 JSON 기반 run/job 영속 저장소를 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift` 및 `apps/ios/iCherri-iosTests/AutoBackupJobStoreTests.swift`에 구현
+- [x] T007 mac receiver의 run-scoped idempotency 저장 계층을 `apps/mac/Platform/Storage/SessionManager.swift` 및 `apps/mac/Platform/Storage/DatabaseManager.swift`에 확장
+- [x] T008 [P] receiver 계약 회귀 테스트를 `apps/mac/iCherri-MacTests/AutoBackupReceiverContractTests.swift` 및 `apps/mac/iCherri-MacTests/DatabaseManagerBackupRunTests.swift`에 추가
+- [x] T009 iOS 업로드 계층이 run/session 문맥을 전달하도록 `apps/ios/Platform/Upload/BackupClient.swift` 및 `apps/ios/Platform/Upload/ResumableUploadManager.swift`를 확장
 
 **Checkpoint**: 여기까지 끝나면 자동 백업용 상태 모델, 영속 저장소, 업로드 계약 기반이 준비되어야 한다.
 
@@ -49,14 +49,14 @@
 
 ### Tests for User Story 1
 
-- [ ] T010 [P] [US1] 시작 조건과 스케줄 평가 테스트를 `apps/ios/iCherri-iosTests/AutoBackupPolicyEvaluatorTests.swift` 및 `apps/ios/iCherri-iosTests/AutoBackupSchedulerTests.swift`에 작성
+- [x] T010 [P] [US1] 시작 조건과 스케줄 평가 테스트를 `apps/ios/iCherri-iosTests/AutoBackupPolicyEvaluatorTests.swift` 및 `apps/ios/iCherri-iosTests/AutoBackupSchedulerTests.swift`에 작성
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] 자동 시작 정책 평가기를 `apps/ios/Platform/Background/AutoBackupPolicyEvaluator.swift`에 구현
-- [ ] T012 [US1] `BGProcessingTask` 등록과 자동 실행 진입을 `apps/ios/Platform/Background/AutoBackupScheduler.swift` 및 `apps/ios/iCherri-ios/iCherri_iosApp.swift`에 구현
-- [ ] T013 [US1] 실제 처리 대상 asset만으로 run을 생성하는 로직을 `apps/ios/Platform/Background/AutoBackupEngine.swift` 및 `apps/ios/Platform/Photos/PhotoLibraryScanIndexStore.swift`에 구현
-- [ ] T014 [US1] 자동 백업 설정, receiver 참조, trust token 참조 저장을 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift` 및 `apps/ios/Features/Backup/BackupDashboardView.swift`에 구현
+- [x] T011 [US1] 자동 시작 정책 평가기를 `apps/ios/Platform/Background/AutoBackupPolicyEvaluator.swift`에 구현
+- [x] T012 [US1] `BGProcessingTask` 등록과 자동 실행 진입을 `apps/ios/Platform/Background/AutoBackupScheduler.swift` 및 `apps/ios/iCherri-ios/iCherri_iosApp.swift`에 구현
+- [x] T013 [US1] 실제 처리 대상 asset만으로 run을 생성하는 로직을 `apps/ios/Platform/Background/AutoBackupEngine.swift` 및 `apps/ios/Platform/Photos/PhotoLibraryScanIndexStore.swift`에 구현
+- [x] T014 [US1] 자동 백업 설정, receiver 참조, trust token 참조 저장을 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift` 및 `apps/ios/Features/Backup/BackupDashboardView.swift`에 구현
 - [ ] T015 [US1] 자동 백업 토글과 eligibility blocked 요약 UI를 `apps/ios/Features/Backup/BackupDashboardView.swift` 및 `apps/ios/Features/Backup/BackupProgressView.swift`에 구현
 
 **Checkpoint**: 자동 시작과 run 생성이 독립적으로 동작해야 한다.
@@ -71,8 +71,8 @@
 
 ### Tests for User Story 2
 
-- [ ] T016 [P] [US2] 재개/일시정지/실패 유지 테스트를 `apps/ios/iCherri-iosTests/AutoBackupEngineTests.swift` 및 `apps/mac/iCherri-MacTests/AutoBackupReceiverContractTests.swift`에 작성
-- [ ] T017 [P] [US2] failedRetained asset이 이후 automatic run에서 다시 평가 대상으로 복귀하는 회귀 테스트를 `apps/ios/iCherri-iosTests/AutoBackupEngineTests.swift` 및 `apps/ios/iCherri-iosTests/AutoBackupJobStoreTests.swift`에 추가
+- [x] T016 [P] [US2] 재개/일시정지/실패 유지 테스트를 `apps/ios/iCherri-iosTests/AutoBackupEngineTests.swift` 및 `apps/mac/iCherri-MacTests/AutoBackupReceiverContractTests.swift`에 작성
+- [x] T017 [P] [US2] failedRetained asset이 이후 automatic run에서 다시 평가 대상으로 복귀하는 회귀 테스트를 `apps/ios/iCherri-iosTests/AutoBackupEngineTests.swift` 및 `apps/ios/iCherri-iosTests/AutoBackupJobStoreTests.swift`에 추가
 
 ### Implementation for User Story 2
 
@@ -80,9 +80,9 @@
 - [ ] T019 [US2] 재개 가능한 chunk 업로드 복구를 `apps/ios/Platform/Upload/BackupClient.swift`, `apps/ios/Platform/Upload/ChunkUploadSender.swift`, `apps/ios/Platform/Upload/ResumableUploadManager.swift`에 구현
 - [ ] T020 [US2] mac receiver의 init/status/chunk 재개와 idempotent session 처리를 `apps/mac/Platform/ReceiverServer/Handlers/UploadHandler.swift`, `apps/mac/Platform/ReceiverServer/Handlers/UploadStatusHandler.swift`, `apps/mac/Platform/Storage/SessionManager.swift`에 구현
 - [ ] T021 [US2] run 범위 기준 partial/finalize 정산을 `apps/mac/Platform/ReceiverServer/Handlers/CheckBatchHandler.swift` 및 `apps/mac/Platform/Storage/DatabaseManager.swift`에 구현
-- [ ] T022 [US2] thermal pause와 receiver unavailable pause/resume 전이를 `apps/ios/Platform/Background/AutoBackupPolicyEvaluator.swift` 및 `apps/ios/Platform/Background/AutoBackupEngine.swift`에 구현
-- [ ] T023 [US2] failedRetained asset을 다음 automatic run 후보 집합에 재편입하는 로직을 `apps/ios/Platform/Background/AutoBackupEngine.swift` 및 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 구현
-- [ ] T024 [US2] cross-Mac handoff 금지와 7일 run expiry 처리를 `apps/ios/Platform/Background/AutoBackupEngine.swift` 및 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 구현
+- [x] T022 [US2] thermal pause와 receiver unavailable pause/resume 전이를 `apps/ios/Platform/Background/AutoBackupPolicyEvaluator.swift` 및 `apps/ios/Platform/Background/AutoBackupEngine.swift`에 구현
+- [x] T023 [US2] failedRetained asset을 다음 automatic run 후보 집합에 재편입하는 로직을 `apps/ios/Platform/Background/AutoBackupEngine.swift` 및 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 구현
+- [x] T024 [US2] cross-Mac handoff 금지와 7일 run expiry 처리를 `apps/ios/Platform/Background/AutoBackupEngine.swift` 및 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 구현
 
 **Checkpoint**: 자동 백업이 화면 꺼짐/앱 재실행/receiver 부재/receiver 변경 후에도 중복 없이 이어져야 한다.
 

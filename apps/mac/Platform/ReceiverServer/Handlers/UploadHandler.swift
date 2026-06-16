@@ -24,7 +24,9 @@ struct UploadHandler: Sendable {
             if let existingSession = try await sessionManager.fetchReusableSession(
                 deviceID: body.device.deviceID,
                 assetLocalID: body.asset.assetLocalID,
-                expectedByteSize: body.expectedByteSize
+                expectedByteSize: body.expectedByteSize,
+                backupRunID: body.backupRunContext?.backupRunID,
+                clientSessionID: body.backupRunContext?.clientSessionID
             ) {
                 let response = UploadInitResponse(
                     uploadID: existingSession.uploadID,
@@ -48,6 +50,8 @@ struct UploadHandler: Sendable {
                 uploadID: uploadID,
                 deviceID: body.device.deviceID,
                 assetLocalID: body.asset.assetLocalID,
+                backupRunID: body.backupRunContext?.backupRunID,
+                clientSessionID: body.backupRunContext?.clientSessionID,
                 tempPath: tempPath.path,
                 expectedByteSize: body.expectedByteSize,
                 chunkSize: body.requestedChunkSize,

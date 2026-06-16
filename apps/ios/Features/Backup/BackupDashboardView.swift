@@ -35,7 +35,10 @@ public struct BackupDashboardView: View {
         .task { await viewModel.onAppear() }
         .onChange(of: scenePhase) { newPhase in
             guard newPhase == .active else { return }
-            Task { await viewModel.refreshReceivers() }
+            Task {
+                await viewModel.refreshReceivers()
+                await viewModel.reevaluateAutomaticBackup()
+            }
         }
         .sheet(
             isPresented: Binding(
@@ -171,6 +174,28 @@ public struct BackupDashboardView: View {
     private var backupTriggerSection: some View {
         GroupBox {
             VStack(spacing: 16) {
+                Toggle(isOn: Binding(
+                    get: { viewModel.isAutoBackupEnabled },
+                    set: { isEnabled in
+                        Task { await viewModel.setAutoBackupEnabled(isEnabled) }
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Automatic Backup")
+                            .font(.headline)
+                        Text("Runs when battery is at least 20% and Wi-Fi is available.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let autoBackupEligibilityMessage = viewModel.autoBackupEligibilityMessage {
+                    Label(autoBackupEligibilityMessage, systemImage: "bolt.horizontal.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 if let receiverName = viewModel.pairedReceiverName {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
@@ -335,6 +360,8 @@ final class BackupDashboardViewModel: ObservableObject {
     @Published var pairingStatusMessage: String?
     @Published var pairingErrorMessage: String?
     @Published var backupStatusMessage: String?
+    @Published var isAutoBackupEnabled = false
+    @Published var autoBackupEligibilityMessage: String?
     @Published var activeBackupProgressViewModel: BackupProgressViewModel?
     @Published var backupCoverageSummary: String?
     @Published var backupCoverageProgress: Double?
@@ -343,6 +370,10 @@ final class BackupDashboardViewModel: ObservableObject {
     private let scanIndexStore = PhotoLibraryScanIndexStore.shared
     private let bonjourBrowser = BonjourBrowser()
     private let keychainStore = KeychainStore()
+    private let autoBackupStore = AutoBackupJobStore.shared
+    private let autoBackupScheduler = AutoBackupScheduler.shared
+    private let autoBackupEngine = AutoBackupEngine.shared
+    private let autoBackupPolicyEvaluator = AutoBackupPolicyEvaluator()
     private let trustTokenKey = "iCherriTrustToken"
     private let receiverIDKey = "iCherriReceiverID"
     private let receiverURLKey = "iCherriReceiverURL"
@@ -363,8 +394,11 @@ final class BackupDashboardViewModel: ObservableObject {
     }
 
     func onAppear() async {
+        UIDevice.current.isBatteryMonitoringEnabled = true
         updatePhotoPermission()
         restorePairingState()
+        await loadAutoBackupPolicy()
+        await syncAutoBackupReceiverSelectionFromDefaults()
         scanIndexStore.startObserving()
         bonjourBrowser.startBrowsing()
         // Observe browser changes
@@ -377,6 +411,7 @@ final class BackupDashboardViewModel: ObservableObject {
                 } else if let pairedReceiverName {
                     self.pairedReceiver = receivers.first(where: { $0.name == pairedReceiverName })
                 }
+                await self.reevaluateAutomaticBackup()
             }
         }
         Task { @MainActor in
@@ -391,8 +426,10 @@ final class BackupDashboardViewModel: ObservableObject {
                         self.localNetworkStatus = .unknown
                     }
                 }
+                await self.reevaluateAutomaticBackup()
             }
         }
+        await reevaluateAutomaticBackup()
     }
 
     func requestPhotoPermission() async {
@@ -408,6 +445,23 @@ final class BackupDashboardViewModel: ObservableObject {
         pairingStatusMessage = isPaired
             ? pairedReceiverName.map { "Connected to \($0)." }
             : "Refreshing available receivers..."
+        await reevaluateAutomaticBackup()
+    }
+
+    func setAutoBackupEnabled(_ isEnabled: Bool) async {
+        isAutoBackupEnabled = isEnabled
+        let currentPolicy = await autoBackupStore.loadPolicy()
+        let updatedPolicy = AutoBackupPolicy(
+            isEnabled: isEnabled,
+            minimumBatteryPercent: currentPolicy.minimumBatteryPercent,
+            requiresWiFiEnabled: currentPolicy.requiresWiFiEnabled,
+            blocksOnLowPowerMode: currentPolicy.blocksOnLowPowerMode,
+            pauseThermalThreshold: currentPolicy.pauseThermalThreshold,
+            stagedStorageLimitBytes: currentPolicy.stagedStorageLimitBytes
+        )
+        await autoBackupStore.savePolicy(updatedPolicy)
+        autoBackupScheduler.scheduleNextEvaluation()
+        await reevaluateAutomaticBackup()
     }
 
     func pair(with receiver: DiscoveredReceiver) async {
@@ -454,6 +508,15 @@ final class BackupDashboardViewModel: ObservableObject {
                 pairedReceiverName = receiver.name
                 isPaired = true
                 pairingStatusMessage = "Connected to \(receiver.name)."
+                await autoBackupStore.saveReceiverSelection(
+                    AutoBackupReceiverSelection(
+                        receiverID: receiver.id,
+                        receiverName: receiver.name,
+                        receiverURLString: baseURL.absoluteString,
+                        trustTokenStorageKey: trustTokenKey
+                    )
+                )
+                await reevaluateAutomaticBackup()
                 print("[Pair] Successfully paired with \(receiver.name), token: \(confirmResponse.trustToken.prefix(8))...")
             } else {
                 print("[Pair] Server returned error: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
@@ -488,6 +551,62 @@ final class BackupDashboardViewModel: ObservableObject {
         backupCoverageSummary = nil
         backupCoverageProgress = nil
         bonjourBrowser.refreshBrowsing()
+        autoBackupEligibilityMessage = "Automatic backup is waiting for a backup target."
+        Task {
+            await autoBackupStore.saveReceiverSelection(nil)
+        }
+    }
+
+    func reevaluateAutomaticBackup() async {
+        guard photoPermissionStatus == .granted else {
+            autoBackupEligibilityMessage = "Automatic backup needs Photos access."
+            return
+        }
+
+        let policy = await autoBackupStore.loadPolicy()
+        isAutoBackupEnabled = policy.isEnabled
+
+        guard policy.isEnabled else {
+            autoBackupEligibilityMessage = "Automatic backup is off."
+            return
+        }
+
+        let runtimeSnapshot = makeAutoBackupRuntimeSnapshot()
+        let eligibility = autoBackupPolicyEvaluator.evaluate(policy: policy, runtimeSnapshot: runtimeSnapshot)
+
+        guard let receiverID = UserDefaults.standard.string(forKey: receiverIDKey), !receiverID.isEmpty else {
+            autoBackupEligibilityMessage = "Automatic backup is waiting for a backup target."
+            autoBackupScheduler.scheduleNextEvaluation()
+            return
+        }
+
+        guard eligibility.isEligible else {
+            autoBackupEligibilityMessage = eligibilityMessage(for: eligibility.reason)
+            autoBackupScheduler.scheduleNextEvaluation()
+            _ = try? await autoBackupEngine.evaluateAndPrepareRun(
+                receiverID: receiverID,
+                receiverName: pairedReceiverName,
+                runtimeSnapshot: runtimeSnapshot,
+                runAssets: []
+            )
+            return
+        }
+
+        let device = currentDeviceInfo()
+        let scanPlan = await scanIndexStore.makeScanPlan(scanner: scanner, deviceID: device.deviceID)
+        if let preparedRun = try? await autoBackupEngine.evaluateAndPrepareRun(
+            receiverID: receiverID,
+            receiverName: pairedReceiverName,
+            runtimeSnapshot: runtimeSnapshot,
+            runAssets: scanPlan.runAssets
+        ) {
+            autoBackupEligibilityMessage = scanPlan.runAssets.isEmpty
+                ? "Automatic backup is ready. No changed assets are waiting."
+                : "Automatic backup prepared \(preparedRun.assetRecords.count) item(s)."
+        } else {
+            autoBackupEligibilityMessage = "Automatic backup could not prepare a run."
+        }
+        autoBackupScheduler.scheduleNextEvaluation()
     }
 
     func startBackup() async {
@@ -624,25 +743,11 @@ final class BackupDashboardViewModel: ObservableObject {
                 let assetIndex = Dictionary(uniqueKeysWithValues: runAssets.map { ($0.assetLocalID, $0) })
 
                 let duplicateAssetIDs = Set(batchResponse.alreadyBackedUp + batchResponse.duplicates)
-                var uploadedAssetIDs: Set<String> = []
-                var failedAssetIDs = Set(batchResponse.unsupported)
+                let reconcileState = BackupRunReconcileState(
+                    duplicateCount: duplicateAssetIDs.count,
+                    failedAssetIDs: Set(batchResponse.unsupported)
+                )
                 var pendingAssetIDs: Set<String> = []
-                var receiverCompletedAssetCount: Int?
-
-                func snapshotCounts() -> (completed: Int, success: Int, duplicates: Int, failed: Int, overallBackedUpCount: Int) {
-                    let success = uploadedAssetIDs.count
-                    let duplicates = duplicateAssetIDs.count
-                    let failed = failedAssetIDs.count
-                    let receiverBackedUpCount = receiverCompletedAssetCount ?? 0
-                    let overallBackedUpCount = max(success + duplicates, receiverBackedUpCount)
-                    return (
-                        completed: success + duplicates + failed,
-                        success: success,
-                        duplicates: duplicates,
-                        failed: failed,
-                        overallBackedUpCount: overallBackedUpCount
-                    )
-                }
 
                 let duplicateBytes = (batchResponse.alreadyBackedUp + batchResponse.duplicates)
                     .compactMap { assetIndex[$0]?.byteSize }
@@ -664,7 +769,7 @@ final class BackupDashboardViewModel: ObservableObject {
 
                 for requirement in batchResponse.requiredUploads {
                     guard let metadata = assetIndex[requirement.assetLocalID] else {
-                        failedAssetIDs.insert(requirement.assetLocalID)
+                        _ = await reconcileState.recordFailure(assetLocalID: requirement.assetLocalID)
                         initialFailures.append(
                             FailedUploadProgressItem(
                                 id: requirement.assetLocalID,
@@ -683,7 +788,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     self.scanIndexStore.markRetryRequired(assetIDs: requiredUploadIDs)
                 }
 
-                let initialCounts = snapshotCounts()
+                let initialCounts = await reconcileState.snapshotCounts()
                 await progressCoordinator.setInitialFailures(initialFailures)
                 await progressCoordinator.setAcknowledgedBytes(duplicateBytes)
                 await progressCoordinator.updateSnapshot(
@@ -719,9 +824,7 @@ final class BackupDashboardViewModel: ObservableObject {
                         ) { outcome in
                             switch outcome {
                             case .success(let assetLocalID, let filename):
-                                uploadedAssetIDs.insert(assetLocalID)
-                                failedAssetIDs.remove(assetLocalID)
-                                let counts = snapshotCounts()
+                                let counts = await reconcileState.recordSuccess(assetLocalID: assetLocalID)
                                 await MainActor.run {
                                     if scanPlan.mode == .full {
                                         self.updateBackupCoverage(backedUpCount: counts.overallBackedUpCount, totalCount: scanPlan.libraryAssetCount)
@@ -738,8 +841,7 @@ final class BackupDashboardViewModel: ObservableObject {
                                     overallBackedUpCount: counts.overallBackedUpCount
                                 )
                             case .failure(let assetLocalID, let filename, let reason):
-                                failedAssetIDs.insert(assetLocalID)
-                                let counts = snapshotCounts()
+                                let counts = await reconcileState.recordFailure(assetLocalID: assetLocalID)
                                 await progressCoordinator.finishAsset(
                                     assetLocalID: assetLocalID,
                                     filename: filename,
@@ -760,7 +862,7 @@ final class BackupDashboardViewModel: ObservableObject {
                         pendingAssetIDs.removeAll()
                     }
 
-                    let verifyingCounts = snapshotCounts()
+                    let verifyingCounts = await reconcileState.snapshotCounts()
                     await progressCoordinator.updateSnapshot(
                         filename: "Verifying receiver snapshot...",
                         completed: verifyingCounts.completed,
@@ -773,7 +875,8 @@ final class BackupDashboardViewModel: ObservableObject {
                     )
 
                     let finalizeResponse = try await backupClient.finalizeBackupRun(backupRunID: backupRunID)
-                    receiverCompletedAssetCount = finalizeResponse.completedAssetCount
+                    await reconcileState.setReceiverCompletedAssetCount(finalizeResponse.completedAssetCount)
+                    let uploadedAssetIDs = await reconcileState.currentUploadedAssetIDs()
                     let missingAssetIDs = Set(finalizeResponse.missingAssetIDs)
                         .subtracting(duplicateAssetIDs)
                         .subtracting(uploadedAssetIDs)
@@ -791,7 +894,7 @@ final class BackupDashboardViewModel: ObservableObject {
                         self.scanIndexStore.markRetryRequired(assetIDs: retryAssetIDs)
                     }
 
-                    let retryCounts = snapshotCounts()
+                    let retryCounts = await reconcileState.snapshotCounts()
                     await progressCoordinator.updateSnapshot(
                         filename: "Retrying \(pendingAssetIDs.count.formatted()) missing items...",
                         completed: retryCounts.completed,
@@ -804,7 +907,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     )
                 }
 
-                let finalCounts = snapshotCounts()
+                let finalCounts = await reconcileState.snapshotCounts()
                 await MainActor.run {
                     if scanPlan.mode == .full {
                         self.updateBackupCoverage(backedUpCount: finalCounts.overallBackedUpCount, totalCount: scanPlan.libraryAssetCount)
@@ -865,6 +968,61 @@ final class BackupDashboardViewModel: ObservableObject {
     private func updatePhotoPermission() {
         let status = scanner.currentAuthorizationStatus()
         photoPermissionStatus = permissionStatus(for: status)
+    }
+
+    private func loadAutoBackupPolicy() async {
+        let policy = await autoBackupStore.loadPolicy()
+        isAutoBackupEnabled = policy.isEnabled
+    }
+
+    private func syncAutoBackupReceiverSelectionFromDefaults() async {
+        guard
+            let receiverID = UserDefaults.standard.string(forKey: receiverIDKey),
+            !receiverID.isEmpty
+        else {
+            await autoBackupStore.saveReceiverSelection(nil)
+            return
+        }
+
+        await autoBackupStore.saveReceiverSelection(
+            AutoBackupReceiverSelection(
+                receiverID: receiverID,
+                receiverName: UserDefaults.standard.string(forKey: receiverNameKey),
+                receiverURLString: UserDefaults.standard.string(forKey: receiverURLKey),
+                trustTokenStorageKey: trustTokenKey
+            )
+        )
+    }
+
+    private func makeAutoBackupRuntimeSnapshot() -> AutoBackupRuntimeSnapshot {
+        let batteryLevel = UIDevice.current.batteryLevel
+        let batteryPercent = batteryLevel >= 0 ? Int((batteryLevel * 100).rounded()) : 100
+        return AutoBackupRuntimeSnapshot(
+            batteryLevelPercent: batteryPercent,
+            isWiFiEnabled: localNetworkStatus == .granted,
+            isLowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            thermalState: ProcessInfo.processInfo.thermalState,
+            hasPairedReceiver: isPaired
+        )
+    }
+
+    private func eligibilityMessage(for reason: AutoBackupEligibilityBlockReason?) -> String {
+        switch reason {
+        case .disabled:
+            return "Automatic backup is off."
+        case .batteryBelowMinimum:
+            return "Automatic backup is waiting for battery to reach 20%."
+        case .wiFiUnavailable:
+            return "Automatic backup is waiting for Wi-Fi."
+        case .receiverUnavailable:
+            return "Automatic backup is waiting for a Mac receiver."
+        case .lowPowerMode:
+            return "Automatic backup is paused by Low Power Mode."
+        case .thermal:
+            return "Automatic backup is paused because the device is too warm."
+        case nil:
+            return "Automatic backup is ready."
+        }
     }
 
     private func permissionStatus(for status: PhotoLibraryAuthStatus) -> PermissionStatus {
@@ -1147,6 +1305,59 @@ private func backupFailureReason(_ error: Error) -> String {
         }
     }
     return error.localizedDescription
+}
+
+private actor BackupRunReconcileState {
+    struct Counts: Sendable {
+        let completed: Int
+        let success: Int
+        let duplicates: Int
+        let failed: Int
+        let overallBackedUpCount: Int
+    }
+
+    private let duplicateCount: Int
+    private var uploadedAssetIDs: Set<String> = []
+    private var failedAssetIDs: Set<String>
+    private var receiverCompletedAssetCount: Int?
+
+    init(duplicateCount: Int, failedAssetIDs: Set<String>) {
+        self.duplicateCount = duplicateCount
+        self.failedAssetIDs = failedAssetIDs
+    }
+
+    func recordSuccess(assetLocalID: String) -> Counts {
+        uploadedAssetIDs.insert(assetLocalID)
+        failedAssetIDs.remove(assetLocalID)
+        return snapshotCounts()
+    }
+
+    func recordFailure(assetLocalID: String) -> Counts {
+        failedAssetIDs.insert(assetLocalID)
+        return snapshotCounts()
+    }
+
+    func setReceiverCompletedAssetCount(_ count: Int) {
+        receiverCompletedAssetCount = count
+    }
+
+    func currentUploadedAssetIDs() -> Set<String> {
+        uploadedAssetIDs
+    }
+
+    func snapshotCounts() -> Counts {
+        let success = uploadedAssetIDs.count
+        let failed = failedAssetIDs.count
+        let receiverBackedUpCount = receiverCompletedAssetCount ?? 0
+        let overallBackedUpCount = max(success + duplicateCount, receiverBackedUpCount)
+        return Counts(
+            completed: success + duplicateCount + failed,
+            success: success,
+            duplicates: duplicateCount,
+            failed: failed,
+            overallBackedUpCount: overallBackedUpCount
+        )
+    }
 }
 
 private actor BackupUploadProgressCoordinator {

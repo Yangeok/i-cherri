@@ -369,6 +369,78 @@ struct DatabaseManagerBackupRunTests {
         #expect(!rehydrated.contentSha256.isEmpty)
     }
 
+    @Test("Given upload sessions share an asset but differ by auto backup context when fetching reusable sessions then the matching context wins")
+    func uploadSessionReusePrefersMatchingAutoBackupContext() async throws {
+        let manager = DatabaseManager.shared
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("icherri-upload-session-context-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        let databasePath = tempDirectory.appendingPathComponent("receiver.sqlite").path
+        try await manager.open(at: databasePath)
+
+        let now = Date()
+        let exactContext = UploadSessionRecord(
+            uploadId: "upload-context",
+            deviceId: "device-1",
+            assetLocalId: "asset-1",
+            backupRunId: "run-1",
+            clientSessionId: "session-1",
+            tempPath: tempDirectory.appendingPathComponent("context.tmp").path,
+            expectedByteSize: 100,
+            receivedBytes: 50,
+            chunkSize: 8,
+            status: "receiving",
+            createdAt: now,
+            updatedAt: now,
+            expiresAt: now.addingTimeInterval(3600),
+            metadataJson: "{}",
+            lastError: nil
+        )
+        let fallbackContext = UploadSessionRecord(
+            uploadId: "upload-fallback",
+            deviceId: "device-1",
+            assetLocalId: "asset-1",
+            backupRunId: nil,
+            clientSessionId: nil,
+            tempPath: tempDirectory.appendingPathComponent("fallback.tmp").path,
+            expectedByteSize: 100,
+            receivedBytes: 10,
+            chunkSize: 8,
+            status: "paused",
+            createdAt: now,
+            updatedAt: now.addingTimeInterval(-60),
+            expiresAt: now.addingTimeInterval(3600),
+            metadataJson: "{}",
+            lastError: nil
+        )
+
+        try await manager.insertUploadSession(exactContext)
+        try await manager.insertUploadSession(fallbackContext)
+
+        let exactMatch = try #require(
+            try await manager.fetchActiveUploadSession(
+                deviceId: "device-1",
+                assetLocalId: "asset-1",
+                expectedByteSize: 100,
+                backupRunId: "run-1",
+                clientSessionId: "session-1"
+            )
+        )
+        let fallbackMatch = try #require(
+            try await manager.fetchActiveUploadSession(
+                deviceId: "device-1",
+                assetLocalId: "asset-1",
+                expectedByteSize: 100
+            )
+        )
+
+        #expect(exactMatch.uploadId == "upload-context")
+        #expect(fallbackMatch.uploadId == "upload-context")
+        #expect(exactMatch.backupRunId == "run-1")
+        #expect(exactMatch.clientSessionId == "session-1")
+    }
+
     private func asset(id: String, fingerprint: String, bytes: Int64) -> AssetMetadata {
         AssetMetadata(
             deviceID: "device-1",

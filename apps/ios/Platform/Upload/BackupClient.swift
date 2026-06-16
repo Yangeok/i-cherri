@@ -57,8 +57,17 @@ public actor BackupClient {
     }
 
     // Initiates an upload session.
-    public func initUpload(asset: AssetMetadata, filename: String) async throws -> UploadInitResponse {
-        let request = UploadInitRequest(device: device, asset: asset, filename: filename)
+    public func initUpload(
+        backupRunContext: AutoBackupRunContext? = nil,
+        asset: AssetMetadata,
+        filename: String
+    ) async throws -> UploadInitResponse {
+        let request = UploadInitRequest(
+            backupRunContext: backupRunContext,
+            device: device,
+            asset: asset,
+            filename: filename
+        )
         return try await post(path: "/uploads/init", body: request)
     }
 
@@ -73,8 +82,15 @@ public actor BackupClient {
     }
 
     // Commits an upload session.
-    public func commitUpload(uploadID: String, assetLocalID: String, finalByteSize: Int64, finalContentHash: String) async throws -> CommitUploadResponse {
+    public func commitUpload(
+        backupRunContext: AutoBackupRunContext? = nil,
+        uploadID: String,
+        assetLocalID: String,
+        finalByteSize: Int64,
+        finalContentHash: String
+    ) async throws -> CommitUploadResponse {
         let request = CommitUploadRequest(
+            backupRunContext: backupRunContext,
             uploadID: uploadID,
             assetLocalID: assetLocalID,
             finalByteSize: finalByteSize,

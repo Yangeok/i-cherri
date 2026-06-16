@@ -10,5 +10,9 @@
 	<array>
 		<string>_icherri._tcp</string>
 	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.icherri.ios.auto-backup.processing</string>
+	</array>
 </dict>
 </plist>

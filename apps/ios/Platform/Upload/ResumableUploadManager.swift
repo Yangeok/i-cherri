@@ -36,7 +36,8 @@ public actor ResumableUploadManager {
     // Performs a full upload with automatic resumption if interrupted.
     public func upload(
         assetLocalID: String,
-        metadata: AssetMetadata
+        metadata: AssetMetadata,
+        backupRunContext: AutoBackupRunContext? = nil
     ) async throws -> UploadResult {
         let preparedUpload = try await prepareUpload(assetLocalID: assetLocalID, metadata: metadata)
         switch preparedUpload {
@@ -45,14 +46,16 @@ public actor ResumableUploadManager {
                 assetLocalID: assetLocalID,
                 data: data,
                 metadata: normalizedMetadata,
-                contentHash: contentHash
+                contentHash: contentHash,
+                backupRunContext: backupRunContext
             )
         case .video(let streamBox, let normalizedMetadata, let contentHash):
             return try await uploadPreparedVideo(
                 assetLocalID: assetLocalID,
                 stream: streamBox.stream,
                 metadata: normalizedMetadata,
-                contentHash: contentHash
+                contentHash: contentHash,
+                backupRunContext: backupRunContext
             )
         }
     }
@@ -75,25 +78,39 @@ public actor ResumableUploadManager {
         assetLocalID: String,
         data: Data,
         metadata: AssetMetadata,
-        contentHash: String
+        contentHash: String,
+        backupRunContext: AutoBackupRunContext?
     ) async throws -> UploadResult {
-        let (uploadID, startOffset, chunkSize) = try await initOrResumeSession(metadata: metadata)
+        let (uploadID, startOffset, chunkSize) = try await initOrResumeSession(
+            metadata: metadata,
+            backupRunContext: backupRunContext
+        )
         try await chunkSender.send(
             data: data,
             uploadID: uploadID,
             chunkSize: chunkSize,
             startingOffset: startOffset
         )
-        return try await commitAndReturn(uploadID: uploadID, assetLocalID: assetLocalID, metadata: metadata, contentHash: contentHash)
+        return try await commitAndReturn(
+            uploadID: uploadID,
+            assetLocalID: assetLocalID,
+            metadata: metadata,
+            contentHash: contentHash,
+            backupRunContext: backupRunContext
+        )
     }
 
     private func uploadPreparedVideo(
         assetLocalID: String,
         stream: InputStream,
         metadata: AssetMetadata,
-        contentHash: String
+        contentHash: String,
+        backupRunContext: AutoBackupRunContext?
     ) async throws -> UploadResult {
-        let (uploadID, startOffset, chunkSize) = try await initOrResumeSession(metadata: metadata)
+        let (uploadID, startOffset, chunkSize) = try await initOrResumeSession(
+            metadata: metadata,
+            backupRunContext: backupRunContext
+        )
         try await chunkSender.send(
             stream: stream,
             uploadID: uploadID,
@@ -101,7 +118,13 @@ public actor ResumableUploadManager {
             chunkSize: chunkSize,
             startingOffset: startOffset
         )
-        return try await commitAndReturn(uploadID: uploadID, assetLocalID: assetLocalID, metadata: metadata, contentHash: contentHash)
+        return try await commitAndReturn(
+            uploadID: uploadID,
+            assetLocalID: assetLocalID,
+            metadata: metadata,
+            contentHash: contentHash,
+            backupRunContext: backupRunContext
+        )
     }
 
     private func normalized(from metadata: AssetMetadata, byteSize: Int64) -> AssetMetadata {
@@ -127,10 +150,17 @@ public actor ResumableUploadManager {
         )
     }
 
-    private func commitAndReturn(uploadID: String, assetLocalID: String, metadata: AssetMetadata, contentHash: String) async throws -> UploadResult {
+    private func commitAndReturn(
+        uploadID: String,
+        assetLocalID: String,
+        metadata: AssetMetadata,
+        contentHash: String,
+        backupRunContext: AutoBackupRunContext?
+    ) async throws -> UploadResult {
 
         // Commit
         let commitResponse = try await backupClient.commitUpload(
+            backupRunContext: backupRunContext,
             uploadID: uploadID,
             assetLocalID: assetLocalID,
             finalByteSize: metadata.byteSize,
@@ -146,9 +176,16 @@ public actor ResumableUploadManager {
 
     // MARK: - Private
 
-    private func initOrResumeSession(metadata: AssetMetadata) async throws -> (uploadID: String, startOffset: Int64, chunkSize: Int) {
+    private func initOrResumeSession(
+        metadata: AssetMetadata,
+        backupRunContext: AutoBackupRunContext?
+    ) async throws -> (uploadID: String, startOffset: Int64, chunkSize: Int) {
         // Try to find an existing paused session
-        let initResponse = try await backupClient.initUpload(asset: metadata, filename: metadata.originalFilename)
+        let initResponse = try await backupClient.initUpload(
+            backupRunContext: backupRunContext,
+            asset: metadata,
+            filename: metadata.originalFilename
+        )
 
         // If already received some bytes (server reused session), resume from there
         if initResponse.receivedBytes > 0 {

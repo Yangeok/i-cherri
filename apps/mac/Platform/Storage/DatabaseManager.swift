@@ -108,6 +108,8 @@ struct UploadSessionRecord: Codable, FetchableRecord, PersistableRecord {
     var uploadId: String
     var deviceId: String
     var assetLocalId: String
+    var backupRunId: String?
+    var clientSessionId: String?
     var tempPath: String
     var expectedByteSize: Int64
     var receivedBytes: Int64
@@ -121,7 +123,8 @@ struct UploadSessionRecord: Codable, FetchableRecord, PersistableRecord {
 
     enum Columns: String, ColumnExpression {
         case uploadId = "upload_id", deviceId = "device_id"
-        case assetLocalId = "asset_local_id", tempPath = "temp_path"
+        case assetLocalId = "asset_local_id", backupRunId = "backup_run_id", clientSessionId = "client_session_id"
+        case tempPath = "temp_path"
         case expectedByteSize = "expected_byte_size", receivedBytes = "received_bytes"
         case chunkSize = "chunk_size", status, createdAt = "created_at"
         case updatedAt = "updated_at", expiresAt = "expires_at", metadataJson = "metadata_json", lastError = "last_error"
@@ -131,6 +134,8 @@ struct UploadSessionRecord: Codable, FetchableRecord, PersistableRecord {
         case uploadId = "upload_id"
         case deviceId = "device_id"
         case assetLocalId = "asset_local_id"
+        case backupRunId = "backup_run_id"
+        case clientSessionId = "client_session_id"
         case tempPath = "temp_path"
         case expectedByteSize = "expected_byte_size"
         case receivedBytes = "received_bytes"
@@ -333,6 +338,19 @@ actor DatabaseManager {
                 t.column("metadata_json", .text).notNull()
                 t.column("last_error", .text)
             }
+        }
+
+        migrator.registerMigration("v4_upload_session_context") { db in
+            try db.alter(table: "upload_sessions") { t in
+                t.add(column: "backup_run_id", .text)
+                t.add(column: "client_session_id", .text)
+            }
+
+            try db.create(
+                index: "idx_upload_sessions_context",
+                on: "upload_sessions",
+                columns: ["device_id", "asset_local_id", "backup_run_id", "client_session_id"]
+            )
         }
 
         migrator.registerMigration("v2_upload_failure_logs") { db in
@@ -716,9 +734,15 @@ actor DatabaseManager {
         }
     }
 
-    func fetchActiveUploadSession(deviceId: String, assetLocalId: String, expectedByteSize: Int64) throws -> UploadSessionRecord? {
+    func fetchActiveUploadSession(
+        deviceId: String,
+        assetLocalId: String,
+        expectedByteSize: Int64,
+        backupRunId: String? = nil,
+        clientSessionId: String? = nil
+    ) throws -> UploadSessionRecord? {
         try queue.read { db in
-            try UploadSessionRecord
+            var request = UploadSessionRecord
                 .filter(Column("device_id") == deviceId)
                 .filter(Column("asset_local_id") == assetLocalId)
                 .filter(Column("expected_byte_size") == expectedByteSize)
@@ -726,6 +750,16 @@ actor DatabaseManager {
                     sql: "status IN (?, ?, ?)",
                     arguments: ["initialized", "receiving", "paused"]
                 )
+
+            if let backupRunId {
+                request = request.filter(Column("backup_run_id") == backupRunId)
+            }
+
+            if let clientSessionId {
+                request = request.filter(Column("client_session_id") == clientSessionId)
+            }
+
+            return try request
                 .order(Column("updated_at").desc)
                 .fetchOne(db)
         }
