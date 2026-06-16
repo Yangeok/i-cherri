@@ -72,15 +72,17 @@
 ### Tests for User Story 2
 
 - [ ] T016 [P] [US2] 재개/일시정지/실패 유지 테스트를 `apps/ios/iCherri-iosTests/AutoBackupEngineTests.swift` 및 `apps/mac/iCherri-MacTests/AutoBackupReceiverContractTests.swift`에 작성
+- [ ] T017 [P] [US2] failedRetained asset이 이후 automatic run에서 다시 평가 대상으로 복귀하는 회귀 테스트를 `apps/ios/iCherri-iosTests/AutoBackupEngineTests.swift` 및 `apps/ios/iCherri-iosTests/AutoBackupJobStoreTests.swift`에 추가
 
 ### Implementation for User Story 2
 
-- [ ] T017 [US2] staged file 생성·재사용·2GB 상한 enforcement를 `apps/ios/Platform/Background/AutoBackupEngine.swift` 및 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 구현
-- [ ] T018 [US2] 재개 가능한 chunk 업로드 복구를 `apps/ios/Platform/Upload/BackupClient.swift`, `apps/ios/Platform/Upload/ChunkUploadSender.swift`, `apps/ios/Platform/Upload/ResumableUploadManager.swift`에 구현
-- [ ] T019 [US2] mac receiver의 init/status/chunk 재개와 idempotent session 처리를 `apps/mac/Platform/ReceiverServer/Handlers/UploadHandler.swift`, `apps/mac/Platform/ReceiverServer/Handlers/UploadStatusHandler.swift`, `apps/mac/Platform/Storage/SessionManager.swift`에 구현
-- [ ] T020 [US2] run 범위 기준 partial/finalize 정산을 `apps/mac/Platform/ReceiverServer/Handlers/CheckBatchHandler.swift` 및 `apps/mac/Platform/Storage/DatabaseManager.swift`에 구현
-- [ ] T021 [US2] thermal pause와 receiver unavailable pause/resume 전이를 `apps/ios/Platform/Background/AutoBackupPolicyEvaluator.swift` 및 `apps/ios/Platform/Background/AutoBackupEngine.swift`에 구현
-- [ ] T022 [US2] cross-Mac handoff 금지와 7일 run expiry 처리를 `apps/ios/Platform/Background/AutoBackupEngine.swift` 및 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 구현
+- [ ] T018 [US2] staged file 생성·재사용·2GB 상한 enforcement를 `apps/ios/Platform/Background/AutoBackupEngine.swift` 및 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 구현
+- [ ] T019 [US2] 재개 가능한 chunk 업로드 복구를 `apps/ios/Platform/Upload/BackupClient.swift`, `apps/ios/Platform/Upload/ChunkUploadSender.swift`, `apps/ios/Platform/Upload/ResumableUploadManager.swift`에 구현
+- [ ] T020 [US2] mac receiver의 init/status/chunk 재개와 idempotent session 처리를 `apps/mac/Platform/ReceiverServer/Handlers/UploadHandler.swift`, `apps/mac/Platform/ReceiverServer/Handlers/UploadStatusHandler.swift`, `apps/mac/Platform/Storage/SessionManager.swift`에 구현
+- [ ] T021 [US2] run 범위 기준 partial/finalize 정산을 `apps/mac/Platform/ReceiverServer/Handlers/CheckBatchHandler.swift` 및 `apps/mac/Platform/Storage/DatabaseManager.swift`에 구현
+- [ ] T022 [US2] thermal pause와 receiver unavailable pause/resume 전이를 `apps/ios/Platform/Background/AutoBackupPolicyEvaluator.swift` 및 `apps/ios/Platform/Background/AutoBackupEngine.swift`에 구현
+- [ ] T023 [US2] failedRetained asset을 다음 automatic run 후보 집합에 재편입하는 로직을 `apps/ios/Platform/Background/AutoBackupEngine.swift` 및 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 구현
+- [ ] T024 [US2] cross-Mac handoff 금지와 7일 run expiry 처리를 `apps/ios/Platform/Background/AutoBackupEngine.swift` 및 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 구현
 
 **Checkpoint**: 자동 백업이 화면 꺼짐/앱 재실행/receiver 부재/receiver 변경 후에도 중복 없이 이어져야 한다.
 
@@ -94,14 +96,14 @@
 
 ### Tests for User Story 3
 
-- [ ] T023 [P] [US3] 상태 요약과 사유 메시지 테스트를 `apps/ios/iCherri-iosTests/AutoBackupStatusViewModelTests.swift` 및 `apps/ios/iCherri-iosTests/BackupProgressViewModelTests.swift`에 작성
+- [ ] T025 [P] [US3] 상태 요약과 사유 메시지 테스트를 `apps/ios/iCherri-iosTests/AutoBackupStatusViewModelTests.swift` 및 `apps/ios/iCherri-iosTests/BackupProgressViewModelTests.swift`에 작성
 
 ### Implementation for User Story 3
 
-- [ ] T024 [US3] 자동 백업 상태 요약 모델과 UI 바인딩을 `apps/ios/Features/Backup/BackupDashboardView.swift` 및 `apps/ios/Features/Backup/BackupProgressView.swift`에 구현
-- [ ] T025 [US3] 최근 결과, 마지막 성공 시각, 다음 재평가/재개 대기를 `apps/ios/Features/Backup/BackupDashboardView.swift` 및 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 구현
-- [ ] T026 [US3] 진단용 이벤트 기록과 UI용 요약 매핑을 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift` 및 `apps/ios/Platform/Background/AutoBackupEngine.swift`에 구현
-- [ ] T027 [US3] receiver 변경/미도달/thermal/staged limit 메시지를 `apps/ios/Features/Backup/BackupDashboardView.swift` 및 `apps/ios/Features/Backup/BackupProgressView.swift`에 일관되게 노출
+- [ ] T026 [US3] 자동 백업 상태 요약 모델과 UI 바인딩을 `apps/ios/Features/Backup/BackupDashboardView.swift` 및 `apps/ios/Features/Backup/BackupProgressView.swift`에 구현
+- [ ] T027 [US3] 최근 결과, 마지막 성공 시각, 다음 재평가/재개 대기를 `apps/ios/Features/Backup/BackupDashboardView.swift` 및 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift`에 구현
+- [ ] T028 [US3] 진단용 이벤트 기록과 UI용 요약 매핑을 `apps/ios/Platform/Persistence/AutoBackupJobStore.swift` 및 `apps/ios/Platform/Background/AutoBackupEngine.swift`에 구현
+- [ ] T029 [US3] receiver 변경/미도달/thermal/staged limit 메시지를 `apps/ios/Features/Backup/BackupDashboardView.swift` 및 `apps/ios/Features/Backup/BackupProgressView.swift`에 일관되게 노출
 
 **Checkpoint**: 사용자가 로그 없이도 자동 백업 상태와 예외를 이해할 수 있어야 한다.
 
@@ -111,10 +113,10 @@
 
 **Purpose**: 전 스토리에 걸친 검증, 문서, 정리
 
-- [ ] T028 [P] 자동 백업 운영 가이드를 `specs/002-background-auto-backup/quickstart.md` 및 `README.md`에 반영
-- [ ] T029 iOS 자동 백업 테스트 묶음을 `apps/ios/iCherri-iosTests/AutoBackupSchedulerTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupPolicyEvaluatorTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupEngineTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupJobStoreTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupStatusViewModelTests.swift` 기준으로 실행
-- [ ] T030 mac receiver 계약/회귀 테스트 묶음을 `apps/mac/iCherri-MacTests/AutoBackupReceiverContractTests.swift` 및 `apps/mac/iCherri-MacTests/DatabaseManagerBackupRunTests.swift` 기준으로 실행
-- [ ] T031 end-to-end quickstart 검증과 dead code 정리를 `apps/ios/Features/Backup/BackupDashboardView.swift`, `apps/ios/Platform/Background/AutoBackupEngine.swift`, `apps/mac/Platform/ReceiverServer/Handlers/UploadHandler.swift`에 반영
+- [ ] T030 [P] 자동 백업 운영 가이드를 `specs/002-background-auto-backup/quickstart.md` 및 `README.md`에 반영
+- [ ] T031 iOS 자동 백업 테스트 묶음을 `apps/ios/iCherri-iosTests/AutoBackupSchedulerTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupPolicyEvaluatorTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupEngineTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupJobStoreTests.swift`, `apps/ios/iCherri-iosTests/AutoBackupStatusViewModelTests.swift` 기준으로 실행
+- [ ] T032 mac receiver 계약/회귀 테스트 묶음을 `apps/mac/iCherri-MacTests/AutoBackupReceiverContractTests.swift` 및 `apps/mac/iCherri-MacTests/DatabaseManagerBackupRunTests.swift` 기준으로 실행
+- [ ] T033 end-to-end quickstart 검증과 dead code 정리를 `apps/ios/Features/Backup/BackupDashboardView.swift`, `apps/ios/Platform/Background/AutoBackupEngine.swift`, `apps/mac/Platform/ReceiverServer/Handlers/UploadHandler.swift`에 반영
 
 ---
 
@@ -145,9 +147,9 @@
 - T002와 T003은 병렬 가능
 - T005, T006, T008은 병렬 가능
 - T010은 T011~T015와 병렬로 시작 가능
-- T016은 T017~T022보다 먼저 쓰되, T017/T018 및 T019/T020은 서로 다른 파일 축이라 일부 병렬 가능
-- T023은 T024~T027보다 먼저 쓰되, T024와 T026은 부분 병렬 가능
-- T028과 T029/T030은 병렬 가능
+- T016은 T017~T024보다 먼저 쓰되, T018/T019 및 T020/T021은 서로 다른 파일 축이라 일부 병렬 가능
+- T025는 T026~T029보다 먼저 쓰되, T026과 T028은 부분 병렬 가능
+- T030과 T031/T032는 병렬 가능
 
 ## Parallel Example: User Story 1
 
@@ -166,10 +168,10 @@ T015 BackupDashboardView + BackupProgressView UI
 
 ```text
 # iOS / mac 분리 축
-T017 staged file lifecycle
-T018 iOS resumable upload recovery
-T019 mac upload/session idempotency
-T020 mac finalize reconciliation
+T018 staged file lifecycle
+T019 iOS resumable upload recovery
+T020 mac upload/session idempotency
+T021 mac finalize reconciliation
 ```
 
 ## Implementation Strategy
