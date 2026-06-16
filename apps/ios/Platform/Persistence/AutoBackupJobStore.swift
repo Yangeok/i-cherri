@@ -58,6 +58,7 @@ private struct AutoBackupJobStoreState: Codable {
     var schemaVersion = currentSchemaVersion
     var policy = AutoBackupPolicy()
     var receiverSelection: AutoBackupReceiverSelection?
+    var nextEvaluationAt: Date?
     var runsByID: [String: AutoBackupRun] = [:]
     var events: [BackupEventRecord] = []
 }
@@ -108,6 +109,15 @@ actor AutoBackupJobStore {
         persist()
     }
 
+    func loadNextEvaluationDate() -> Date? {
+        state.nextEvaluationAt
+    }
+
+    func saveNextEvaluationDate(_ date: Date?) {
+        state.nextEvaluationAt = date
+        persist()
+    }
+
     func upsertRun(_ run: AutoBackupRun) {
         state.runsByID[run.runID] = run
         persist()
@@ -150,7 +160,27 @@ actor AutoBackupJobStore {
 
     func appendEvent(_ event: BackupEventRecord) {
         state.events.append(event)
+        if state.events.count > 200 {
+            state.events.removeFirst(state.events.count - 200)
+        }
         persist()
+    }
+
+    func loadLatestEvent(runID: String?) -> BackupEventRecord? {
+        guard let runID else { return nil }
+        return state.events
+            .filter { $0.runID == runID }
+            .sorted { $0.createdAt > $1.createdAt }
+            .first
+    }
+
+    func loadRecentEvents(runID: String?, limit: Int = 5) -> [BackupEventRecord] {
+        guard let runID else { return [] }
+        return state.events
+            .filter { $0.runID == runID }
+            .sorted { $0.createdAt > $1.createdAt }
+            .prefix(limit)
+            .map { $0 }
     }
 
     func totalStagedBytes(runID: String) -> Int64 {
@@ -180,6 +210,16 @@ actor AutoBackupJobStore {
 
     func snapshotRuns() -> [AutoBackupRun] {
         state.runsByID.values.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    func loadMostRecentTerminalRun(receiverID: String?) -> AutoBackupRun? {
+        state.runsByID.values
+            .filter { run in
+                (receiverID == nil || run.receiverID == receiverID)
+                    && (run.state == .completed || run.state == .partial || run.state == .expired)
+            }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .first
     }
 
     private static func loadState(from fileURL: URL) -> AutoBackupJobStoreState {

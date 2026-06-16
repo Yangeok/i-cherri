@@ -148,4 +148,18 @@ struct BackupProgressViewModelTests {
         #expect(viewModel.canCancel == false)
         #expect(viewModel.trailingStatusText == "Failed")
     }
+
+    @Test("Given automatic backup summary when assigning it to progress view model then the status banner state is retained")
+    func givenAutomaticBackupSummary_whenAssigningItToProgressViewModel_thenTheStatusBannerStateIsRetained() async throws {
+        let viewModel = BackupProgressViewModel(totalCount: 10)
+        let status = AutoBackupStatusViewModel(
+            title: "Automatic Backup Is Paused",
+            detail: "Paused until iPhone temperature falls.",
+            symbolName: "pause.circle.fill"
+        )
+
+        viewModel.setAutoBackupStatus(status)
+
+        #expect(viewModel.autoBackupStatus == status)
+    }
 }

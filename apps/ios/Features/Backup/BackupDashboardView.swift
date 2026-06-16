@@ -189,8 +189,33 @@ public struct BackupDashboardView: View {
                     }
                 }
 
+                if let autoBackupStatusSummary = viewModel.autoBackupStatusSummary {
+                    autoBackupStatusCard(autoBackupStatusSummary)
+                }
+
                 if let autoBackupEligibilityMessage = viewModel.autoBackupEligibilityMessage {
                     Label(autoBackupEligibilityMessage, systemImage: "bolt.horizontal.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let autoBackupRecentResultMessage = viewModel.autoBackupRecentResultMessage {
+                    Label(autoBackupRecentResultMessage, systemImage: "clock.arrow.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let autoBackupLastSuccessMessage = viewModel.autoBackupLastSuccessMessage {
+                    Label(autoBackupLastSuccessMessage, systemImage: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let autoBackupNextEvaluationMessage = viewModel.autoBackupNextEvaluationMessage {
+                    Label(autoBackupNextEvaluationMessage, systemImage: "clock")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -305,6 +330,23 @@ public struct BackupDashboardView: View {
         }
         .padding(.vertical, 4)
     }
+
+    private func autoBackupStatusCard(_ status: AutoBackupStatusViewModel) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: status.symbolName)
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(status.title)
+                    .font(.subheadline.weight(.semibold))
+                Text(status.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
 }
 
 // MARK: - ViewModel
@@ -362,6 +404,10 @@ final class BackupDashboardViewModel: ObservableObject {
     @Published var backupStatusMessage: String?
     @Published var isAutoBackupEnabled = false
     @Published var autoBackupEligibilityMessage: String?
+    @Published var autoBackupStatusSummary: AutoBackupStatusViewModel?
+    @Published var autoBackupRecentResultMessage: String?
+    @Published var autoBackupLastSuccessMessage: String?
+    @Published var autoBackupNextEvaluationMessage: String?
     @Published var activeBackupProgressViewModel: BackupProgressViewModel?
     @Published var backupCoverageSummary: String?
     @Published var backupCoverageProgress: Double?
@@ -554,12 +600,14 @@ final class BackupDashboardViewModel: ObservableObject {
         autoBackupEligibilityMessage = "Automatic backup is waiting for a backup target."
         Task {
             await autoBackupStore.saveReceiverSelection(nil)
+            await refreshAutoBackupStatusPresentation(fallbackMessage: self.autoBackupEligibilityMessage)
         }
     }
 
     func reevaluateAutomaticBackup() async {
         guard photoPermissionStatus == .granted else {
             autoBackupEligibilityMessage = "Automatic backup needs Photos access."
+            await refreshAutoBackupStatusPresentation(fallbackMessage: autoBackupEligibilityMessage)
             return
         }
 
@@ -568,6 +616,7 @@ final class BackupDashboardViewModel: ObservableObject {
 
         guard policy.isEnabled else {
             autoBackupEligibilityMessage = "Automatic backup is off."
+            await refreshAutoBackupStatusPresentation(fallbackMessage: autoBackupEligibilityMessage)
             return
         }
 
@@ -577,6 +626,7 @@ final class BackupDashboardViewModel: ObservableObject {
         guard let receiverID = UserDefaults.standard.string(forKey: receiverIDKey), !receiverID.isEmpty else {
             autoBackupEligibilityMessage = "Automatic backup is waiting for a backup target."
             autoBackupScheduler.scheduleNextEvaluation()
+            await refreshAutoBackupStatusPresentation(fallbackMessage: autoBackupEligibilityMessage)
             return
         }
 
@@ -589,6 +639,7 @@ final class BackupDashboardViewModel: ObservableObject {
                 runtimeSnapshot: runtimeSnapshot,
                 runAssets: []
             )
+            await refreshAutoBackupStatusPresentation(fallbackMessage: autoBackupEligibilityMessage)
             return
         }
 
@@ -607,6 +658,7 @@ final class BackupDashboardViewModel: ObservableObject {
             autoBackupEligibilityMessage = "Automatic backup could not prepare a run."
         }
         autoBackupScheduler.scheduleNextEvaluation()
+        await refreshAutoBackupStatusPresentation(fallbackMessage: autoBackupEligibilityMessage)
     }
 
     func startBackup() async {
@@ -981,6 +1033,7 @@ final class BackupDashboardViewModel: ObservableObject {
             !receiverID.isEmpty
         else {
             await autoBackupStore.saveReceiverSelection(nil)
+            await refreshAutoBackupStatusPresentation(fallbackMessage: "Automatic backup is waiting for a backup target.")
             return
         }
 
@@ -992,6 +1045,7 @@ final class BackupDashboardViewModel: ObservableObject {
                 trustTokenStorageKey: trustTokenKey
             )
         )
+        await refreshAutoBackupStatusPresentation(fallbackMessage: autoBackupEligibilityMessage)
     }
 
     private func makeAutoBackupRuntimeSnapshot() -> AutoBackupRuntimeSnapshot {
@@ -1023,6 +1077,29 @@ final class BackupDashboardViewModel: ObservableObject {
         case nil:
             return "Automatic backup is ready."
         }
+    }
+
+    private func refreshAutoBackupStatusPresentation(fallbackMessage: String?) async {
+        let receiverID = UserDefaults.standard.string(forKey: receiverIDKey)
+        let activeRun: AutoBackupRun?
+        if let receiverID, !receiverID.isEmpty {
+            activeRun = await autoBackupStore.loadActiveRun(receiverID: receiverID)
+        } else {
+            activeRun = nil
+        }
+        let terminalRun = await autoBackupStore.loadMostRecentTerminalRun(receiverID: receiverID)
+        let latestEvent = await autoBackupStore.loadLatestEvent(runID: activeRun?.runID ?? terminalRun?.runID)
+        let nextEvaluationAt = await autoBackupStore.loadNextEvaluationDate()
+        autoBackupStatusSummary = AutoBackupStatusViewModel.make(
+            isEnabled: isAutoBackupEnabled,
+            receiverName: pairedReceiverName,
+            activeRun: activeRun,
+            fallbackMessage: fallbackMessage,
+            latestEvent: latestEvent
+        )
+        autoBackupRecentResultMessage = AutoBackupStatusViewModel.recentResultText(for: terminalRun)
+        autoBackupLastSuccessMessage = AutoBackupStatusViewModel.lastSuccessText(for: terminalRun)
+        autoBackupNextEvaluationMessage = AutoBackupStatusViewModel.nextEvaluationText(for: nextEvaluationAt)
     }
 
     private func permissionStatus(for status: PhotoLibraryAuthStatus) -> PermissionStatus {

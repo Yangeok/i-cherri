@@ -105,4 +105,31 @@ struct AutoBackupJobStoreTests {
         #expect(expiredRunIDs == ["run-expired"])
         #expect(expiredRun?.state == .expired)
     }
+
+    @Test("Given next evaluation and run events when reloading the store then scheduling and event history survive")
+    func persistsNextEvaluationAndLatestEvent() async {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autobackup-events-tests-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        let fileURL = tempDirectory.appendingPathComponent("auto-backup-jobs.json")
+
+        let now = Date(timeIntervalSince1970: 1_700_000_800)
+        let store = AutoBackupJobStore(fileURL: fileURL)
+        await store.saveNextEvaluationDate(now.addingTimeInterval(900))
+        await store.appendEvent(
+            BackupEventRecord(
+                eventID: "event-1",
+                runID: "run-1",
+                message: "Waiting for Wi-Fi before the next automatic backup.",
+                createdAt: now
+            )
+        )
+
+        let reloadedStore = AutoBackupJobStore(fileURL: fileURL)
+        let nextEvaluation = await reloadedStore.loadNextEvaluationDate()
+        let latestEvent = await reloadedStore.loadLatestEvent(runID: "run-1")
+
+        #expect(nextEvaluation == now.addingTimeInterval(900))
+        #expect(latestEvent?.message == "Waiting for Wi-Fi before the next automatic backup.")
+    }
 }

@@ -27,6 +27,9 @@ public struct BackupProgressView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     headerSection
+                    if let autoBackupStatus = viewModel.autoBackupStatus {
+                        autoBackupStatusSection(autoBackupStatus)
+                    }
                     if let errorMessage = viewModel.errorMessage {
                         errorSection(errorMessage)
                     }
@@ -82,6 +85,23 @@ public struct BackupProgressView: View {
                 .font(.subheadline)
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func autoBackupStatusSection(_ status: AutoBackupStatusViewModel) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: status.symbolName)
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(status.title)
+                    .font(.subheadline.weight(.semibold))
+                Text(status.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -257,6 +277,7 @@ public final class BackupProgressViewModel: ObservableObject {
     @Published public var isComplete: Bool = false
     @Published public var errorMessage: String?
     @Published public var phase: BackupProgressPhase = .scanning
+    @Published var autoBackupStatus: AutoBackupStatusViewModel?
 
     public var onRetryFailedUploads: (([String]) -> Void)?
     public var onRetryUpload: ((String) -> Void)?
@@ -355,6 +376,10 @@ public final class BackupProgressViewModel: ObservableObject {
         isComplete = true
         formattedSpeed = "—"
         phase = .failed
+    }
+
+    func setAutoBackupStatus(_ status: AutoBackupStatusViewModel?) {
+        autoBackupStatus = status
     }
 
     public var canCancel: Bool {

@@ -8,9 +8,11 @@ final class AutoBackupScheduler {
 
     private var didRegisterBackgroundTasks = false
     private let engine: AutoBackupEngine
+    private let store: AutoBackupJobStore
 
-    init(engine: AutoBackupEngine = .shared) {
+    init(engine: AutoBackupEngine = .shared, store: AutoBackupJobStore = .shared) {
         self.engine = engine
+        self.store = store
     }
 
     func registerBackgroundTasks() {
@@ -34,6 +36,9 @@ final class AutoBackupScheduler {
     func scheduleNextEvaluation() {
         let request = buildProcessingRequest()
         try? BGTaskScheduler.shared.submit(request)
+        Task {
+            await store.saveNextEvaluationDate(request.earliestBeginDate)
+        }
     }
 
     func buildProcessingRequest() -> BGProcessingTaskRequest {
