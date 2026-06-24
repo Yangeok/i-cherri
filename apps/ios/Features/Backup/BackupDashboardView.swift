@@ -21,6 +21,9 @@ public struct BackupDashboardView: View {
                 ScrollView {
                     VStack(spacing: 28) {
                         permissionSection
+                        if let suggestedTarget = viewModel.suggestedSwitchTarget {
+                            switchSuggestionBanner(for: suggestedTarget)
+                        }
                         pairingSection
                         if viewModel.isPaired {
                             backupTriggerSection
@@ -111,6 +114,11 @@ public struct BackupDashboardView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
+                    if viewModel.isBrowsing {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(.trailing, 4)
+                    }
                     Button {
                         Task { await viewModel.refreshReceivers() }
                     } label: {
@@ -127,8 +135,16 @@ public struct BackupDashboardView: View {
                             Text("Current Backup Target")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Text(receiverName)
-                                .font(.subheadline.weight(.semibold))
+                            HStack(spacing: 6) {
+                                Text(receiverName)
+                                    .font(.subheadline.weight(.semibold))
+                                Circle()
+                                    .fill(viewModel.pairedReceiverIsOnline ? Color.green : Color.orange)
+                                    .frame(width: 8, height: 8)
+                                Text(viewModel.pairedReceiverIsOnline ? "Online" : "Offline")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         Spacer()
                         Button("Change") { isTargetPickerPresented = true }
@@ -142,16 +158,25 @@ public struct BackupDashboardView: View {
                     }
                 }
                 if viewModel.discoveredReceivers.isEmpty {
-                    VStack(spacing: 8) {
-                        ProgressView()
-                        Text("Looking for Mac receivers…")
+                    if viewModel.isBrowsing {
+                        VStack(spacing: 8) {
+                            ProgressView()
+                            Text("Looking for Mac receivers…")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 8)
+                    } else {
+                        Text("No receivers found")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
                     }
                 } else {
                     ForEach(viewModel.discoveredReceivers) { receiver in
                         receiverRow(receiver)
                     }
+                    .opacity(viewModel.isBrowsing ? 0.7 : 1.0)
                 }
                 if let message = viewModel.pairingStatusMessage {
                     Label(message, systemImage: viewModel.isPaired ? "checkmark.circle.fill" : "dot.radiowaves.left.and.right")
@@ -224,29 +249,36 @@ public struct BackupDashboardView: View {
                 if let receiverName = viewModel.pairedReceiverName {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("Connected to \(receiverName)")
+                            Image(systemName: viewModel.pairedReceiverIsOnline ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(viewModel.pairedReceiverIsOnline ? .green : .orange)
+                            Text(viewModel.pairedReceiverIsOnline ? "Connected to \(receiverName)" : "Disconnected from \(receiverName)")
                                 .font(.subheadline)
+                                .foregroundStyle(viewModel.pairedReceiverIsOnline ? .primary : .secondary)
                             Spacer()
                         }
 
-                        if let backupCoverageSummary = viewModel.backupCoverageSummary,
-                           let backupCoverageProgress = viewModel.backupCoverageProgress {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text("Library Coverage")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Text(backupCoverageSummary)
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                }
+                        if viewModel.pairedReceiverIsOnline {
+                            if let backupCoverageSummary = viewModel.backupCoverageSummary,
+                               let backupCoverageProgress = viewModel.backupCoverageProgress {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        Text("Library Coverage")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                        Text(backupCoverageSummary)
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
 
-                                ProgressView(value: backupCoverageProgress)
-                                    .tint(.green)
+                                    ProgressView(value: backupCoverageProgress)
+                                        .tint(.green)
+                                }
                             }
+                        } else {
+                            Text("Make sure your Mac is active and on the same network.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -256,7 +288,7 @@ public struct BackupDashboardView: View {
                         .padding(.vertical, 4)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isBackingUp)
+                .disabled(viewModel.isBackingUp || !viewModel.pairedReceiverIsOnline)
                 if let backupStatusMessage = viewModel.backupStatusMessage {
                     Label(backupStatusMessage, systemImage: "info.circle")
                         .font(.caption)
@@ -267,6 +299,35 @@ public struct BackupDashboardView: View {
         } label: {
             Label("Backup", systemImage: "externaldrive.fill.badge.icloud")
         }
+    }
+
+    private func switchSuggestionBanner(for target: DiscoveredReceiver) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .font(.title3)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Target Offline")
+                    .font(.subheadline.weight(.bold))
+                Text("기존 백업 대상(\(viewModel.pairedReceiverName ?? ""))을 찾을 수 없습니다. 주변에 감지된 '\(target.name)'으로 백업 대상을 전환할까요?")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            
+            Spacer()
+            
+            Button("전환") {
+                Task { await viewModel.pair(with: target) }
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .disabled(viewModel.isPairing)
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(12)
     }
 
     // MARK: - Helpers
@@ -411,6 +472,17 @@ final class BackupDashboardViewModel: ObservableObject {
     @Published var activeBackupProgressViewModel: BackupProgressViewModel?
     @Published var backupCoverageSummary: String?
     @Published var backupCoverageProgress: Double?
+    @Published var isBrowsing = false
+
+    var pairedReceiverIsOnline: Bool {
+        guard let name = pairedReceiverName else { return false }
+        return discoveredReceivers.contains(where: { $0.name == name })
+    }
+
+    var suggestedSwitchTarget: DiscoveredReceiver? {
+        guard isPaired && !pairedReceiverIsOnline else { return nil }
+        return availableSwitchTargets.first
+    }
 
     private let scanner = PhotoLibraryScanner()
     private let scanIndexStore = PhotoLibraryScanIndexStore.shared
@@ -465,9 +537,17 @@ final class BackupDashboardViewModel: ObservableObject {
                 switch status {
                 case .ready:
                     self.localNetworkStatus = .granted
+                    self.isBrowsing = false
                 case .failed:
                     self.localNetworkStatus = .denied
-                case .idle, .browsing:
+                    self.isBrowsing = false
+                case .browsing:
+                    self.isBrowsing = true
+                    if self.localNetworkStatus != .granted {
+                        self.localNetworkStatus = .unknown
+                    }
+                case .idle:
+                    self.isBrowsing = false
                     if self.localNetworkStatus != .granted {
                         self.localNetworkStatus = .unknown
                     }
@@ -530,7 +610,7 @@ final class BackupDashboardViewModel: ObservableObject {
             let url = baseURL.appendingPathComponent("/pair")
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
-            request.timeoutInterval = 10
+            request.timeoutInterval = 5
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue(device.deviceID, forHTTPHeaderField: "X-iCherri-Device-ID")
             
@@ -1345,7 +1425,7 @@ final class BackupDashboardViewModel: ObservableObject {
             connection.start(queue: .global(qos: .userInitiated))
 
             Task.detached(priority: .userInitiated) {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
                 finish(.failure(URLError(.timedOut)))
             }
         }
@@ -1353,6 +1433,14 @@ final class BackupDashboardViewModel: ObservableObject {
 }
 
 private func backupFailureReason(_ error: Error) -> String {
+    let localizedDescription = error.localizedDescription
+    if localizedDescription.contains("timed out") || localizedDescription.contains("시간 초과") {
+        return "Mac 리시버와 연결할 수 없습니다. Mac의 iCherri 앱이 실행 중인지, 그리고 같은 Wi-Fi에 연결되어 있는지 확인해 주세요."
+    }
+    if localizedDescription.contains("Cannot find host") || localizedDescription.contains("Could not connect to the server") || localizedDescription.contains("호스트를 찾을 수") {
+        return "백업 대상을 찾을 수 없습니다. 네트워크 설정을 확인해 주세요."
+    }
+
     if let backupError = error as? BackupClientError {
         switch backupError {
         case .httpError(let statusCode, let data):
@@ -1381,7 +1469,7 @@ private func backupFailureReason(_ error: Error) -> String {
             return "Upload session expired."
         }
     }
-    return error.localizedDescription
+    return localizedDescription
 }
 
 private actor BackupRunReconcileState {

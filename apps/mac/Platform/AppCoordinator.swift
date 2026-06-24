@@ -196,6 +196,14 @@ final class AppCoordinator: NSObject, ObservableObject {
             try await srv.start()
             self.server = srv
             print("[AppCoordinator] HTTP Server start requested on port \(port)")
+
+            // Bonjour Advertiser
+            let receiverName = Host.current().localizedName ?? "Mac Receiver"
+            let adv = BonjourAdvertiser(port: port, receiverName: receiverName)
+            try await adv.start()
+            self.advertiser = adv
+            print("[AppCoordinator] Bonjour Advertiser started as \(receiverName) on port \(port)")
+
             // Cleanup Scheduler
             let scheduler = CleanupScheduler(sessionManager: manager, incomingDir: tmpDir)
             await scheduler.start()
