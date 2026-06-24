@@ -35,34 +35,49 @@ public final class PhotoLibraryScanner {
         options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
 
         let result = PHAsset.fetchAssets(with: options)
-        var assets: [AssetMetadata] = []
-        assets.reserveCapacity(result.count)
+        let count = result.count
+        guard count > 0 else { return [] }
 
-        result.enumerateObjects { asset, _, _ in
+        var assets = [AssetMetadata?](repeating: nil, count: count)
+        let lock = NSLock()
+
+        // Run metadata extraction concurrently across available CPU cores
+        DispatchQueue.concurrentPerform(iterations: count) { index in
             autoreleasepool {
-                guard let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) else { return }
-                assets.append(metadata)
+                let asset = result.object(at: index)
+                if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) {
+                    lock.lock()
+                    assets[index] = metadata
+                    lock.unlock()
+                }
             }
         }
 
-        return assets
+        return assets.compactMap { $0 }
     }
 
     public func scanAssets(localIdentifiers: [String], deviceID: String) async -> [AssetMetadata] {
         guard !localIdentifiers.isEmpty else { return [] }
 
         let result = PHAsset.fetchAssets(withLocalIdentifiers: localIdentifiers, options: nil)
-        var assets: [AssetMetadata] = []
-        assets.reserveCapacity(result.count)
+        let count = result.count
+        guard count > 0 else { return [] }
 
-        result.enumerateObjects { asset, _, _ in
+        var assets = [AssetMetadata?](repeating: nil, count: count)
+        let lock = NSLock()
+
+        DispatchQueue.concurrentPerform(iterations: count) { index in
             autoreleasepool {
-                guard let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) else { return }
-                assets.append(metadata)
+                let asset = result.object(at: index)
+                if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) {
+                    lock.lock()
+                    assets[index] = metadata
+                    lock.unlock()
+                }
             }
         }
 
-        return assets.sorted { lhs, rhs in
+        return assets.compactMap { $0 }.sorted { lhs, rhs in
             lhs.creationDate > rhs.creationDate
         }
     }
@@ -130,19 +145,36 @@ public final class PhotoLibraryScanner {
     // MARK: - Private
 
     private static func extractMetadata(from asset: PHAsset, deviceID: String) -> AssetMetadata? {
-        guard let filename = (asset.value(forKey: "filename") as? String) ?? inferFilename(from: asset) else {
-            return nil
-        }
         let mediaType = resolveMediaType(asset)
         let creation = asset.creationDate ?? Date()
         let modification = asset.modificationDate ?? creation
-        let byteSize = resolveByteSize(for: asset)
+
+        // Single-pass: fetch asset resources only once to avoid I/O bottlenecks
+        let resources = PHAssetResource.assetResources(for: asset)
+        let preferred = preferredResource(from: resources, mediaType: asset.mediaType) ?? resources.first
+
+        // Extract filename
+        let filename = (asset.value(forKey: "filename") as? String)
+            ?? preferred?.originalFilename
+            ?? "\(asset.localIdentifier).jpg"
+
+        // Extract byte size
+        var byteSize: Int64 = 0
+        if let resource = preferred {
+            if let size = resource.value(forKey: "fileSize") as? Int64 {
+                byteSize = size
+            } else if let size = resource.value(forKey: "fileSize") as? NSNumber {
+                byteSize = size.int64Value
+            }
+        }
+
         let fingerprint = FingerprintBuilder.build(
             creationDate: creation,
             modificationDate: modification,
             byteSize: byteSize,
             pixelWidth: asset.pixelWidth,
-            pixelHeight: asset.pixelHeight
+            pixelHeight: asset.pixelHeight,
+            durationSeconds: asset.duration > 0 ? asset.duration : nil
         )
 
         return AssetMetadata(
@@ -169,25 +201,6 @@ public final class PhotoLibraryScanner {
         default:
             return .unknown
         }
-    }
-
-    private static func inferFilename(from asset: PHAsset) -> String? {
-        let resources = PHAssetResource.assetResources(for: asset)
-        return resources.first?.originalFilename
-    }
-
-    private static func resolveByteSize(for asset: PHAsset) -> Int64 {
-        let resources = PHAssetResource.assetResources(for: asset)
-        let resource = preferredResource(from: resources, mediaType: asset.mediaType) ?? resources.first
-        guard let resource else { return 0 }
-
-        if let size = resource.value(forKey: "fileSize") as? Int64 {
-            return size
-        }
-        if let size = resource.value(forKey: "fileSize") as? NSNumber {
-            return size.int64Value
-        }
-        return 0
     }
 
     private static func preferredResource(from resources: [PHAssetResource], mediaType: PHAssetMediaType) -> PHAssetResource? {
