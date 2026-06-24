@@ -179,10 +179,12 @@ public struct BackupDashboardView: View {
                     .opacity(viewModel.isBrowsing ? 0.7 : 1.0)
                 }
                 if let message = viewModel.pairingStatusMessage {
-                    Label(message, systemImage: viewModel.isPaired ? "checkmark.circle.fill" : "dot.radiowaves.left.and.right")
-                        .font(.caption)
-                        .foregroundStyle(viewModel.isPaired ? .green : .secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !(viewModel.isPaired && !viewModel.pairedReceiverIsOnline) {
+                        Label(message, systemImage: viewModel.isPaired ? "checkmark.circle.fill" : "dot.radiowaves.left.and.right")
+                            .font(.caption)
+                            .foregroundStyle(viewModel.isPaired ? .green : .secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 if let errorMessage = viewModel.pairingErrorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
