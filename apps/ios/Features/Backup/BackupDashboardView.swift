@@ -573,6 +573,7 @@ final class BackupDashboardViewModel: ObservableObject {
         // Observe browser changes
         Task { @MainActor in
             for await receivers in bonjourBrowser.$discoveredReceivers.values {
+                let wasOffline = !self.pairedReceiverIsOnline
                 self.discoveredReceivers = receivers
                 self.localNetworkStatus = receivers.isEmpty ? self.localNetworkStatus : .granted
                 if let pairedReceiverID = UserDefaults.standard.string(forKey: self.receiverIDKey) {
@@ -580,6 +581,14 @@ final class BackupDashboardViewModel: ObservableObject {
                 } else if let pairedReceiverName {
                     self.pairedReceiver = receivers.first(where: { $0.name == pairedReceiverName })
                 }
+                
+                if wasOffline && self.pairedReceiverIsOnline {
+                    Task {
+                        await self.sendPingToReceiver()
+                    }
+                    self.startPingTimer()
+                }
+                
                 await self.reevaluateAutomaticBackup()
             }
         }
