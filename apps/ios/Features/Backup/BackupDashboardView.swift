@@ -518,7 +518,7 @@ final class BackupDashboardViewModel: ObservableObject {
                 let deviceID: String
             }
             let pingReq = DevicePingRequest(deviceID: deviceID)
-            let url = receiverURL.appendingPathComponent("/devices/ping")
+            guard let url = URL(string: "\(receiverURLString)/devices/ping") else { return }
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.timeoutInterval = 4
