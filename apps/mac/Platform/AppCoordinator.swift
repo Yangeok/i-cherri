@@ -377,6 +377,10 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
             return await handlePairRequest(request)
         }
 
+        if method == "POST" && path == "/devices/ping" {
+            return await handleDevicePingRequest(request)
+        }
+
         return .notFound
     }
 
@@ -411,6 +415,34 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
             return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
         } catch {
             return .error(code: "pair_error", message: error.localizedDescription, status: 500)
+        }
+    }
+
+    private func handleDevicePingRequest(_ request: HTTPRequest) async -> HTTPResponse {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        struct DevicePingRequest: Codable {
+            let deviceID: String
+        }
+        
+        guard let body = try? decoder.decode(DevicePingRequest.self, from: request.body) else {
+            return .error(code: "invalid_body", message: "Failed to parse DevicePingRequest")
+        }
+        
+        do {
+            if var device = try await DatabaseManager.shared.fetchDevice(id: body.deviceID) {
+                device.lastSeenAt = Date()
+                try await DatabaseManager.shared.upsertDevice(device)
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .receiverDataDidChange, object: nil)
+                }
+                let response = ["status": "ok"]
+                return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
+            }
+            return .error(code: "device_not_found", message: "Device not paired", status: 404)
+        } catch {
+            return .error(code: "ping_error", message: error.localizedDescription, status: 500)
         }
     }
 

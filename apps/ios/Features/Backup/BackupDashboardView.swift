@@ -475,6 +475,7 @@ final class BackupDashboardViewModel: ObservableObject {
     @Published var backupCoverageSummary: String?
     @Published var backupCoverageProgress: Double?
     @Published var isBrowsing = false
+    private var pingTimer: Task<Void, Never>?
 
     var pairedReceiverIsOnline: Bool {
         guard let name = pairedReceiverName else { return false }
@@ -484,6 +485,54 @@ final class BackupDashboardViewModel: ObservableObject {
     var suggestedSwitchTarget: DiscoveredReceiver? {
         guard isPaired && !pairedReceiverIsOnline else { return nil }
         return availableSwitchTargets.first
+    }
+
+    func startPingTimer() {
+        pingTimer?.cancel()
+        pingTimer = Task {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 15_000_000_000) // 15 seconds
+                    await sendPingToReceiver()
+                } catch {
+                    break
+                }
+            }
+        }
+    }
+
+    func stopPingTimer() {
+        pingTimer?.cancel()
+        pingTimer = nil
+    }
+
+    private func sendPingToReceiver() async {
+        guard isPaired, pairedReceiverIsOnline,
+              let receiverURLString = UserDefaults.standard.string(forKey: receiverURLKey),
+              let receiverURL = URL(string: receiverURLString),
+              let deviceID = UserDefaults.standard.string(forKey: receiverIDKey)
+        else { return }
+
+        do {
+            struct DevicePingRequest: Codable {
+                let deviceID: String
+            }
+            let pingReq = DevicePingRequest(deviceID: deviceID)
+            let url = receiverURL.appendingPathComponent("/devices/ping")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 4
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            request.httpBody = try encoder.encode(pingReq)
+            
+            _ = try await URLSession.shared.data(for: request)
+            print("[Ping] Successfully sent heartbeat ping to receiver")
+        } catch {
+            print("[Ping] Failed to send heartbeat: \(error)")
+        }
     }
 
     private let scanner = PhotoLibraryScanner()
@@ -644,6 +693,7 @@ final class BackupDashboardViewModel: ObservableObject {
                         trustTokenStorageKey: trustTokenKey
                     )
                 )
+                self.startPingTimer()
                 await reevaluateAutomaticBackup()
                 print("[Pair] Successfully paired with \(receiver.name), token: \(confirmResponse.trustToken.prefix(8))...")
             } else {
@@ -680,6 +730,7 @@ final class BackupDashboardViewModel: ObservableObject {
         backupCoverageProgress = nil
         bonjourBrowser.refreshBrowsing()
         autoBackupEligibilityMessage = "Automatic backup is waiting for a backup target."
+        self.stopPingTimer()
         Task {
             await autoBackupStore.saveReceiverSelection(nil)
             await refreshAutoBackupStatusPresentation(fallbackMessage: self.autoBackupEligibilityMessage)
@@ -1210,6 +1261,9 @@ final class BackupDashboardViewModel: ObservableObject {
         pairedReceiverName = defaults.string(forKey: receiverNameKey)
         isPaired = pairedReceiverName != nil
         pairingStatusMessage = pairedReceiverName.map { "Connected to \($0)." }
+        if isPaired {
+            startPingTimer()
+        }
     }
 
     private func describeBackupError(_ error: Error) -> String {

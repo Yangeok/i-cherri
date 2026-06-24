@@ -24,6 +24,7 @@ struct DashboardView: View {
     @State private var scrubberActiveSectionID: String?
     @State private var scrubberActiveSectionTitle: String?
     @State private var scrubberCommitTask: Task<Void, Never>?
+    @State private var deviceStatusRefresher = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationSplitView {
@@ -43,6 +44,11 @@ struct DashboardView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .receiverDataDidChange)) { _ in
             Task { await viewModel.load() }
+        }
+        .onReceive(deviceStatusRefresher) { _ in
+            Task {
+                await viewModel.refreshDeviceStatus()
+            }
         }
         .quickLookPreview($previewURL)
         .alert(
@@ -564,13 +570,19 @@ struct DashboardView: View {
     // MARK: - Helpers
 
     private func deviceRow(_ device: PairedDeviceRecord) -> some View {
-        HStack {
+        let isOnline = Date().timeIntervalSince(device.lastSeenAt) < 30.0
+        return HStack {
             Image(systemName: "iphone")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isOnline ? .green : .secondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text(device.deviceName)
-                    .font(.subheadline)
-                Text(device.pairingStatus.capitalized)
+                HStack(spacing: 6) {
+                    Text(device.deviceName)
+                        .font(.subheadline)
+                    Circle()
+                        .fill(isOnline ? Color.green : Color.gray)
+                        .frame(width: 6, height: 6)
+                }
+                Text(isOnline ? "Online" : "Offline")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -852,6 +864,15 @@ final class DashboardViewModel: ObservableObject {
 
     var selectedDeviceInfo: PairedDeviceRecord? {
         pairedDevices.first { $0.deviceId == selectedDevice }
+    }
+
+    func refreshDeviceStatus() async {
+        do {
+            let devices = try await DatabaseManager.shared.fetchAllDevices()
+            self.pairedDevices = devices
+        } catch {
+            print("Failed to refresh device status: \(error)")
+        }
     }
 
     func load() async {
