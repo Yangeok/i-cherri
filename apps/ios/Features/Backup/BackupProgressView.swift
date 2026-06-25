@@ -142,6 +142,7 @@ public struct BackupProgressView: View {
     private var statsSection: some View {
         HStack(spacing: 12) {
             GlowBadge(label: "This Run", value: "\(viewModel.sessionUploadedCount)", color: .green)
+            GlowBadge(label: "Duration", value: viewModel.formattedDuration, color: .blue)
             GlowBadge(label: "Failed", value: "\(viewModel.failedCount)", color: .red)
         }
     }
@@ -279,6 +280,37 @@ public final class BackupProgressViewModel: ObservableObject {
     @Published public var phase: BackupProgressPhase = .scanning
     @Published var autoBackupStatus: AutoBackupStatusViewModel?
 
+    @Published public var sessionTotalCount: Int = 0
+    @Published public var elapsedTime: TimeInterval = 0
+    private var durationTimer: Task<Void, Never>?
+
+    public var formattedDuration: String {
+        let hours = Int(elapsedTime) / 3600
+        let minutes = (Int(elapsedTime) % 3600) / 60
+        let seconds = Int(elapsedTime) % 60
+        if hours > 0 {
+            return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%02d:%02d", minutes, seconds)
+        }
+    }
+
+    public func startDurationTimer() {
+        durationTimer?.cancel()
+        let startTime = Date()
+        durationTimer = Task { @MainActor in
+            while !Task.isCancelled {
+                elapsedTime = Date().timeIntervalSince(startTime)
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            }
+        }
+    }
+
+    public func stopDurationTimer() {
+        durationTimer?.cancel()
+        durationTimer = nil
+    }
+
     public var onRetryFailedUploads: (([String]) -> Void)?
     public var onRetryUpload: ((String) -> Void)?
 
@@ -296,7 +328,7 @@ public final class BackupProgressViewModel: ObservableObject {
     }
 
     public func setTotalCount(_ count: Int) {
-        totalCount = count
+        sessionTotalCount = count
         progress = count > 0 ? Double(completedCount) / Double(count) : 0
         if completedCount < count {
             isComplete = false
@@ -314,7 +346,11 @@ public final class BackupProgressViewModel: ObservableObject {
         switch phase {
         case .complete, .failed:
             isComplete = true
-        case .scanning, .checking, .uploading:
+            stopDurationTimer()
+        case .scanning:
+            isComplete = false
+            startDurationTimer()
+        case .checking, .uploading:
             isComplete = false
         }
     }
@@ -344,6 +380,9 @@ public final class BackupProgressViewModel: ObservableObject {
         }
         if let phase {
             self.phase = phase
+            if phase == .complete || phase == .failed {
+                stopDurationTimer()
+            }
         }
         if let sentBytes {
             self.sentBytes = sentBytes
@@ -361,12 +400,13 @@ public final class BackupProgressViewModel: ObservableObject {
             failedUploads = failedUploadItems
         }
 
-        progress = totalCount > 0 ? Double(completed) / Double(totalCount) : 0
+        progress = sessionTotalCount > 0 ? Double(completed) / Double(sessionTotalCount) : 0
         formattedSpeed = formatSpeed(bytesPerSecond)
         formattedTransfer = formatTransfer(sentBytes: self.sentBytes, totalBytes: self.totalBytes)
-        if totalCount > 0, completed >= totalCount {
+        if sessionTotalCount > 0, completed >= sessionTotalCount {
             isComplete = true
-        } else if phase != .failed {
+            stopDurationTimer()
+        } else if phase != .failed && phase != .complete {
             isComplete = false
         }
     }
@@ -376,6 +416,7 @@ public final class BackupProgressViewModel: ObservableObject {
         isComplete = true
         formattedSpeed = "—"
         phase = .failed
+        stopDurationTimer()
     }
 
     func setAutoBackupStatus(_ status: AutoBackupStatusViewModel?) {

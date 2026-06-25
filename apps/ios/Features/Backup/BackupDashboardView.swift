@@ -922,6 +922,8 @@ final class BackupDashboardViewModel: ObservableObject {
                 await MainActor.run {
                     progressViewModel.setTotalCount(scanPlan.runAssetCount)
                     progressViewModel.setTotalBytes(scanPlan.runAssetBytes)
+                    progressViewModel.totalCount = scanPlan.libraryAssetCount
+                    progressViewModel.overallBackedUpCount = max(scanPlan.libraryAssetCount - scanPlan.runAssetCount, 0)
                 }
 
                 try Task.checkCancellation()
@@ -986,6 +988,8 @@ final class BackupDashboardViewModel: ObservableObject {
 
                 let duplicateAssetIDs = Set(batchResponse.alreadyBackedUp + batchResponse.duplicates)
                 let reconcileState = BackupRunReconcileState(
+                    libraryAssetCount: scanPlan.libraryAssetCount,
+                    runAssetCount: scanPlan.runAssetCount,
                     duplicateCount: duplicateAssetIDs.count,
                     failedAssetIDs: Set(batchResponse.unsupported)
                 )
@@ -1594,12 +1598,16 @@ private actor BackupRunReconcileState {
         let overallBackedUpCount: Int
     }
 
+    private let libraryAssetCount: Int
+    private let runAssetCount: Int
     private let duplicateCount: Int
     private var uploadedAssetIDs: Set<String> = []
     private var failedAssetIDs: Set<String>
     private var receiverCompletedAssetCount: Int?
 
-    init(duplicateCount: Int, failedAssetIDs: Set<String>) {
+    init(libraryAssetCount: Int, runAssetCount: Int, duplicateCount: Int, failedAssetIDs: Set<String>) {
+        self.libraryAssetCount = libraryAssetCount
+        self.runAssetCount = runAssetCount
         self.duplicateCount = duplicateCount
         self.failedAssetIDs = failedAssetIDs
     }
@@ -1627,7 +1635,8 @@ private actor BackupRunReconcileState {
         let success = uploadedAssetIDs.count
         let failed = failedAssetIDs.count
         let receiverBackedUpCount = receiverCompletedAssetCount ?? 0
-        let overallBackedUpCount = max(success + duplicateCount, receiverBackedUpCount)
+        let alreadyBackedUpCount = max(libraryAssetCount - runAssetCount, 0)
+        let overallBackedUpCount = max(alreadyBackedUpCount + success + duplicateCount, receiverBackedUpCount)
         return Counts(
             completed: success + duplicateCount + failed,
             success: success,
