@@ -490,6 +490,9 @@ final class BackupDashboardViewModel: ObservableObject {
     func startPingTimer() {
         pingTimer?.cancel()
         pingTimer = Task {
+            // Send an initial ping immediately on timer start
+            await sendPingToReceiver()
+            
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(nanoseconds: 15_000_000_000) // 15 seconds
@@ -573,7 +576,6 @@ final class BackupDashboardViewModel: ObservableObject {
         // Observe browser changes
         Task { @MainActor in
             for await receivers in bonjourBrowser.$discoveredReceivers.values {
-                let wasOffline = !self.pairedReceiverIsOnline
                 self.discoveredReceivers = receivers
                 self.localNetworkStatus = receivers.isEmpty ? self.localNetworkStatus : .granted
                 
@@ -589,21 +591,38 @@ final class BackupDashboardViewModel: ObservableObject {
                                 UserDefaults.standard.set(newBaseURL.absoluteString, forKey: self.receiverURLKey)
                                 print("[Auto-Healing] Automatically updated receiver URL to \(newBaseURL.absoluteString)")
                             }
+                            // Start pinging immediately once the endpoint is resolved to the new URL
+                            self.startPingTimer()
                         } catch {
                             print("[Auto-Healing] Failed to auto-resolve endpoint: \(error)")
                         }
                     }
                 } else if let pairedReceiverID = UserDefaults.standard.string(forKey: self.receiverIDKey) {
                     self.pairedReceiver = receivers.first(where: { $0.id == pairedReceiverID })
+                    if let endpoint = self.pairedReceiver?.endpoint {
+                        Task {
+                            do {
+                                let newBaseURL = try await Self.resolveEndpoint(endpoint)
+                                UserDefaults.standard.set(newBaseURL.absoluteString, forKey: self.receiverURLKey)
+                                self.startPingTimer()
+                            } catch {
+                                print("[Auto-Healing] Failed to resolve matched receiver by ID: \(error)")
+                            }
+                        }
+                    }
                 } else if let pairedReceiverName {
                     self.pairedReceiver = receivers.first(where: { $0.name == pairedReceiverName })
-                }
-                
-                if wasOffline && self.pairedReceiverIsOnline {
-                    Task {
-                        await self.sendPingToReceiver()
+                    if let endpoint = self.pairedReceiver?.endpoint {
+                        Task {
+                            do {
+                                let newBaseURL = try await Self.resolveEndpoint(endpoint)
+                                UserDefaults.standard.set(newBaseURL.absoluteString, forKey: self.receiverURLKey)
+                                self.startPingTimer()
+                            } catch {
+                                print("[Auto-Healing] Failed to resolve matched receiver by name: \(error)")
+                            }
+                        }
                     }
-                    self.startPingTimer()
                 }
                 
                 await self.reevaluateAutomaticBackup()
