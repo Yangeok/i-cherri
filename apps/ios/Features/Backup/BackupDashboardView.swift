@@ -532,8 +532,17 @@ final class BackupDashboardViewModel: ObservableObject {
             encoder.dateEncodingStrategy = .iso8601
             request.httpBody = try encoder.encode(pingReq)
             
-            _ = try await URLSession.shared.data(for: request)
-            print("[Ping] Successfully sent heartbeat ping to receiver")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse {
+                if http.statusCode >= 400 {
+                    let errMsg = String(data: data, encoding: .utf8) ?? "No response body"
+                    print("[Ping] Failed to send heartbeat. HTTP \(http.statusCode): \(errMsg)")
+                } else {
+                    print("[Ping] Successfully sent heartbeat ping to receiver")
+                }
+            } else {
+                print("[Ping] Successfully sent heartbeat ping to receiver")
+            }
         } catch {
             print("[Ping] Failed to send heartbeat: \(error)")
         }

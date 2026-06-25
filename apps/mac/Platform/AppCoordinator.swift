@@ -440,8 +440,10 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
                 let response = ["status": "ok"]
                 return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
             }
+            print("[ReceiverRouteService] Ping rejected: device \(body.deviceID) not found in paired database")
             return .error(code: "device_not_found", message: "Device not paired", status: 404)
         } catch {
+            print("[ReceiverRouteService] Ping handler error: \(error)")
             return .error(code: "ping_error", message: error.localizedDescription, status: 500)
         }
     }
