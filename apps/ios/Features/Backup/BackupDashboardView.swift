@@ -512,9 +512,10 @@ final class BackupDashboardViewModel: ObservableObject {
     private func sendPingToReceiver() async {
         guard isPaired, pairedReceiverIsOnline,
               let receiverURLString = UserDefaults.standard.string(forKey: receiverURLKey),
-              let receiverURL = URL(string: receiverURLString),
-              let deviceID = UserDefaults.standard.string(forKey: receiverIDKey)
+              let receiverURL = URL(string: receiverURLString)
         else { return }
+
+        let deviceID = persistentDeviceID()
 
         do {
             struct DevicePingRequest: Codable {
