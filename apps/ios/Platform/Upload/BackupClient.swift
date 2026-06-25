@@ -49,7 +49,9 @@ public actor BackupClient {
 
     // Fetches receiver info (no auth required).
     public func fetchReceiverInfo() async throws -> ReceiverInfo {
-        let url = receiverBaseURL.appendingPathComponent("/receiver/info")
+        guard let url = URL(string: "\(receiverBaseURL.absoluteString)/receiver/info") else {
+            throw URLError(.badURL)
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         let (data, _) = try await session.data(for: req)
@@ -73,7 +75,9 @@ public actor BackupClient {
 
     // Queries upload session status for resumption.
     public func uploadStatus(uploadID: String) async throws -> UploadStatusResponse {
-        let url = receiverBaseURL.appendingPathComponent("/uploads/\(uploadID)/status")
+        guard let url = URL(string: "\(receiverBaseURL.absoluteString)/uploads/\(uploadID)/status") else {
+            throw URLError(.badURL)
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         attachAuthHeaders(&req)
@@ -105,7 +109,10 @@ public actor BackupClient {
     // MARK: - Helpers
 
     private func post<Req: Encodable, Res: Decodable>(path: String, body: Req) async throws -> Res {
-        let url = receiverBaseURL.appendingPathComponent(path)
+        let sanitizedPath = path.hasPrefix("/") ? path : "/\(path)"
+        guard let url = URL(string: "\(receiverBaseURL.absoluteString)\(sanitizedPath)") else {
+            throw URLError(.badURL)
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

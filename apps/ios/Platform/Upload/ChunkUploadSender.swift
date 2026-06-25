@@ -97,7 +97,9 @@ public actor ChunkUploadSender {
     // MARK: - Private
 
     private func uploadChunk(_ chunk: Data, uploadID: String, index: Int, offset: Int64, total: Int64) async throws {
-        let url = receiverBaseURL.appendingPathComponent("/uploads/\(uploadID)/chunks/\(index)")
+        guard let url = URL(string: "\(receiverBaseURL.absoluteString)/uploads/\(uploadID)/chunks/\(index)") else {
+            throw URLError(.badURL)
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "PUT"
         req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")

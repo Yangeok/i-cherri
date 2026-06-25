@@ -703,7 +703,9 @@ final class BackupDashboardViewModel: ObservableObject {
             let device = currentDeviceInfo()
             let pairRequest = PairingStartRequest(device: device)
             
-            let url = baseURL.appendingPathComponent("/pair")
+            guard let url = URL(string: "\(baseURL.absoluteString)/pair") else {
+                throw URLError(.badURL)
+            }
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.timeoutInterval = 5
