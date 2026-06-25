@@ -576,7 +576,24 @@ final class BackupDashboardViewModel: ObservableObject {
                 let wasOffline = !self.pairedReceiverIsOnline
                 self.discoveredReceivers = receivers
                 self.localNetworkStatus = receivers.isEmpty ? self.localNetworkStatus : .granted
-                if let pairedReceiverID = UserDefaults.standard.string(forKey: self.receiverIDKey) {
+                
+                // Auto-Healing: Automatically detect and update the stored URL if the Mac's IP/port has changed
+                if let pairedName = self.pairedReceiverName,
+                   let matchingReceiver = receivers.first(where: { $0.name == pairedName }) {
+                    self.pairedReceiver = matchingReceiver
+                    Task {
+                        do {
+                            let newBaseURL = try await Self.resolveEndpoint(matchingReceiver.endpoint)
+                            let currentStoredURL = UserDefaults.standard.string(forKey: self.receiverURLKey)
+                            if newBaseURL.absoluteString != currentStoredURL {
+                                UserDefaults.standard.set(newBaseURL.absoluteString, forKey: self.receiverURLKey)
+                                print("[Auto-Healing] Automatically updated receiver URL to \(newBaseURL.absoluteString)")
+                            }
+                        } catch {
+                            print("[Auto-Healing] Failed to auto-resolve endpoint: \(error)")
+                        }
+                    }
+                } else if let pairedReceiverID = UserDefaults.standard.string(forKey: self.receiverIDKey) {
                     self.pairedReceiver = receivers.first(where: { $0.id == pairedReceiverID })
                 } else if let pairedReceiverName {
                     self.pairedReceiver = receivers.first(where: { $0.name == pairedReceiverName })
