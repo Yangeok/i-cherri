@@ -78,7 +78,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
         let totalCount = scanner.totalAssetCount()
 
         if !state.fullScanCompleted || state.cachedAssetsByID.isEmpty || state.requiresReconcile || state.incrementalRunsSinceReconcile >= reconcileInterval {
-            let assets = await scanner.scanAllAssets(deviceID: deviceID)
+            let assets = await scanner.scanAllAssets(deviceID: deviceID, cachedAssets: state.cachedAssetsByID)
             state.cachedAssetsByID = Dictionary(uniqueKeysWithValues: assets.map { ($0.assetLocalID, $0) })
             state.pendingAssetIDs.removeAll()
             state.requiresReconcile = false
@@ -109,7 +109,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
             )
         }
 
-        let assets = await scanner.scanAssets(localIdentifiers: candidateIDs, deviceID: deviceID)
+        let assets = await scanner.scanAssets(localIdentifiers: candidateIDs, deviceID: deviceID, cachedAssets: state.cachedAssetsByID)
         let resolvedIDs = Set(assets.map(\.assetLocalID))
 
         for asset in assets {

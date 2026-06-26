@@ -29,7 +29,7 @@ public final class PhotoLibraryScanner {
     }
 
     // Scans all media assets and returns AssetMetadata array. Targets >1000 assets/sec.
-    public func scanAllAssets(deviceID: String) async -> [AssetMetadata] {
+    public func scanAllAssets(deviceID: String, cachedAssets: [String: AssetMetadata] = [:]) async -> [AssetMetadata] {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
@@ -47,7 +47,8 @@ public final class PhotoLibraryScanner {
             semaphore.wait()
             autoreleasepool {
                 let asset = result.object(at: index)
-                if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) {
+                let cached = cachedAssets[asset.localIdentifier]
+                if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID, cachedAsset: cached) {
                     lock.lock()
                     assets[index] = metadata
                     lock.unlock()
@@ -59,7 +60,7 @@ public final class PhotoLibraryScanner {
         return assets.compactMap { $0 }
     }
 
-    public func scanAssets(localIdentifiers: [String], deviceID: String) async -> [AssetMetadata] {
+    public func scanAssets(localIdentifiers: [String], deviceID: String, cachedAssets: [String: AssetMetadata] = [:]) async -> [AssetMetadata] {
         guard !localIdentifiers.isEmpty else { return [] }
 
         let result = PHAsset.fetchAssets(withLocalIdentifiers: localIdentifiers, options: nil)
@@ -74,7 +75,8 @@ public final class PhotoLibraryScanner {
             semaphore.wait()
             autoreleasepool {
                 let asset = result.object(at: index)
-                if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) {
+                let cached = cachedAssets[asset.localIdentifier]
+                if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID, cachedAsset: cached) {
                     lock.lock()
                     assets[index] = metadata
                     lock.unlock()
@@ -150,54 +152,41 @@ public final class PhotoLibraryScanner {
 
     // MARK: - Private
 
-    private static func extractMetadata(from asset: PHAsset, deviceID: String) -> AssetMetadata? {
-        let mediaType = resolveMediaType(asset)
+    private static func extractMetadata(from asset: PHAsset, deviceID: String, cachedAsset: AssetMetadata?) -> AssetMetadata? {
         let creation = asset.creationDate ?? Date()
         let modification = asset.modificationDate ?? creation
 
-        // Optimized: Try KVC lookup first to avoid expensive PHAssetResource IPC roundtrips.
-        // We use responds(to:) to safely check if the undocumented selector exists, preventing NSUndefinedKeyException crash.
-        var filename: String? = nil
-        var byteSize: Int64 = 0
-
-        let filenameSel = NSSelectorFromString("filename")
-        if asset.responds(to: filenameSel) {
-            filename = asset.value(forKey: "filename") as? String
+        // If we have a valid cached asset with matching modification date, reuse it directly!
+        if let cached = cachedAsset, cached.modificationDate == modification {
+            return cached
         }
 
-        let fileSizeSel = NSSelectorFromString("fileSize")
-        if asset.responds(to: fileSizeSel) {
-            if let sizeVal = asset.value(forKey: "fileSize") as? Int64 {
-                byteSize = sizeVal
-            } else if let sizeVal = asset.value(forKey: "fileSize") as? NSNumber {
-                byteSize = sizeVal.int64Value
-            }
-        }
+        let mediaType = resolveMediaType(asset)
 
-        // Fallback: If metadata is incomplete, query PHAssetResource (triggers assetsd IPC)
-        if filename == nil || byteSize <= 0 {
-            let resources = PHAssetResource.assetResources(for: asset)
-            let preferred = preferredResource(from: resources, mediaType: asset.mediaType) ?? resources.first
-            
-            if filename == nil {
-                filename = preferred?.originalFilename
-            }
-            if byteSize <= 0, let resource = preferred {
-                if let size = resource.value(forKey: "fileSize") as? Int64 {
-                    byteSize = size
-                } else if let size = resource.value(forKey: "fileSize") as? NSNumber {
-                    byteSize = size.int64Value
-                }
-            }
-        }
+        // Single-pass: fetch asset resources only once to avoid I/O bottlenecks
+        let resources = PHAssetResource.assetResources(for: asset)
+        let preferred = preferredResource(from: resources, mediaType: asset.mediaType) ?? resources.first
 
-        var rawFilename = filename ?? "\(asset.localIdentifier).jpg"
+        // Extract filename
+        var rawFilename = (asset.value(forKey: "filename") as? String)
+            ?? preferred?.originalFilename
+            ?? "\(asset.localIdentifier).jpg"
 
         // Strip any path components if the framework returned a full file URL path (common in simulators)
         if rawFilename.contains("/") {
             rawFilename = (rawFilename as NSString).lastPathComponent
         }
         let finalFilename = rawFilename
+
+        // Extract byte size
+        var byteSize: Int64 = 0
+        if let resource = preferred {
+            if let size = resource.value(forKey: "fileSize") as? Int64 {
+                byteSize = size
+            } else if let size = resource.value(forKey: "fileSize") as? NSNumber {
+                byteSize = size.int64Value
+            }
+        }
 
         let fingerprint = FingerprintBuilder.build(
             creationDate: creation,
