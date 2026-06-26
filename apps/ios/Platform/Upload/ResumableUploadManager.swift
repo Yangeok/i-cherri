@@ -37,6 +37,11 @@ public actor ResumableUploadManager {
         metadata: AssetMetadata,
         backupRunContext: AutoBackupRunContext? = nil
     ) async throws -> UploadResult {
+        defer {
+            Task {
+                await PrehashCache.shared.remove(for: assetLocalID)
+            }
+        }
         let preparedUpload = try await prepareUpload(assetLocalID: assetLocalID, metadata: metadata)
         switch preparedUpload {
         case .image(let data, let normalizedMetadata, let contentHash):
@@ -58,6 +63,19 @@ public actor ResumableUploadManager {
     }
 
     private func prepareUpload(assetLocalID: String, metadata: AssetMetadata) async throws -> PreparedUpload {
+        // Try to retrieve pre-hashed cache first
+        if let cachedHash = await PrehashCache.shared.getHash(for: assetLocalID) {
+            if metadata.mediaType == .video {
+                let (_, totalSize) = try await scanner.openInputStreamWithSize(for: assetLocalID)
+                let normalizedMetadata = normalized(from: metadata, byteSize: totalSize)
+                return .video(metadata: normalizedMetadata, contentHash: cachedHash)
+            } else if let cachedData = await PrehashCache.shared.getData(for: assetLocalID) {
+                let normalizedMetadata = normalized(from: metadata, byteSize: Int64(cachedData.count))
+                return .image(data: cachedData, metadata: normalizedMetadata, contentHash: cachedHash)
+            }
+        }
+
+        // Fallback: If not cached, compute hash synchronously
         if metadata.mediaType == .video {
             let (_, totalSize) = try await scanner.openInputStreamWithSize(for: assetLocalID)
             let contentHash = try await hashStream(assetLocalID: assetLocalID)
@@ -330,4 +348,38 @@ public actor ResumableUploadManager {
 public enum ResumableUploadError: Error, Equatable, Sendable {
     case commitFailed(String)
     case sessionExpired
+}
+
+public actor PrehashCache {
+    public static let shared = PrehashCache()
+    private init() {}
+    
+    private var hashes: [String: String] = [:]
+    private var dataCache: [String: Data] = [:]
+    
+    public func setHash(_ hash: String, for assetID: String) {
+        hashes[assetID] = hash
+    }
+    
+    public func getHash(for assetID: String) -> String? {
+        hashes[assetID]
+    }
+    
+    public func setData(_ data: Data, for assetID: String) {
+        dataCache[assetID] = data
+    }
+    
+    public func getData(for assetID: String) -> Data? {
+        dataCache[assetID]
+    }
+    
+    public func remove(for assetID: String) {
+        hashes.removeValue(forKey: assetID)
+        dataCache.removeValue(forKey: assetID)
+    }
+    
+    public func isFull() -> Bool {
+        // Limit to 2 concurrent image datas in memory to prevent OOM
+        return dataCache.count >= 2
+    }
 }

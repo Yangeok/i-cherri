@@ -4,6 +4,7 @@ import ICherriProtocol
 import ICherriDesignSystem
 import Inject
 import Factory
+import CryptoKit
 
 
 // Onboarding + pairing + backup trigger dashboard for iOS.
@@ -1355,6 +1356,53 @@ final class BackupDashboardViewModel: ObservableObject {
         onOutcome: @escaping @Sendable (UploadTaskOutcome) async -> Void
     ) async throws {
         guard !pendingAssets.isEmpty else { return }
+
+        // Start background pre-hashing pipeline
+        let scanner = PhotoLibraryScanner()
+        let prehashTask = Task.detached(priority: .utility) {
+            for metadata in pendingAssets {
+                if Task.isCancelled { break }
+                
+                // Keep memory usage low: wait if cache is full
+                while await PrehashCache.shared.isFull() {
+                    if Task.isCancelled { break }
+                    try? await Task.sleep(nanoseconds: 200_000_000) // 0.2s
+                }
+                
+                do {
+                    if metadata.mediaType == .video {
+                        // Stream hashing for videos to avoid memory loading
+                        let (stream, _) = try await scanner.openInputStreamWithSize(for: metadata.assetLocalID)
+                        stream.open()
+                        var hasher = SHA256()
+                        let bufSize = 65536
+                        let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
+                        while stream.hasBytesAvailable {
+                            if Task.isCancelled { break }
+                            let n = stream.read(buf, maxLength: bufSize)
+                            guard n > 0 else { break }
+                            hasher.update(data: Data(bytes: buf, count: n))
+                        }
+                        buf.deallocate()
+                        stream.close()
+                        
+                        if !Task.isCancelled {
+                            let contentHash = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+                            await PrehashCache.shared.setHash(contentHash, for: metadata.assetLocalID)
+                        }
+                    } else {
+                        let data = try await scanner.fetchData(for: metadata.assetLocalID)
+                        if Task.isCancelled { break }
+                        let contentHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+                        await PrehashCache.shared.setHash(contentHash, for: metadata.assetLocalID)
+                        await PrehashCache.shared.setData(data, for: metadata.assetLocalID)
+                    }
+                } catch {
+                    print("[Prehash] Failed to prehash \(metadata.originalFilename): \(error)")
+                }
+            }
+        }
+        defer { prehashTask.cancel() }
 
         try await withThrowingTaskGroup(of: UploadTaskOutcome.self) { group in
             var nextIndex = 0

@@ -92,7 +92,7 @@ public struct UploadRequirement: Codable, Sendable {
     public let uploadMode: String
     public let preferredChunkSize: Int
 
-    public static let defaultChunkSize = 5 * 1024 * 1024  // 5 MB
+    public static let defaultChunkSize = 20 * 1024 * 1024  // 20 MB
 
     public init(assetLocalID: String, uploadReason: UploadReason, preferredChunkSize: Int = defaultChunkSize) {
         self.assetLocalID = assetLocalID
