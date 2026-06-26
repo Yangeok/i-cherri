@@ -40,9 +40,11 @@ public final class PhotoLibraryScanner {
 
         var assets = [AssetMetadata?](repeating: nil, count: count)
         let lock = NSLock()
+        let semaphore = DispatchSemaphore(value: 4) // Limit to 4 concurrent metadata extractions to prevent assetsd IPC bottleneck
 
-        // Run metadata extraction concurrently across available CPU cores
+        // Run metadata extraction concurrently across available CPU cores with semaphore limiting
         DispatchQueue.concurrentPerform(iterations: count) { index in
+            semaphore.wait()
             autoreleasepool {
                 let asset = result.object(at: index)
                 if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) {
@@ -51,6 +53,7 @@ public final class PhotoLibraryScanner {
                     lock.unlock()
                 }
             }
+            semaphore.signal()
         }
 
         return assets.compactMap { $0 }
@@ -65,8 +68,10 @@ public final class PhotoLibraryScanner {
 
         var assets = [AssetMetadata?](repeating: nil, count: count)
         let lock = NSLock()
+        let semaphore = DispatchSemaphore(value: 4) // Limit to 4 concurrent metadata extractions
 
         DispatchQueue.concurrentPerform(iterations: count) { index in
+            semaphore.wait()
             autoreleasepool {
                 let asset = result.object(at: index)
                 if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) {
@@ -75,6 +80,7 @@ public final class PhotoLibraryScanner {
                     lock.unlock()
                 }
             }
+            semaphore.signal()
         }
 
         return assets.compactMap { $0 }.sorted { lhs, rhs in
