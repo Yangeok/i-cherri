@@ -331,7 +331,10 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
     }
 
     func handle(_ request: HTTPRequest) async -> HTTPResponse {
-        let path = request.path
+        var path = request.path
+        while path.contains("//") {
+            path = path.replacingOccurrences(of: "//", with: "/")
+        }
         let method = request.method
 
         print("[ReceiverRouteService] HTTP Request: \(method) \(path)")

@@ -10,6 +10,14 @@ public actor BackupClient {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
+    private var cleanedBaseURLString: String {
+        let str = receiverBaseURL.absoluteString
+        if str.hasSuffix("/") {
+            return String(str.dropLast())
+        }
+        return str
+    }
+
     public init(receiverBaseURL: URL, device: DeviceInfo, trustToken: String? = nil) {
         self.receiverBaseURL = receiverBaseURL
         self.device = device
@@ -49,7 +57,7 @@ public actor BackupClient {
 
     // Fetches receiver info (no auth required).
     public func fetchReceiverInfo() async throws -> ReceiverInfo {
-        guard let url = URL(string: "\(receiverBaseURL.absoluteString)/receiver/info") else {
+        guard let url = URL(string: "\(cleanedBaseURLString)/receiver/info") else {
             throw URLError(.badURL)
         }
         var req = URLRequest(url: url)
@@ -75,7 +83,7 @@ public actor BackupClient {
 
     // Queries upload session status for resumption.
     public func uploadStatus(uploadID: String) async throws -> UploadStatusResponse {
-        guard let url = URL(string: "\(receiverBaseURL.absoluteString)/uploads/\(uploadID)/status") else {
+        guard let url = URL(string: "\(cleanedBaseURLString)/uploads/\(uploadID)/status") else {
             throw URLError(.badURL)
         }
         var req = URLRequest(url: url)
@@ -110,7 +118,7 @@ public actor BackupClient {
 
     private func post<Req: Encodable, Res: Decodable>(path: String, body: Req) async throws -> Res {
         let sanitizedPath = path.hasPrefix("/") ? path : "/\(path)"
-        guard let url = URL(string: "\(receiverBaseURL.absoluteString)\(sanitizedPath)") else {
+        guard let url = URL(string: "\(cleanedBaseURLString)\(sanitizedPath)") else {
             throw URLError(.badURL)
         }
         var req = URLRequest(url: url)
