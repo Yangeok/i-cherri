@@ -155,14 +155,23 @@ public final class PhotoLibraryScanner {
         let creation = asset.creationDate ?? Date()
         let modification = asset.modificationDate ?? creation
 
-        // Optimized: Try KVC lookup first to avoid expensive PHAssetResource IPC roundtrips
-        var filename = asset.value(forKey: "filename") as? String
+        // Optimized: Try KVC lookup first to avoid expensive PHAssetResource IPC roundtrips.
+        // We use responds(to:) to safely check if the undocumented selector exists, preventing NSUndefinedKeyException crash.
+        var filename: String? = nil
         var byteSize: Int64 = 0
 
-        if let sizeVal = asset.value(forKey: "fileSize") as? Int64 {
-            byteSize = sizeVal
-        } else if let sizeVal = asset.value(forKey: "fileSize") as? NSNumber {
-            byteSize = sizeVal.int64Value
+        let filenameSel = NSSelectorFromString("filename")
+        if asset.responds(to: filenameSel) {
+            filename = asset.value(forKey: "filename") as? String
+        }
+
+        let fileSizeSel = NSSelectorFromString("fileSize")
+        if asset.responds(to: fileSizeSel) {
+            if let sizeVal = asset.value(forKey: "fileSize") as? Int64 {
+                byteSize = sizeVal
+            } else if let sizeVal = asset.value(forKey: "fileSize") as? NSNumber {
+                byteSize = sizeVal.int64Value
+            }
         }
 
         // Fallback: If metadata is incomplete, query PHAssetResource (triggers assetsd IPC)
