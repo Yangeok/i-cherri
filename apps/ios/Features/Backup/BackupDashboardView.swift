@@ -635,7 +635,9 @@ final class BackupDashboardViewModel: ObservableObject {
                     }
                 }
                 
-                await self.reevaluateAutomaticBackup()
+                Task {
+                    await self.reevaluateAutomaticBackup()
+                }
             }
         }
         Task { @MainActor in
@@ -658,10 +660,14 @@ final class BackupDashboardViewModel: ObservableObject {
                         self.localNetworkStatus = .unknown
                     }
                 }
-                await self.reevaluateAutomaticBackup()
+                Task {
+                    await self.reevaluateAutomaticBackup()
+                }
             }
         }
-        await reevaluateAutomaticBackup()
+        Task {
+            await reevaluateAutomaticBackup()
+        }
     }
 
     func requestPhotoPermission() async {
@@ -677,7 +683,9 @@ final class BackupDashboardViewModel: ObservableObject {
         pairingStatusMessage = isPaired
             ? pairedReceiverName.map { "Connected to \($0)." }
             : "Refreshing available receivers..."
-        await reevaluateAutomaticBackup()
+        Task {
+            await reevaluateAutomaticBackup()
+        }
     }
 
     func setAutoBackupEnabled(_ isEnabled: Bool) async {
@@ -693,7 +701,9 @@ final class BackupDashboardViewModel: ObservableObject {
         )
         await autoBackupStore.savePolicy(updatedPolicy)
         autoBackupScheduler.scheduleNextEvaluation()
-        await reevaluateAutomaticBackup()
+        Task {
+            await reevaluateAutomaticBackup()
+        }
     }
 
     func pair(with receiver: DiscoveredReceiver) async {
@@ -751,7 +761,9 @@ final class BackupDashboardViewModel: ObservableObject {
                     )
                 )
                 self.startPingTimer()
-                await reevaluateAutomaticBackup()
+                Task {
+                    await reevaluateAutomaticBackup()
+                }
                 print("[Pair] Successfully paired with \(receiver.name), token: \(confirmResponse.trustToken.prefix(8))...")
             } else {
                 print("[Pair] Server returned error: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
