@@ -1465,24 +1465,38 @@ final class BackupDashboardViewModel: ObservableObject {
         discoveredReceivers: [DiscoveredReceiver],
         storedReceiverURLString: String?
     ) async throws -> URL {
-        if let pairedReceiver {
-            return try await resolveEndpoint(pairedReceiver.endpoint)
-        }
-
-        if let pairedReceiverID,
-           let discoveredReceiver = discoveredReceivers.first(where: { $0.id == pairedReceiverID }) {
-            return try await resolveEndpoint(discoveredReceiver.endpoint)
-        }
-
-        if let pairedReceiverName,
-           let discoveredReceiver = discoveredReceivers.first(where: { $0.name == pairedReceiverName }) {
-            return try await resolveEndpoint(discoveredReceiver.endpoint)
-        }
-
+        // 1. First priority: Use the stored receiver URL (which is kept updated by Auto-Healing)
         if let storedReceiverURLString,
            let receiverURL = URL(string: storedReceiverURLString),
            !isLinkLocalReceiverURL(receiverURL) {
             return receiverURL
+        }
+
+        // 2. Second priority fallback: Dynamically resolve Bonjour endpoints if stored URL is unavailable or invalid
+        if let pairedReceiver {
+            do {
+                return try await resolveEndpoint(pairedReceiver.endpoint)
+            } catch {
+                print("[resolveReceiverURL] Failed to resolve pairedReceiver endpoint: \(error)")
+            }
+        }
+
+        if let pairedReceiverID,
+           let discoveredReceiver = discoveredReceivers.first(where: { $0.id == pairedReceiverID }) {
+            do {
+                return try await resolveEndpoint(discoveredReceiver.endpoint)
+            } catch {
+                print("[resolveReceiverURL] Failed to resolve pairedReceiverID endpoint: \(error)")
+            }
+        }
+
+        if let pairedReceiverName,
+           let discoveredReceiver = discoveredReceivers.first(where: { $0.name == pairedReceiverName }) {
+            do {
+                return try await resolveEndpoint(discoveredReceiver.endpoint)
+            } catch {
+                print("[resolveReceiverURL] Failed to resolve pairedReceiverName endpoint: \(error)")
+            }
         }
 
         throw URLError(.cannotFindHost)
