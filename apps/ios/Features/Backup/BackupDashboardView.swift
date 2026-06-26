@@ -1556,7 +1556,7 @@ final class BackupDashboardViewModel: ObservableObject {
             connection.start(queue: .global(qos: .userInitiated))
 
             Task.detached(priority: .userInitiated) {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
                 finish(.failure(URLError(.timedOut)))
             }
         }
