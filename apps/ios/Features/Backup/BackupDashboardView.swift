@@ -3,6 +3,8 @@ import Network
 import ICherriProtocol
 import ICherriDesignSystem
 import Inject
+import Factory
+
 
 // Onboarding + pairing + backup trigger dashboard for iOS.
 public struct BackupDashboardView: View {
@@ -548,14 +550,14 @@ final class BackupDashboardViewModel: ObservableObject {
         }
     }
 
-    private let scanner = PhotoLibraryScanner()
-    private let scanIndexStore = PhotoLibraryScanIndexStore.shared
-    private let bonjourBrowser = BonjourBrowser()
-    private let keychainStore = KeychainStore()
-    private let autoBackupStore = AutoBackupJobStore.shared
-    private let autoBackupScheduler = AutoBackupScheduler.shared
-    private let autoBackupEngine = AutoBackupEngine.shared
-    private let autoBackupPolicyEvaluator = AutoBackupPolicyEvaluator()
+    @Injected(\.photoLibraryScanner) private var scanner
+    @Injected(\.photoLibraryScanIndexStore) private var scanIndexStore
+    @Injected(\.bonjourBrowser) private var bonjourBrowser
+    @Injected(\.keychainStore) private var keychainStore
+    @Injected(\.autoBackupStore) private var autoBackupStore
+    @Injected(\.autoBackupScheduler) private var autoBackupScheduler
+    @Injected(\.autoBackupEngine) private var autoBackupEngine
+    @Injected(\.autoBackupPolicyEvaluator) private var autoBackupPolicyEvaluator
     private let trustTokenKey = "iCherriTrustToken"
     private let receiverIDKey = "iCherriReceiverID"
     private let receiverURLKey = "iCherriReceiverURL"

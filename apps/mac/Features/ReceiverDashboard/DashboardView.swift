@@ -10,6 +10,7 @@ import Darwin
 import ICherriDesignSystem
 import ICherriProtocol
 import Inject
+import Factory
 
 // macOS receiver dashboard showing paired devices, active sessions, and backup history.
 struct DashboardView: View {
@@ -24,7 +25,6 @@ struct DashboardView: View {
     @State private var scrubberActiveSectionID: String?
     @State private var scrubberActiveSectionTitle: String?
     @State private var scrubberCommitTask: Task<Void, Never>?
-    @State private var deviceStatusRefresher = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationSplitView {
@@ -35,20 +35,15 @@ struct DashboardView: View {
         .navigationTitle("iCherri Receiver")
         .enableInjection()
         .toolbar { toolbarContent }
-        .task { await viewModel.load() }
+        .task {
+            await viewModel.load()
+            viewModel.startObservation()
+        }
+        .onDisappear {
+            viewModel.stopObservation()
+        }
         .onChange(of: viewModel.selectedDevice) { _, _ in
             Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .changeBackupFolder)) { _ in
-            viewModel.selectBackupFolder()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .receiverDataDidChange)) { _ in
-            Task { await viewModel.load() }
-        }
-        .onReceive(deviceStatusRefresher) { _ in
-            Task {
-                await viewModel.refreshDeviceStatus()
-            }
         }
         .quickLookPreview($previewURL)
         .alert(
@@ -836,6 +831,12 @@ final class DashboardViewModel: ObservableObject {
     private static let retainedPageRadius = 2
     private static let assetPageLoadThreshold = 30
 
+    @Injected(\.databaseManager) private var databaseManager
+    @Injected(\.appCoordinator) private var appCoordinator
+
+    private var observationTask: Task<Void, Never>?
+    private var timerTask: Task<Void, Never>?
+
     @Published var pairedDevices: [PairedDeviceRecord] = []
     @Published var activeUploads: [DashboardActiveUpload] = []
     @Published var allAssets: [BackupAssetRecord] = []
@@ -868,7 +869,7 @@ final class DashboardViewModel: ObservableObject {
 
     func refreshDeviceStatus() async {
         do {
-            let devices = try await DatabaseManager.shared.fetchAllDevices()
+            let devices = try await databaseManager.fetchAllDevices()
             self.pairedDevices = devices
         } catch {
             print("Failed to refresh device status: \(error)")
@@ -878,12 +879,12 @@ final class DashboardViewModel: ObservableObject {
     func load() async {
         do {
             let previousSelection = selectedDevice
-            self.backupFolderPath = AppCoordinator.shared.backupFolder.path
+            self.backupFolderPath = appCoordinator.backupFolder.path
             
-            let devices = try await DatabaseManager.shared.fetchAllDevices()
-            let assets = try await DatabaseManager.shared.fetchAllAssets()
-            let sessions = try await DatabaseManager.shared.fetchAllSessions()
-            let coverageSummaries = try await DatabaseManager.shared.fetchLatestBackupCoverageSummaries()
+            let devices = try await databaseManager.fetchAllDevices()
+            let assets = try await databaseManager.fetchAllAssets()
+            let sessions = try await databaseManager.fetchAllSessions()
+            let coverageSummaries = try await databaseManager.fetchLatestBackupCoverageSummaries()
             
             self.pairedDevices = devices
             self.allAssets = assets
@@ -1007,7 +1008,7 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func selectBackupFolder() {
-        AppCoordinator.shared.selectBackupFolder()
+        appCoordinator.selectBackupFolder()
         Task {
             await load()
         }
@@ -1165,7 +1166,7 @@ final class DashboardViewModel: ObservableObject {
 
     func confirmDeleteDevice(_ device: PairedDeviceRecord) async {
         do {
-            let tempPaths = try await DatabaseManager.shared.deletePairedDevice(deviceId: device.deviceId)
+            let tempPaths = try await databaseManager.deletePairedDevice(deviceId: device.deviceId)
             let keychain = MacKeychainStore()
             try? keychain.deleteTrustToken(for: device.deviceId)
             for path in tempPaths {
@@ -1178,8 +1179,49 @@ final class DashboardViewModel: ObservableObject {
 
             await load()
         } catch {
-            print("[DashboardViewModel] Delete device failed: \(error)")
+            print("Failed to delete device: \(error)")
         }
+    }
+
+    func startObservation() {
+        observationTask?.cancel()
+        observationTask = Task { [weak self] in
+            guard let self else { return }
+            
+            let folderChangeStream = NotificationCenter.default.notifications(named: .changeBackupFolder)
+            let dataChangeStream = NotificationCenter.default.notifications(named: .receiverDataDidChange)
+            
+            Task { [weak self] in
+                for await _ in folderChangeStream {
+                    await self?.selectBackupFolder()
+                }
+            }
+            
+            Task { [weak self] in
+                for await _ in dataChangeStream {
+                    await self?.load()
+                }
+            }
+        }
+        
+        timerTask?.cancel()
+        timerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds
+                    await self?.refreshDeviceStatus()
+                } catch {
+                    break
+                }
+            }
+        }
+    }
+
+    func stopObservation() {
+        observationTask?.cancel()
+        observationTask = nil
+        timerTask?.cancel()
+        timerTask = nil
     }
 }
 

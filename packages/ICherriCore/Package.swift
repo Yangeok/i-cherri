@@ -8,12 +8,18 @@ let package = Package(
         .library(name: "ICherriCore", targets: ["ICherriCore"])
     ],
     dependencies: [
-        .package(path: "../ICherriProtocol")
+        .package(path: "../ICherriProtocol"),
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.24.2"),
+        .package(url: "https://github.com/hmlongco/Factory.git", from: "2.3.1")
     ],
     targets: [
         .target(
             name: "ICherriCore",
-            dependencies: ["ICherriProtocol"],
+            dependencies: [
+                "ICherriProtocol",
+                .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "Factory", package: "Factory")
+            ],
             path: "Sources/ICherriCore"
         ),
         .testTarget(
