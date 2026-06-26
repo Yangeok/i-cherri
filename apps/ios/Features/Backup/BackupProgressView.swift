@@ -118,7 +118,15 @@ public struct BackupProgressView: View {
                 Text("\(viewModel.overallBackedUpCount) / \(viewModel.totalCount) backed up")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                
                 Spacer()
+                
+                Text(String(format: "%.0f%%", viewModel.progress * 100))
+                    .font(.system(.caption, weight: .bold).monospacedDigit())
+                    .foregroundStyle(Color.accentColor)
+                
+                Spacer()
+                
                 if let trailingStatus = viewModel.trailingStatusText {
                     Text(trailingStatus)
                         .font(.caption.monospacedDigit())
