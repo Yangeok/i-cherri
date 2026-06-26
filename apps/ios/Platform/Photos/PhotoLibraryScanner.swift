@@ -160,9 +160,15 @@ public final class PhotoLibraryScanner {
         let preferred = preferredResource(from: resources, mediaType: asset.mediaType) ?? resources.first
 
         // Extract filename
-        let filename = (asset.value(forKey: "filename") as? String)
+        var rawFilename = (asset.value(forKey: "filename") as? String)
             ?? preferred?.originalFilename
             ?? "\(asset.localIdentifier).jpg"
+
+        // Strip any path components if the framework returned a full file URL path (common in simulators)
+        if rawFilename.contains("/") {
+            rawFilename = (rawFilename as NSString).lastPathComponent
+        }
+        let filename = rawFilename
 
         // Extract byte size
         var byteSize: Int64 = 0
