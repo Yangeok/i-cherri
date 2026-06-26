@@ -40,7 +40,7 @@ public final class PhotoLibraryScanner {
 
         var assets = [AssetMetadata?](repeating: nil, count: count)
         let lock = NSLock()
-        let semaphore = DispatchSemaphore(value: 4) // Limit to 4 concurrent metadata extractions to prevent assetsd IPC bottleneck
+        let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions to prevent assetsd IPC bottleneck
 
         // Run metadata extraction concurrently across available CPU cores with semaphore limiting
         DispatchQueue.concurrentPerform(iterations: count) { index in
@@ -68,7 +68,7 @@ public final class PhotoLibraryScanner {
 
         var assets = [AssetMetadata?](repeating: nil, count: count)
         let lock = NSLock()
-        let semaphore = DispatchSemaphore(value: 4) // Limit to 4 concurrent metadata extractions
+        let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions
 
         DispatchQueue.concurrentPerform(iterations: count) { index in
             semaphore.wait()
@@ -155,30 +155,40 @@ public final class PhotoLibraryScanner {
         let creation = asset.creationDate ?? Date()
         let modification = asset.modificationDate ?? creation
 
-        // Single-pass: fetch asset resources only once to avoid I/O bottlenecks
-        let resources = PHAssetResource.assetResources(for: asset)
-        let preferred = preferredResource(from: resources, mediaType: asset.mediaType) ?? resources.first
+        // Optimized: Try KVC lookup first to avoid expensive PHAssetResource IPC roundtrips
+        var filename = asset.value(forKey: "filename") as? String
+        var byteSize: Int64 = 0
 
-        // Extract filename
-        var rawFilename = (asset.value(forKey: "filename") as? String)
-            ?? preferred?.originalFilename
-            ?? "\(asset.localIdentifier).jpg"
+        if let sizeVal = asset.value(forKey: "fileSize") as? Int64 {
+            byteSize = sizeVal
+        } else if let sizeVal = asset.value(forKey: "fileSize") as? NSNumber {
+            byteSize = sizeVal.int64Value
+        }
+
+        // Fallback: If metadata is incomplete, query PHAssetResource (triggers assetsd IPC)
+        if filename == nil || byteSize <= 0 {
+            let resources = PHAssetResource.assetResources(for: asset)
+            let preferred = preferredResource(from: resources, mediaType: asset.mediaType) ?? resources.first
+            
+            if filename == nil {
+                filename = preferred?.originalFilename
+            }
+            if byteSize <= 0, let resource = preferred {
+                if let size = resource.value(forKey: "fileSize") as? Int64 {
+                    byteSize = size
+                } else if let size = resource.value(forKey: "fileSize") as? NSNumber {
+                    byteSize = size.int64Value
+                }
+            }
+        }
+
+        var rawFilename = filename ?? "\(asset.localIdentifier).jpg"
 
         // Strip any path components if the framework returned a full file URL path (common in simulators)
         if rawFilename.contains("/") {
             rawFilename = (rawFilename as NSString).lastPathComponent
         }
-        let filename = rawFilename
-
-        // Extract byte size
-        var byteSize: Int64 = 0
-        if let resource = preferred {
-            if let size = resource.value(forKey: "fileSize") as? Int64 {
-                byteSize = size
-            } else if let size = resource.value(forKey: "fileSize") as? NSNumber {
-                byteSize = size.int64Value
-            }
-        }
+        let finalFilename = rawFilename
 
         let fingerprint = FingerprintBuilder.build(
             creationDate: creation,
@@ -192,7 +202,7 @@ public final class PhotoLibraryScanner {
         return AssetMetadata(
             deviceID: deviceID,
             assetLocalID: asset.localIdentifier,
-            originalFilename: filename,
+            originalFilename: finalFilename,
             mediaType: mediaType,
             creationDate: creation,
             modificationDate: modification,
