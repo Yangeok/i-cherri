@@ -14,5 +14,7 @@
 	<array>
 		<string>com.icherri.ios.auto-backup.processing</string>
 	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 </dict>
 </plist>

@@ -5,6 +5,7 @@ import ICherriDesignSystem
 import Inject
 import Factory
 import CryptoKit
+import ActivityKit
 
 
 // Onboarding + pairing + backup trigger dashboard for iOS.
@@ -929,6 +930,9 @@ final class BackupDashboardViewModel: ObservableObject {
             defer {
                 Task { @MainActor in
                     self.isBackingUp = false
+                    if #available(iOS 16.2, *) {
+                        BackupLiveActivityManager.shared.stop()
+                    }
                     if backgroundTaskID != .invalid {
                         UIApplication.shared.endBackgroundTask(backgroundTaskID)
                     }
@@ -943,6 +947,9 @@ final class BackupDashboardViewModel: ObservableObject {
                 let runAssets = scanPlan.runAssets
 
                 await MainActor.run {
+                    if #available(iOS 16.2, *) {
+                        BackupLiveActivityManager.shared.start(deviceName: device.deviceName, totalCount: scanPlan.runAssetCount)
+                    }
                     progressViewModel.setTotalCount(scanPlan.runAssetCount)
                     progressViewModel.setTotalBytes(scanPlan.runAssetBytes)
                     progressViewModel.totalCount = scanPlan.libraryAssetCount
@@ -1927,6 +1934,26 @@ private actor BackupUploadProgressCoordinator {
                 activeUploadItems: activeUploadItems,
                 failedUploadItems: snapshotFailedUploads
             )
+
+            let formattedSpeed: String
+            if bytesPerSecond > 0 {
+                let mb = bytesPerSecond / (1024.0 * 1024.0)
+                formattedSpeed = String(format: "%.1f MB/s", mb)
+            } else {
+                formattedSpeed = "—"
+            }
+
+            let progressVal = totalCount > 0 ? Double(snapshotCompleted) / Double(totalCount) : 0.0
+
+            if #available(iOS 16.2, *) {
+                BackupLiveActivityManager.shared.update(
+                    progress: progressVal,
+                    completedCount: snapshotCompleted,
+                    totalCount: totalCount,
+                    formattedSpeed: formattedSpeed,
+                    filename: snapshotFilename
+                )
+            }
         }
     }
 }
@@ -1974,3 +2001,108 @@ private actor AssetUploadProgressReporter: ChunkUploadProgressDelegate {
         )
     }
 }
+
+// MARK: - Live Activity / Dynamic Island Models
+
+@available(iOS 16.2, *)
+public struct BackupActivityAttributes: ActivityAttributes {
+    public struct ContentState: Codable, Hashable {
+        public var progress: Double
+        public var completedCount: Int
+        public var totalCount: Int
+        public var formattedSpeed: String
+        public var currentFilename: String?
+
+        public init(
+            progress: Double,
+            completedCount: Int,
+            totalCount: Int,
+            formattedSpeed: String,
+            currentFilename: String? = nil
+        ) {
+            self.progress = progress
+            self.completedCount = completedCount
+            self.totalCount = totalCount
+            self.formattedSpeed = formattedSpeed
+            self.currentFilename = currentFilename
+        }
+    }
+
+    public let deviceName: String
+    
+    public init(deviceName: String) {
+        self.deviceName = deviceName
+    }
+}
+
+@available(iOS 16.2, *)
+@MainActor
+public final class BackupLiveActivityManager {
+    public static let shared = BackupLiveActivityManager()
+    private init() {}
+    
+    private var currentActivity: Activity<BackupActivityAttributes>?
+    
+    public func start(deviceName: String, totalCount: Int) {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            print("[LiveActivity] Live Activities are disabled by user or system.")
+            return
+        }
+        
+        stop()
+        
+        let attributes = BackupActivityAttributes(deviceName: deviceName)
+        let initialState = BackupActivityAttributes.ContentState(
+            progress: 0,
+            completedCount: 0,
+            totalCount: totalCount,
+            formattedSpeed: "—"
+        )
+        
+        do {
+            let activity = try Activity.request(
+                attributes: attributes,
+                content: ActivityContent(state: initialState, staleDate: nil),
+                pushType: nil
+            )
+            self.currentActivity = activity
+            print("[LiveActivity] Started Activity ID: \(activity.id)")
+        } catch {
+            print("[LiveActivity] Failed to request Activity: \(error)")
+        }
+    }
+    
+    public func update(progress: Double, completedCount: Int, totalCount: Int, formattedSpeed: String, filename: String?) {
+        guard let activity = currentActivity else { return }
+        
+        let updatedState = BackupActivityAttributes.ContentState(
+            progress: progress,
+            completedCount: completedCount,
+            totalCount: totalCount,
+            formattedSpeed: formattedSpeed,
+            currentFilename: filename
+        )
+        
+        Task {
+            await activity.update(ActivityContent(state: updatedState, staleDate: nil))
+            print("[LiveActivity] Updated Activity: \(activity.id) (\(completedCount)/\(totalCount) - \(formattedSpeed))")
+        }
+    }
+    
+    public func stop() {
+        guard let activity = currentActivity else { return }
+        
+        Task {
+            let finalState = BackupActivityAttributes.ContentState(
+                progress: 1.0,
+                completedCount: activity.content.state.totalCount,
+                totalCount: activity.content.state.totalCount,
+                formattedSpeed: "Done"
+            )
+            await activity.end(ActivityContent(state: finalState, staleDate: nil), dismissalPolicy: .after(Date().addingTimeInterval(3.0)))
+            self.currentActivity = nil
+            print("[LiveActivity] Ended Activity: \(activity.id)")
+        }
+    }
+}
+
