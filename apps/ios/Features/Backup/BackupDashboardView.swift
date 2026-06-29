@@ -920,10 +920,18 @@ final class BackupDashboardViewModel: ObservableObject {
         let storedReceiverURLString = UserDefaults.standard.string(forKey: receiverURLKey)
 
         let backupTask = Task.detached(priority: .userInitiated) { [maxConcurrentUploads = Self.maxConcurrentUploads] in
+            let backgroundTaskID = await MainActor.run {
+                return UIApplication.shared.beginBackgroundTask(withName: "ManualBackup") {
+                    // System expires this background execution budget
+                }
+            }
             var executedScanMode: PhotoLibraryScanPlan.Mode = .incremental
             defer {
                 Task { @MainActor in
                     self.isBackingUp = false
+                    if backgroundTaskID != .invalid {
+                        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                    }
                 }
             }
 
