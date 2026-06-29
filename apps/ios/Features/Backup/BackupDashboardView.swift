@@ -1936,7 +1936,12 @@ private actor BackupUploadProgressCoordinator {
             let formattedSpeed: String
             if bytesPerSecond > 0 {
                 let mb = bytesPerSecond / (1024.0 * 1024.0)
-                formattedSpeed = String(format: "%.1f MB/s", mb)
+                if mb >= 1.0 {
+                    formattedSpeed = String(format: "%.1fM/s", mb)
+                } else {
+                    let kb = bytesPerSecond / 1024.0
+                    formattedSpeed = String(format: "%.0fK/s", kb)
+                }
             } else {
                 formattedSpeed = "—"
             }
