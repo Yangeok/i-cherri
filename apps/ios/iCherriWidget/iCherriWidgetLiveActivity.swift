@@ -88,12 +88,12 @@ struct BackupLiveActivityWidget: Widget {
                     .padding(.top, 4)
                 }
             } compactLeading: {
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Image(systemName: "arrow.clockwise.icloud.fill")
+                        .font(.system(size: 9))
                         .foregroundColor(.blue)
-                    Text("\(Int(context.state.progress * 100))%")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
+                    Text("\(context.state.completedCount)/\(context.state.totalCount)")
+                        .font(.system(size: 8, weight: .bold))
                 }
             } compactTrailing: {
                 Text(context.state.formattedSpeed)

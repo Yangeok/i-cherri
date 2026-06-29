@@ -36,8 +36,6 @@ public struct BackupDashboardView: View {
                     .padding()
                 }
             }
-            .navigationTitle("iCherri")
-            .navigationBarTitleDisplayMode(.large)
         }
         .task { await viewModel.onAppear() }
         .onChange(of: scenePhase) { newPhase in
