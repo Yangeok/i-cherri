@@ -43,19 +43,13 @@ struct BackupLiveActivityWidget: Widget {
             DynamicIsland {
                 // Expanded UI when user long-presses the Dynamic Island
                 DynamicIslandExpandedRegion(.leading) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.clockwise.icloud.fill")
-                            .font(.title2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("백업 전송 중")
+                            .font(.headline)
                             .foregroundColor(.blue)
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("i-Cherri 백업")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            Text(context.attributes.deviceName)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
+                        Text(context.attributes.deviceName)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                     }
                 }
                 

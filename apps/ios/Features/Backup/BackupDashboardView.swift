@@ -944,7 +944,12 @@ final class BackupDashboardViewModel: ObservableObject {
 
                 await MainActor.run {
                     if #available(iOS 16.2, *) {
-                        BackupLiveActivityManager.shared.start(deviceName: device.deviceName, totalCount: scanPlan.runAssetCount)
+                        let initialCompleted = max(scanPlan.libraryAssetCount - scanPlan.runAssetCount, 0)
+                        BackupLiveActivityManager.shared.start(
+                            deviceName: device.deviceName,
+                            completedCount: initialCompleted,
+                            totalCount: scanPlan.libraryAssetCount
+                        )
                     }
                     progressViewModel.setTotalCount(scanPlan.runAssetCount)
                     progressViewModel.setTotalBytes(scanPlan.runAssetBytes)
@@ -2044,7 +2049,7 @@ public final class BackupLiveActivityManager {
     
     private var currentActivity: Activity<BackupActivityAttributes>?
     
-    public func start(deviceName: String, totalCount: Int) {
+    public func start(deviceName: String, completedCount: Int, totalCount: Int) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("[LiveActivity] Live Activities are disabled by user or system.")
             return
@@ -2054,8 +2059,8 @@ public final class BackupLiveActivityManager {
         
         let attributes = BackupActivityAttributes(deviceName: deviceName)
         let initialState = BackupActivityAttributes.ContentState(
-            progress: 0,
-            completedCount: 0,
+            progress: totalCount > 0 ? Double(completedCount) / Double(totalCount) : 0.0,
+            completedCount: completedCount,
             totalCount: totalCount,
             formattedSpeed: "—"
         )
