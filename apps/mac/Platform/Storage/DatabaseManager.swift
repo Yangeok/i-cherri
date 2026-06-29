@@ -678,25 +678,13 @@ actor DatabaseManager {
                     r.created_at,
                     r.updated_at,
                     r.finalized_at,
-                    SUM(
-                        CASE
-                            WHEN EXISTS (
-                                SELECT 1
-                                FROM backup_assets AS b
-                                WHERE b.status IN ('completed', 'duplicate')
-                                  AND (
-                                      (b.device_id = s.device_id AND b.asset_local_id = s.asset_local_id)
-                                      OR b.quick_fingerprint = s.quick_fingerprint
-                                  )
-                            )
-                            THEN 1
-                            ELSE 0
-                        END
+                    (
+                        SELECT COUNT(*)
+                        FROM backup_assets AS b
+                        WHERE b.device_id = r.device_id
+                          AND b.status IN ('completed', 'duplicate')
                     ) AS completed_asset_count
                 FROM backup_runs AS r
-                LEFT JOIN backup_run_assets AS s
-                  ON s.run_id = r.run_id
-                 AND s.device_id = r.device_id
                 WHERE r.run_id = (
                     SELECT r2.run_id
                     FROM backup_runs AS r2
@@ -704,14 +692,6 @@ actor DatabaseManager {
                     ORDER BY r2.created_at DESC, r2.updated_at DESC, r2.run_id DESC
                     LIMIT 1
                 )
-                GROUP BY
-                    r.run_id,
-                    r.device_id,
-                    r.total_asset_count,
-                    r.status,
-                    r.created_at,
-                    r.updated_at,
-                    r.finalized_at
                 """
             )
 
