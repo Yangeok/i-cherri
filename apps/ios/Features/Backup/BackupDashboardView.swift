@@ -911,19 +911,17 @@ final class BackupDashboardViewModel: ObservableObject {
             failedUploadItems: []
         )
         activeBackupProgressViewModel = progressViewModel
-
         let pairedReceiverSnapshot = pairedReceiver
         let pairedReceiverIDSnapshot = UserDefaults.standard.string(forKey: receiverIDKey)
         let pairedReceiverNameSnapshot = pairedReceiverName
         let discoveredReceiversSnapshot = discoveredReceivers
         let storedReceiverURLString = UserDefaults.standard.string(forKey: receiverURLKey)
 
-        let backupTask = Task.detached(priority: .userInitiated) { [maxConcurrentUploads = Self.maxConcurrentUploads] in
-            let backgroundTaskID = await MainActor.run {
-                return UIApplication.shared.beginBackgroundTask(withName: "ManualBackup") {
-                    // System expires this background execution budget
-                }
-            }
+        let backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "ManualBackup") {
+            // System expires this background execution budget
+        }
+
+        let backupTask = Task.detached(priority: .userInitiated) { [maxConcurrentUploads = Self.maxConcurrentUploads, backgroundTaskID] in
             var executedScanMode: PhotoLibraryScanPlan.Mode = .incremental
             defer {
                 Task { @MainActor in
