@@ -1943,12 +1943,12 @@ private actor BackupUploadProgressCoordinator {
                 formattedSpeed = "—"
             }
 
-            let progressVal = totalCount > 0 ? Double(snapshotCompleted) / Double(totalCount) : 0.0
+            let progressVal = totalCount > 0 ? Double(snapshotOverallBackedUpCount) / Double(totalCount) : 0.0
 
             if #available(iOS 16.2, *) {
                 BackupLiveActivityManager.shared.update(
                     progress: progressVal,
-                    completedCount: snapshotCompleted,
+                    completedCount: snapshotOverallBackedUpCount,
                     totalCount: totalCount,
                     formattedSpeed: formattedSpeed,
                     filename: snapshotFilename
