@@ -1870,15 +1870,22 @@ private actor BackupUploadProgressCoordinator {
             return
         }
 
+        let isBackground = UIApplication.shared.applicationState == .background
+        let currentThrottleInterval: UInt64 = isBackground ? 3_000_000_000 : 500_000_000
+
         let now = DispatchTime.now().uptimeNanoseconds
         let elapsed = now &- lastEmissionUptime
-        if lastEmissionUptime == 0 || elapsed >= throttleIntervalNanoseconds {
+        if lastEmissionUptime == 0 || elapsed >= currentThrottleInterval {
+            pendingEmissionTask?.cancel()
+            pendingEmissionTask = nil
             Task { await emitUpdate(bytesPerSecond: bytesPerSecond, phase: phase) }
             return
         }
 
+        guard !isBackground else { return }
+
         guard pendingEmissionTask == nil else { return }
-        let remaining = throttleIntervalNanoseconds - elapsed
+        let remaining = currentThrottleInterval - elapsed
         pendingEmissionTask = Task { [self] in
             try? await Task.sleep(nanoseconds: remaining)
             await emitPendingUpdate()
