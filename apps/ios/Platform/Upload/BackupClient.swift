@@ -24,6 +24,8 @@ public actor BackupClient {
         self.trustToken = trustToken
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
+        config.shouldUseExtendedBackgroundIdleMode = true
+        config.waitsForConnectivity = true
         self.session = URLSession(configuration: config)
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601

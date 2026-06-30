@@ -917,8 +917,12 @@ final class BackupDashboardViewModel: ObservableObject {
         let discoveredReceiversSnapshot = discoveredReceivers
         let storedReceiverURLString = UserDefaults.standard.string(forKey: receiverURLKey)
 
-        let backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "ManualBackup") {
-            // System expires this background execution budget
+        var backgroundTaskID = UIBackgroundTaskIdentifier.invalid
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "ManualBackup") {
+            if backgroundTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                backgroundTaskID = .invalid
+            }
         }
 
         let backupTask = Task.detached(priority: .userInitiated) { [maxConcurrentUploads = Self.maxConcurrentUploads, backgroundTaskID] in

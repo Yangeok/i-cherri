@@ -16,6 +16,8 @@ public actor ChunkUploadSender {
         self.trustToken = trustToken
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 120
+        config.shouldUseExtendedBackgroundIdleMode = true
+        config.waitsForConnectivity = true
         self.session = URLSession(configuration: config)
     }
 
