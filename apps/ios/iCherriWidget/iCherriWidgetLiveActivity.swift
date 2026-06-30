@@ -10,19 +10,22 @@ public struct BackupActivityAttributes: ActivityAttributes {
         public var totalCount: Int
         public var formattedSpeed: String
         public var currentFilename: String?
+        public var phaseText: String
 
         public init(
             progress: Double,
             completedCount: Int,
             totalCount: Int,
             formattedSpeed: String,
-            currentFilename: String? = nil
+            currentFilename: String? = nil,
+            phaseText: String = "백업 진행 중"
         ) {
             self.progress = progress
             self.completedCount = completedCount
             self.totalCount = totalCount
             self.formattedSpeed = formattedSpeed
             self.currentFilename = currentFilename
+            self.phaseText = phaseText
         }
     }
 
@@ -43,13 +46,19 @@ struct BackupLiveActivityWidget: Widget {
             DynamicIsland {
                 // Expanded UI when user long-presses the Dynamic Island
                 DynamicIslandExpandedRegion(.leading) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("백업 전송 중")
-                            .font(.headline)
-                            .foregroundColor(.blue)
-                        Text(context.attributes.deviceName)
+                    HStack(spacing: 6) {
+                        Image(systemName: "cloud.fill")
                             .font(.subheadline)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.blue)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(context.state.phaseText)
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            Text(context.attributes.deviceName)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
                 

@@ -984,7 +984,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     BackupUploadProgressCoordinator(
                         viewModel: progressViewModel,
                         totalExpectedBytes: scanPlan.runAssetBytes,
-                        totalCount: progressViewModel.totalCount
+                        totalCount: scanPlan.libraryAssetCount
                     )
                 }
 
@@ -1870,7 +1870,9 @@ private actor BackupUploadProgressCoordinator {
             return
         }
 
-        let isBackground = UIApplication.shared.applicationState == .background
+        let isBackground = Thread.isMainThread 
+            ? UIApplication.shared.applicationState == .background 
+            : DispatchQueue.main.sync { UIApplication.shared.applicationState == .background }
         let currentThrottleInterval: UInt64 = isBackground ? 3_000_000_000 : 500_000_000
 
         let now = DispatchTime.now().uptimeNanoseconds
@@ -1958,13 +1960,28 @@ private actor BackupUploadProgressCoordinator {
 
             let progressVal = totalCount > 0 ? Double(snapshotOverallBackedUpCount) / Double(totalCount) : 0.0
 
+            let phaseText: String
+            switch phase {
+            case .scanning:
+                phaseText = "라이브러리 스캔 중..."
+            case .checking:
+                phaseText = "백업 확인 중..."
+            case .uploading:
+                phaseText = "백업 전송 중"
+            case .complete:
+                phaseText = "백업 완료"
+            case .failed:
+                phaseText = "백업 실패"
+            }
+
             if #available(iOS 16.2, *) {
                 BackupLiveActivityManager.shared.update(
                     progress: progressVal,
                     completedCount: snapshotOverallBackedUpCount,
                     totalCount: totalCount,
                     formattedSpeed: formattedSpeed,
-                    filename: snapshotFilename
+                    filename: snapshotFilename,
+                    phaseText: phaseText
                 )
             }
         }
@@ -2025,19 +2042,22 @@ public struct BackupActivityAttributes: ActivityAttributes {
         public var totalCount: Int
         public var formattedSpeed: String
         public var currentFilename: String?
+        public var phaseText: String
 
         public init(
             progress: Double,
             completedCount: Int,
             totalCount: Int,
             formattedSpeed: String,
-            currentFilename: String? = nil
+            currentFilename: String? = nil,
+            phaseText: String = "백업 진행 중"
         ) {
             self.progress = progress
             self.completedCount = completedCount
             self.totalCount = totalCount
             self.formattedSpeed = formattedSpeed
             self.currentFilename = currentFilename
+            self.phaseText = phaseText
         }
     }
 
@@ -2056,7 +2076,7 @@ public final class BackupLiveActivityManager {
     
     private var currentActivity: Activity<BackupActivityAttributes>?
     
-    public func start(deviceName: String, completedCount: Int, totalCount: Int) {
+    public func start(deviceName: String, completedCount: Int, totalCount: Int, phaseText: String = "라이브러리 스캔 중...") {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("[LiveActivity] Live Activities are disabled by user or system.")
             return
@@ -2069,7 +2089,8 @@ public final class BackupLiveActivityManager {
             progress: totalCount > 0 ? Double(completedCount) / Double(totalCount) : 0.0,
             completedCount: completedCount,
             totalCount: totalCount,
-            formattedSpeed: "—"
+            formattedSpeed: "—",
+            phaseText: phaseText
         )
         
         do {
@@ -2085,7 +2106,7 @@ public final class BackupLiveActivityManager {
         }
     }
     
-    public func update(progress: Double, completedCount: Int, totalCount: Int, formattedSpeed: String, filename: String?) {
+    public func update(progress: Double, completedCount: Int, totalCount: Int, formattedSpeed: String, filename: String?, phaseText: String) {
         guard let activity = currentActivity else { return }
         
         let updatedState = BackupActivityAttributes.ContentState(
@@ -2093,7 +2114,8 @@ public final class BackupLiveActivityManager {
             completedCount: completedCount,
             totalCount: totalCount,
             formattedSpeed: formattedSpeed,
-            currentFilename: filename
+            currentFilename: filename,
+            phaseText: phaseText
         )
         
         Task {
@@ -2110,7 +2132,8 @@ public final class BackupLiveActivityManager {
                 progress: 1.0,
                 completedCount: activity.content.state.totalCount,
                 totalCount: activity.content.state.totalCount,
-                formattedSpeed: "Done"
+                formattedSpeed: "Done",
+                phaseText: "백업 완료"
             )
             await activity.end(ActivityContent(state: finalState, staleDate: nil), dismissalPolicy: .after(Date().addingTimeInterval(3.0)))
             self.currentActivity = nil
