@@ -1763,10 +1763,40 @@ private actor BackupUploadProgressCoordinator {
     private var lastEmissionUptime: UInt64 = 0
     private var pendingEmissionTask: Task<Void, Never>?
 
+    private var isBackground: Bool = false
+    private var backgroundTask: Task<Void, Never>?
+    private var foregroundTask: Task<Void, Never>?
+
     init(viewModel: BackupProgressViewModel, totalExpectedBytes: Int64, totalCount: Int) {
         self.viewModel = viewModel
         self.totalExpectedBytes = totalExpectedBytes
         self.totalCount = totalCount
+
+        let initialBg = Thread.isMainThread 
+            ? UIApplication.shared.applicationState == .background 
+            : DispatchQueue.main.sync { UIApplication.shared.applicationState == .background }
+        self.isBackground = initialBg
+
+        self.backgroundTask = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: UIApplication.didEnterBackgroundNotification) {
+                await self?.setBackground(true)
+            }
+        }
+
+        self.foregroundTask = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: UIApplication.willEnterForegroundNotification) {
+                await self?.setBackground(false)
+            }
+        }
+    }
+
+    deinit {
+        backgroundTask?.cancel()
+        foregroundTask?.cancel()
+    }
+
+    private func setBackground(_ isBg: Bool) {
+        self.isBackground = isBg
     }
 
     func beginAsset(assetLocalID: String, filename: String, expectedByteSize: Int64) {
@@ -1870,9 +1900,6 @@ private actor BackupUploadProgressCoordinator {
             return
         }
 
-        let isBackground = Thread.isMainThread 
-            ? UIApplication.shared.applicationState == .background 
-            : DispatchQueue.main.sync { UIApplication.shared.applicationState == .background }
         let currentThrottleInterval: UInt64 = isBackground ? 3_000_000_000 : 500_000_000
 
         let now = DispatchTime.now().uptimeNanoseconds
