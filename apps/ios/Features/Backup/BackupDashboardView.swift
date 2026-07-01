@@ -24,17 +24,17 @@ public struct BackupDashboardView: View {
             ZStack {
                 backgroundGradient
                 ScrollView {
-                    VStack(spacing: 28) {
-                        permissionSection
-                        if let suggestedTarget = viewModel.suggestedSwitchTarget {
-                            switchSuggestionBanner(for: suggestedTarget)
-                        }
-                        pairingSection
-                        if viewModel.isPaired {
-                            backupTriggerSection
+                    VStack(spacing: 24) {
+                        // 1. 단일 대화형 대시보드 시뮬레이터 디자인 본판 이식
+                        simulatorSection
+                        
+                        // 백업 중이 아닐 때만 하단 2열 설정/기기 그리드를 보여줌
+                        if viewModel.activeBackupProgressViewModel == nil {
+                            settingsGridSection
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
-                    .padding()
+                    .padding(.vertical)
                 }
             }
             .navigationTitle("iCherri")
@@ -54,28 +54,6 @@ public struct BackupDashboardView: View {
             Task {
                 await viewModel.refreshReceivers()
                 await viewModel.reevaluateAutomaticBackup()
-            }
-        }
-        .sheet(
-            isPresented: Binding(
-                get: { viewModel.activeBackupProgressViewModel != nil },
-                set: { isPresented in
-                    if !isPresented && !viewModel.isBackupSheetLocked {
-                        viewModel.dismissBackupProgress()
-                    }
-                }
-            )
-        ) {
-            if let progressViewModel = viewModel.activeBackupProgressViewModel {
-                NavigationStack {
-                    BackupProgressView(viewModel: progressViewModel)
-                }
-                .presentationDetents([.height(88), .large], selection: $backupSheetDetent)
-                .presentationDragIndicator(.visible)
-                .interactiveDismissDisabled(viewModel.isBackupSheetLocked)
-                .onAppear {
-                    backupSheetDetent = .large
-                }
             }
         }
         .sheet(isPresented: $isGalleryPresented) {
@@ -98,258 +76,462 @@ public struct BackupDashboardView: View {
         .enableInjection()
     }
 
-    // MARK: - Sections
-
-    private var permissionSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                Label("Photo Library", systemImage: "photo.on.rectangle.angled")
-                    .font(.headline)
-                permissionRow(
-                    title: "Photos Access",
-                    status: viewModel.photoPermissionStatus,
-                    action: { await viewModel.requestPhotoPermission() }
-                )
-                permissionRow(
-                    title: "Local Network",
-                    status: viewModel.localNetworkStatus,
-                    action: nil
-                )
-            }
-        } label: {
-            Label("Permissions", systemImage: "lock.shield")
-        }
-        .groupBoxStyle(.automatic)
-    }
-
-    private var pairingSection: some View {
-        GroupBox {
-            VStack(spacing: 16) {
-                HStack {
-                    Text("Nearby Mac receivers")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if viewModel.isBrowsing {
-                        ProgressView()
-                            .controlSize(.small)
-                            .padding(.trailing, 4)
-                    }
-                    Button {
-                        Task { await viewModel.refreshReceivers() }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                    .font(.caption)
-                    .buttonStyle(.bordered)
-                    .disabled(viewModel.isPairing || viewModel.isBackingUp)
-                }
-
-                if let receiverName = viewModel.pairedReceiverName {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Current Backup Target")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            HStack(spacing: 6) {
-                                Text(receiverName)
-                                    .font(.subheadline.weight(.semibold))
-                                Circle()
-                                    .fill(viewModel.pairedReceiverIsOnline ? Color.green : Color.orange)
-                                    .frame(width: 8, height: 8)
-                                Text(viewModel.pairedReceiverIsOnline ? "Online" : "Offline")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        Button("Change") { isTargetPickerPresented = true }
-                            .font(.caption)
-                            .buttonStyle(.bordered)
-                            .disabled(viewModel.isPairing || viewModel.isBackingUp || viewModel.availableSwitchTargets.isEmpty)
-                        Button("Forget") { viewModel.clearPairedReceiver() }
-                            .font(.caption)
-                            .buttonStyle(.bordered)
-                            .disabled(viewModel.isPairing || viewModel.isBackingUp)
-                    }
-                }
-                if viewModel.discoveredReceivers.isEmpty {
-                    if viewModel.isBrowsing {
-                        VStack(spacing: 8) {
-                            ProgressView()
-                            Text("Looking for Mac receivers…")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 8)
-                    } else {
-                        Text("No receivers found")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 8)
-                    }
+    // MARK: - Subviews (단일 대화형 대시보드 본판 구현)
+    
+    private var simulatorSection: some View {
+        VStack(spacing: 20) {
+            // 디스크 & 카드 Morphing 컨테이너
+            VStack {
+                if let progressViewModel = viewModel.activeBackupProgressViewModel {
+                    expandedCardView(progressViewModel)
                 } else {
-                    ForEach(viewModel.discoveredReceivers) { receiver in
-                        receiverRow(receiver)
-                    }
-                    .opacity(viewModel.isBrowsing ? 0.7 : 1.0)
-                }
-                if let message = viewModel.pairingStatusMessage {
-                    if !(viewModel.isPaired && !viewModel.pairedReceiverIsOnline) {
-                        Label(message, systemImage: viewModel.isPaired ? "checkmark.circle.fill" : "dot.radiowaves.left.and.right")
-                            .font(.caption)
-                            .foregroundStyle(viewModel.isPaired ? .green : .secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                if let errorMessage = viewModel.pairingErrorMessage {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    defaultDiscView
                 }
             }
-        } label: {
-            Label("Available Receivers", systemImage: "macbook.and.iphone")
-        }
-    }
-
-    private var backupTriggerSection: some View {
-        GroupBox {
-            VStack(spacing: 16) {
-                Toggle(isOn: Binding(
-                    get: { viewModel.isAutoBackupEnabled },
-                    set: { isEnabled in
-                        Task { await viewModel.setAutoBackupEnabled(isEnabled) }
-                    }
-                )) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Automatic Backup")
-                            .font(.headline)
-                        Text("Runs when battery is at least 20% and Wi-Fi is available.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if let autoBackupStatusSummary = viewModel.autoBackupStatusSummary {
-                    autoBackupStatusCard(autoBackupStatusSummary)
-                }
-
-                if let autoBackupEligibilityMessage = viewModel.autoBackupEligibilityMessage {
-                    Label(autoBackupEligibilityMessage, systemImage: "bolt.horizontal.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if let autoBackupRecentResultMessage = viewModel.autoBackupRecentResultMessage {
-                    Label(autoBackupRecentResultMessage, systemImage: "clock.arrow.circlepath")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if let autoBackupLastSuccessMessage = viewModel.autoBackupLastSuccessMessage {
-                    Label(autoBackupLastSuccessMessage, systemImage: "checkmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if let autoBackupNextEvaluationMessage = viewModel.autoBackupNextEvaluationMessage {
-                    Label(autoBackupNextEvaluationMessage, systemImage: "clock")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if let receiverName = viewModel.pairedReceiverName {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Image(systemName: viewModel.pairedReceiverIsOnline ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                .foregroundStyle(viewModel.pairedReceiverIsOnline ? .green : .orange)
-                            Text(viewModel.pairedReceiverIsOnline ? "Connected to \(receiverName)" : "Disconnected from \(receiverName)")
-                                .font(.subheadline)
-                                .foregroundStyle(viewModel.pairedReceiverIsOnline ? .primary : .secondary)
-                            Spacer()
-                        }
-
-                        if viewModel.pairedReceiverIsOnline {
-                            if let backupCoverageSummary = viewModel.backupCoverageSummary,
-                               let backupCoverageProgress = viewModel.backupCoverageProgress {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack {
-                                        Text("Library Coverage")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        Spacer()
-                                        Text(backupCoverageSummary)
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundStyle(.secondary)
-                                    }
-
-                                    ProgressView(value: backupCoverageProgress)
-                                        .tint(.green)
-                                }
-                            }
-                        } else {
-                            Text("Make sure your Mac is active and on the same network.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                Button(action: { Task { await viewModel.startBackup() } }) {
-                    Label("Start Backup", systemImage: "arrow.up.to.line.compact")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isBackingUp || !viewModel.pairedReceiverIsOnline)
-                if let backupStatusMessage = viewModel.backupStatusMessage {
-                    Label(backupStatusMessage, systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        } label: {
-            Label("Backup", systemImage: "externaldrive.fill.badge.icloud")
-        }
-    }
-
-    private func switchSuggestionBanner(for target: DiscoveredReceiver) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .font(.title3)
+            .frame(height: viewModel.activeBackupProgressViewModel != nil ? 270 : 190)
+            .animation(.spring(response: 0.5, dampingFraction: 0.78), value: viewModel.activeBackupProgressViewModel != nil)
+            .background(morphingBackgroundGlow)
             
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Target Offline")
-                    .font(.subheadline.weight(.bold))
-                Text("기존 백업 대상(\(viewModel.pairedReceiverName ?? ""))을 찾을 수 없습니다. 주변에 감지된 '\(target.name)'으로 백업 대상을 전환할까요?")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            
-            Spacer()
-            
-            Button("전환") {
-                Task { await viewModel.pair(with: target) }
-            }
-            .font(.caption.weight(.semibold))
-            .buttonStyle(.borderedProminent)
-            .tint(.orange)
-            .disabled(viewModel.isPairing)
+            triggerAndControls
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .background(Color.secondary.opacity(0.12))
+        .cornerRadius(20)
     }
-
+    
+    private var defaultDiscView: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 4) {
+                if !viewModel.isPaired {
+                    Circle()
+                        .fill(.gray)
+                        .frame(width: 8, height: 8)
+                    Text("연결 없음")
+                        .font(.system(.caption2, design: .rounded, weight: .bold))
+                        .foregroundColor(.gray)
+                } else {
+                    Circle()
+                        .fill(viewModel.pairedReceiverIsOnline ? .green : .orange)
+                        .frame(width: 8, height: 8)
+                    Text(viewModel.pairedReceiverIsOnline ? "Online" : "Offline")
+                        .font(.system(.caption2, design: .rounded, weight: .bold))
+                        .foregroundColor(viewModel.pairedReceiverIsOnline ? .green : .orange)
+                }
+            }
+            
+            Text(viewModel.pairedReceiverName ?? "대상을 선택해 주세요")
+                .font(.system(.headline, design: .rounded, weight: .bold))
+            
+            if let recentResult = viewModel.autoBackupRecentResultMessage {
+                Text(recentResult)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.secondary)
+            } else {
+                Text("백업 대기 중")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .transition(.scale.combined(with: .opacity))
+        .frame(width: 160, height: 160)
+        .background(
+            Circle()
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Circle()
+                        .stroke(LinearGradient(colors: [.white.opacity(0.35), .clear], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
+                )
+                .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
+        )
+    }
+    
+    private func expandedCardView(_ progressViewModel: BackupProgressViewModel) -> some View {
+        VStack(spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(phaseTitle(for: progressViewModel.phase))
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                    Text(phaseDescription(for: progressViewModel.phase))
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                
+                if progressViewModel.phase == .uploading {
+                    Text(String(format: "%.1f%%", progressViewModel.progress * 100))
+                        .font(.system(.title3, design: .rounded, weight: .black))
+                        .foregroundColor(.accentColor)
+                } else if progressViewModel.phase == .complete {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.title3)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            
+            // ⭐️ [요구사항 반영] 실시간 병렬 다중 전송 썸네일 리스트 렌더링 (실제 데이터 매핑!)
+            if progressViewModel.phase == .uploading && !progressViewModel.activeUploads.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(progressViewModel.activeUploads) { upload in
+                        VStack(alignment: .leading, spacing: 4) {
+                            ActiveUploadThumbnailView(assetLocalID: upload.assetLocalID)
+                                .frame(width: 54, height: 54)
+                                .cornerRadius(8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(.white.opacity(0.15), lineWidth: 0.5)
+                                )
+                            
+                            Text(upload.filename)
+                                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .frame(width: 54)
+                            
+                            ProgressView(value: upload.progress)
+                                .progressViewStyle(.linear)
+                                .scaleEffect(x: 1, y: 0.5, anchor: .center)
+                                .tint(.accentColor)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            } else if progressViewModel.phase == .uploading {
+                Text(progressViewModel.currentFilename ?? "준비 중...")
+                    .font(.system(.caption2, design: .monospaced, weight: .semibold))
+                    .foregroundColor(.accentColor.opacity(0.85))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.accentColor.opacity(0.15), lineWidth: 0.5)
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            
+            // 리퀴드 프로그레스 바
+            LiquidProgressBar(
+                progress: progressViewModel.phase == .complete ? 1.0 : (progressViewModel.phase == .uploading ? progressViewModel.progress : 0.0),
+                tint: progressViewModel.phase == .complete ? .green : .accentColor
+            )
+            .frame(height: 14)
+            
+            // 진행 상세 보조 지표 배지 그리드
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("전송 속도")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundColor(.secondary)
+                    Text(progressViewModel.phase == .uploading ? progressViewModel.formattedSpeed : "—")
+                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                )
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("백업 진행률")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundColor(.secondary)
+                    Text(simulatedProgressText(for: progressViewModel))
+                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                )
+            }
+        }
+        .padding(20)
+        .transition(.scale.combined(with: .opacity))
+        .background(
+            RoundedRectangle(cornerRadius: 24)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(LinearGradient(colors: [.white.opacity(0.25), .clear], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
+                )
+                .shadow(color: .purple.opacity(0.08), radius: 15, y: 8)
+        )
+    }
+    
+    private var morphingBackgroundGlow: some View {
+        ZStack {
+            if viewModel.activeBackupProgressViewModel == nil {
+                Circle()
+                    .fill(Color.blue.opacity(0.12))
+                    .blur(radius: 20)
+            } else {
+                RoundedRectangle(cornerRadius: 30)
+                    .fill(LinearGradient(colors: [Color.blue.opacity(0.08), Color.purple.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .blur(radius: 25)
+            }
+        }
+        .animation(.spring(response: 0.5, dampingFraction: 0.78), value: viewModel.activeBackupProgressViewModel != nil)
+    }
+    
+    private var triggerAndControls: some View {
+        VStack(spacing: 12) {
+            if let progressViewModel = viewModel.activeBackupProgressViewModel {
+                // 백업 진행 중일 때 -> 취소/일시정지 버튼 노출 (Rosegold Glassmorphism)
+                if progressViewModel.canCancel {
+                    Button(action: {
+                        progressViewModel.cancel()
+                    }) {
+                        Label("백업 취소 / 일시정지", systemImage: "stop.fill")
+                            .font(.system(.subheadline, design: .rounded, weight: .bold))
+                            .foregroundColor(.red.opacity(0.85))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(12)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.red.opacity(0.25), lineWidth: 0.8)
+                            )
+                    }
+                }
+            } else {
+                // 평소 상태 -> 백업 시작 버튼
+                Button(action: {
+                    Task {
+                        await viewModel.startBackup()
+                    }
+                }) {
+                    Label("백업 시작", systemImage: "arrow.up.to.line.compact")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.accentColor)
+                .disabled(viewModel.isBackingUp || !viewModel.pairedReceiverIsOnline)
+            }
+        }
+    }
+    
+    private var settingsGridSection: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("설정 및 기기 연결 상태")
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundColor(.secondary)
+                Spacer()
+                if viewModel.isBrowsing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
+            
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                // 자동 백업 카드 (실제 자동 백업 스토어 및 스케줄러 연동 완료!)
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("자동 백업", systemImage: "bolt.badge.aod")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundColor(.secondary)
+                    
+                    Toggle("", isOn: Binding(
+                        get: { viewModel.isAutoBackupEnabled },
+                        set: { isEnabled in
+                            Task {
+                                await viewModel.setAutoBackupEnabled(isEnabled)
+                            }
+                        }
+                    ))
+                    .labelsHidden()
+                    .tint(.accentColor)
+                    
+                    Text(viewModel.autoBackupEligibilityMessage ?? "배터리 20% + Wi-Fi 조건")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.ultraThinMaterial)
+                .cornerRadius(16)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(.white.opacity(0.18), lineWidth: 0.5)
+                )
+                
+                // 사진 권한 카드 (탭 시 실제 사진 라이브러리 접근 요청 연동)
+                Button(action: {
+                    if viewModel.photoPermissionStatus != .granted {
+                        Task {
+                            await viewModel.requestPhotoPermission()
+                        }
+                    }
+                }) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("사진 라이브러리", systemImage: "photo.fill")
+                            .font(.system(.caption, design: .rounded, weight: .bold))
+                            .foregroundColor(.secondary)
+                        
+                        HStack {
+                            Text(viewModel.photoPermissionStatus == .granted ? "허용됨" : (viewModel.photoPermissionStatus == .denied ? "차단됨" : "확인 중"))
+                                .font(.system(.footnote, design: .rounded, weight: .semibold))
+                                .foregroundColor(viewModel.photoPermissionStatus == .granted ? .green : (viewModel.photoPermissionStatus == .denied ? .red : .orange))
+                            Spacer()
+                            Image(systemName: viewModel.photoPermissionStatus == .granted ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                                .foregroundColor(viewModel.photoPermissionStatus == .granted ? .green : (viewModel.photoPermissionStatus == .denied ? .red : .orange))
+                        }
+                        
+                        Text(viewModel.photoPermissionStatus == .granted ? "라이브러리 접근 허가" : "탭하여 권한 요청")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(16)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(.white.opacity(0.18), lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+                
+                // 로컬 네트워크 카드 (탭 시 수동 Bonjour 새로고침 유동적 호출)
+                Button(action: {
+                    Task {
+                        await viewModel.refreshReceivers()
+                    }
+                }) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("로컬 네트워크", systemImage: "network")
+                            .font(.system(.caption, design: .rounded, weight: .bold))
+                            .foregroundColor(.secondary)
+                        
+                        HStack {
+                            Text(viewModel.localNetworkStatus == .granted ? "허용됨" : "확인 필요")
+                                .font(.system(.footnote, design: .rounded, weight: .semibold))
+                                .foregroundColor(viewModel.localNetworkStatus == .granted ? .green : .orange)
+                            Spacer()
+                            Image(systemName: viewModel.localNetworkStatus == .granted ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                                .foregroundColor(viewModel.localNetworkStatus == .granted ? .green : .orange)
+                        }
+                        
+                        Text("주변 Mac 탐색 허가")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(16)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(.white.opacity(0.18), lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+                
+                // ⭐️ [요구사항 완벽 반영] 백업 대상 선택 및 Forget/Refresh 가 탑재된 기기 연결 카드
+                Menu {
+                    Section("감지된 기기 (자동 스캔 중)") {
+                        if viewModel.discoveredReceivers.isEmpty {
+                            Text("검색된 주변 Mac 기기 없음")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(viewModel.discoveredReceivers) { receiver in
+                                Button(action: {
+                                    Task {
+                                        await viewModel.pair(with: receiver)
+                                    }
+                                }) {
+                                    HStack {
+                                        Text(receiver.name)
+                                        if viewModel.pairedReceiverName == receiver.name {
+                                            Spacer()
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    Section("제어 및 해제") {
+                        // 수동 새로고침
+                        Button(action: {
+                            Task {
+                                await viewModel.refreshReceivers()
+                            }
+                        }) {
+                            Label("주변 기기 새로고침 (Refresh)", systemImage: "arrow.clockwise")
+                        }
+                        
+                        // 기기 잊기
+                        if viewModel.isPaired {
+                            Button(role: .destructive, action: {
+                                viewModel.clearPairedReceiver()
+                            }) {
+                                Label("이 기기 연결 끊기 (Forget)", systemImage: "trash")
+                            }
+                        }
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Label("백업 대상", systemImage: "macbook.and.iphone")
+                                .font(.system(.caption, design: .rounded, weight: .bold))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Text(viewModel.pairedReceiverName ?? "선택 안 됨")
+                            .font(.system(.footnote, design: .rounded, weight: .semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                        
+                        if !viewModel.isPaired {
+                            Text("연결 없음")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundColor(.gray)
+                        } else {
+                            Text(viewModel.pairedReceiverIsOnline ? "🟢 Online" : "🟠 Offline")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundColor(viewModel.pairedReceiverIsOnline ? .green : .orange)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(16)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(.white.opacity(0.18), lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal)
+    }
+    
     // MARK: - Helpers
-
+    
     private var backgroundGradient: some View {
         LinearGradient(
             colors: [Color(.systemBackground), Color.accentColor.opacity(0.05)],
@@ -358,73 +540,34 @@ public struct BackupDashboardView: View {
         )
         .ignoresSafeArea()
     }
-
-    private func permissionRow(title: String, status: PermissionStatus, action: (() async -> Void)?) -> some View {
-        HStack {
-            Text(title)
-                .font(.subheadline)
-            Spacer()
-            switch status {
-            case .granted:
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-            case .denied:
-                Button("Open Settings") { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
-                    .font(.caption)
-                    .buttonStyle(.bordered)
-            case .unknown:
-                if let action {
-                    Button("Allow") { Task { await action() } }
-                        .font(.caption)
-                        .buttonStyle(.borderedProminent)
-                } else {
-                    ProgressView()
-                }
-            }
+    
+    private func phaseTitle(for phase: BackupProgressPhase) -> String {
+        switch phase {
+        case .scanning: return "스캔 중"
+        case .checking: return "백업 확인 중"
+        case .uploading: return "전송 중"
+        case .complete: return "완료"
+        case .failed: return "실패"
         }
     }
-
-    private func receiverRow(_ receiver: DiscoveredReceiver) -> some View {
-        HStack {
-            Image(systemName: "desktopcomputer")
-            VStack(alignment: .leading, spacing: 2) {
-                Text(receiver.name)
-                    .font(.subheadline)
-                if viewModel.isPaired && viewModel.pairedReceiverName == receiver.name {
-                    Text("Current backup target")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            if viewModel.isPaired && viewModel.pairedReceiver?.id == receiver.id {
-                Label("Current", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            } else {
-                Button(viewModel.isPaired ? "Switch Target" : "Connect") { Task { await viewModel.pair(with: receiver) } }
-                    .font(.caption)
-                    .buttonStyle(.bordered)
-                    .disabled(viewModel.isPairing || viewModel.isBackingUp)
-            }
+    
+    private func phaseDescription(for phase: BackupProgressPhase) -> String {
+        switch phase {
+        case .scanning: return "최근 촬영된 라이브러리 스캔 중…"
+        case .checking: return "Mac 리시버의 해시 파일과 비교 중…"
+        case .uploading: return "iPhone 사진 라이브러리 전송 중"
+        case .complete: return "모든 사진이 Mac에 동기화되었습니다."
+        case .failed: return "백업 도중 오류가 발생했습니다."
         }
-        .padding(.vertical, 4)
     }
-
-    private func autoBackupStatusCard(_ status: AutoBackupStatusViewModel) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: status.symbolName)
-                .foregroundStyle(Color.accentColor)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(status.title)
-                    .font(.subheadline.weight(.semibold))
-                Text(status.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
+    
+    private func simulatedProgressText(for progressViewModel: BackupProgressViewModel) -> String {
+        switch progressViewModel.phase {
+        case .scanning, .checking:
+            return "계산 중…"
+        case .uploading, .complete, .failed:
+            return "\(progressViewModel.completedCount) / \(progressViewModel.totalCount)"
         }
-        .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 

@@ -607,7 +607,7 @@ public struct FailedUploadProgressItem: Identifiable, Equatable {
     }
 }
 
-private struct ActiveUploadThumbnailView: View {
+struct ActiveUploadThumbnailView: View {
     let assetLocalID: String
     @StateObject private var loader: AssetThumbnailLoader
 
@@ -640,7 +640,7 @@ private struct ActiveUploadThumbnailView: View {
 }
 
 @MainActor
-private final class AssetThumbnailLoader: ObservableObject {
+final class AssetThumbnailLoader: ObservableObject {
     @Published var image: UIImage?
 
     private let assetLocalID: String
