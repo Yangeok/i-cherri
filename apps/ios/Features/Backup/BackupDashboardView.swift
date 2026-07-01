@@ -442,7 +442,7 @@ public struct BackupDashboardView: View {
         case .scanning, .checking:
             return "계산 중…"
         case .uploading, .complete, .failed:
-            return "\(progressViewModel.completedCount) / \(progressViewModel.totalCount)"
+            return "\(progressViewModel.overallBackedUpCount) / \(progressViewModel.totalCount)"
         }
     }
 }
@@ -2377,7 +2377,7 @@ struct ExpandedBackupCardView: View {
         case .scanning, .checking:
             return "계산 중…"
         case .uploading, .complete, .failed:
-            return "\(progressViewModel.completedCount) / \(progressViewModel.totalCount)"
+            return "\(progressViewModel.overallBackedUpCount) / \(progressViewModel.totalCount)"
         }
     }
 }
