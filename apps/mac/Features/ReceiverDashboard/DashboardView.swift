@@ -702,7 +702,6 @@ struct DashboardView: View {
             ))
             .onAppear {
                 Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
-                Task { await viewModel.prefetchVisibleAssetNeighborhood(around: index, size: 48) }
             }
     }
 
@@ -716,7 +715,6 @@ struct DashboardView: View {
             ))
             .onAppear {
                 Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
-                Task { await viewModel.prefetchVisibleAssetNeighborhood(around: index, size: itemSize) }
             }
     }
 
@@ -1114,6 +1112,15 @@ final class DashboardViewModel: ObservableObject {
         visibleAssets = Array(filteredAssets[nextRange])
         rebuildVisibleAssetSections()
         hasMoreVisibleAssets = upperBound < filteredAssets.count
+
+        // Prefetch thumbnails for the newly visible asset window in one go
+        let assetsToWarm = visibleAssets
+        let columns = gridColumnCount
+        let width: CGFloat = 800
+        let itemSize = columns > 0 ? (width / CGFloat(columns)) : 48
+        Task {
+            await AssetHistoryThumbnailPrefetcher.prefetch(assets: assetsToWarm, size: itemSize)
+        }
     }
 
     private static func buildSections(
@@ -1346,9 +1353,11 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
             size: size,
             scale: displayScale
         ) {
+            // Decode image on the background thread
+            let nsImage = NSImage(data: thumbnailData)
             await MainActor.run {
                 if image == nil {
-                    image = NSImage(data: thumbnailData)
+                    image = nsImage
                 }
             }
         }
