@@ -1395,19 +1395,8 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
 
     private static func loadDirectThumbnail(fileURL: URL, mediaType: String, size: CGFloat) -> CGImage? {
         if mediaType.lowercased() == "video" {
-            let asset = AVURLAsset(url: fileURL)
-            let generator = AVAssetImageGenerator(asset: asset)
-            generator.appliesPreferredTrackTransform = true
-            let workloadProfile = AssetHistoryThumbnailWorkloadProfile.current()
-            let targetSize = min(size, workloadProfile.maxVideoPixelSize)
-            generator.maximumSize = CGSize(width: targetSize * 2, height: targetSize * 2)
-
-            do {
-                let frame = try generator.copyCGImage(at: .zero, actualTime: nil)
-                return squareCroppedImage(from: frame, size: size)
-            } catch {
-                return nil
-            }
+            // Let QLThumbnailGenerator handle videos asynchronously out-of-process.
+            return nil
         }
 
         guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return nil }
