@@ -920,7 +920,8 @@ final class DashboardViewModel: ObservableObject {
                 self.selectedDevice = devices.first?.deviceId
             }
 
-            await loadSelectedDeviceAssets(reset: true)
+            let hasChangedDevice = previousSelection != selectedDevice
+            await loadSelectedDeviceAssets(reset: hasChangedDevice)
         } catch {
             print("[DashboardViewModel] Load failed: \(error)")
         }
@@ -947,9 +948,20 @@ final class DashboardViewModel: ObservableObject {
             visibleAssetWindowRange = 0..<0
             rebuildScrubberSections()
             scheduleThumbnailBackfillIfNeeded(for: deviceId)
-        }
+            updateVisibleAssetWindow(anchorIndex: 0)
+        } else {
+            filteredAssets = await matchingAssetsForSelectedDevice()
+            rebuildScrubberSections()
 
-        updateVisibleAssetWindow(anchorIndex: reset ? 0 : visibleAssetWindowRange.lowerBound)
+            // Preserve the currently loaded range of assets
+            let currentRange = visibleAssetWindowRange
+            let clampedUpperBound = min(filteredAssets.count, currentRange.upperBound)
+            let newRange = 0..<clampedUpperBound
+            visibleAssetWindowRange = newRange
+            visibleAssets = Array(filteredAssets[newRange])
+            rebuildVisibleAssetSections()
+            hasMoreVisibleAssets = clampedUpperBound < filteredAssets.count
+        }
     }
 
     func loadMoreIfNeeded(currentIndex: Int) async {
@@ -1106,8 +1118,10 @@ final class DashboardViewModel: ObservableObject {
         rebuildVisibleAssetSections()
         hasMoreVisibleAssets = upperBound < filteredAssets.count
 
-        // Prefetch thumbnails for the newly visible asset window in one go
-        let assetsToWarm = visibleAssets
+        // Prefetch thumbnails only for the neighborhood around the anchorIndex (80 items)
+        let lowerBoundPrefetch = max(0, anchorIndex - 20)
+        let upperBoundPrefetch = min(filteredAssets.count - 1, anchorIndex + 60)
+        let assetsToWarm = Array(filteredAssets[lowerBoundPrefetch...upperBoundPrefetch])
         let columns = gridColumnCount
         let width: CGFloat = 800
         let itemSize = columns > 0 ? (width / CGFloat(columns)) : 48
@@ -1736,8 +1750,12 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
         guard !requests.isEmpty else { return }
 
         for request in requests where !queuedRequestSet.contains(request) {
-            queuedRequests.append(request)
             queuedRequestSet.insert(request)
+            if request.workload == .backgroundBackfill {
+                queuedRequests.append(request)
+            } else {
+                queuedRequests.insert(request, at: 0)
+            }
         }
 
         spawnWorkersIfNeeded()
