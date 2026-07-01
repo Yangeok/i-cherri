@@ -1088,7 +1088,7 @@ final class DashboardViewModel: ObservableObject {
             lastPage: lastPage,
             radius: Self.retainedPageRadius
         )
-        let lowerBound = pageRange.lowerBound * Self.assetPageSize
+        let lowerBound = 0
         let upperBound = min(filteredAssets.count, (pageRange.upperBound + 1) * Self.assetPageSize)
         let nextRange = lowerBound..<upperBound
 
