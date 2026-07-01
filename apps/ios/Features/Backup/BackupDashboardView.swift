@@ -1071,6 +1071,9 @@ final class BackupDashboardViewModel: ObservableObject {
                     duplicateCount: duplicateAssetIDs.count,
                     failedAssetIDs: Set(batchResponse.unsupported)
                 )
+                // ✅ reconcileState에도 SSOT를 주입 — snapshotCounts()가 max(로컬추정, SSOT)를 반환하도록
+                // 이 값이 없으면 updateSnapshot()이 overallBackedUpCount를 1 같은 값으로 덮어쓰게 됨
+                await reconcileState.setReceiverCompletedAssetCount(ssotCompletedCount)
                 var pendingAssetIDs: Set<String> = []
 
                 let duplicateBytes = (batchResponse.alreadyBackedUp + batchResponse.duplicates)
