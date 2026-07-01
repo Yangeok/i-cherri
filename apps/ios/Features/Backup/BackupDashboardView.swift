@@ -15,6 +15,7 @@ public struct BackupDashboardView: View {
     @StateObject private var viewModel = BackupDashboardViewModel()
     @State private var isTargetPickerPresented = false
     @State private var backupSheetDetent: PresentationDetent = .large
+    @State private var isGalleryPresented = false
 
     public init() {}
 
@@ -34,6 +35,16 @@ public struct BackupDashboardView: View {
                         }
                     }
                     .padding()
+                }
+            }
+            .navigationTitle("iCherri")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        isGalleryPresented = true
+                    } label: {
+                        Image(systemName: "sparkles.rectangle.stack")
+                    }
                 }
             }
         }
@@ -66,6 +77,9 @@ public struct BackupDashboardView: View {
                     backupSheetDetent = .large
                 }
             }
+        }
+        .sheet(isPresented: $isGalleryPresented) {
+            ComponentGalleryView()
         }
         .confirmationDialog(
             "Choose Backup Target",
@@ -1768,6 +1782,7 @@ private actor BackupUploadProgressCoordinator {
     private var pendingEmissionTask: Task<Void, Never>?
 
     private var isBackground: Bool = false
+    private var isObservingNotifications: Bool = false
     private var backgroundTask: Task<Void, Never>?
     private var foregroundTask: Task<Void, Never>?
 
@@ -1775,35 +1790,49 @@ private actor BackupUploadProgressCoordinator {
         self.viewModel = viewModel
         self.totalExpectedBytes = totalExpectedBytes
         self.totalCount = totalCount
-
-        let initialBg = Thread.isMainThread 
-            ? UIApplication.shared.applicationState == .background 
-            : DispatchQueue.main.sync { UIApplication.shared.applicationState == .background }
-        self.isBackground = initialBg
-
-        self.backgroundTask = Task { [weak self] in
-            for await _ in NotificationCenter.default.notifications(named: UIApplication.didEnterBackgroundNotification) {
-                await self?.setBackground(true)
-            }
-        }
-
-        self.foregroundTask = Task { [weak self] in
-            for await _ in NotificationCenter.default.notifications(named: UIApplication.willEnterForegroundNotification) {
-                await self?.setBackground(false)
-            }
-        }
     }
 
     deinit {
-        backgroundTask?.cancel()
-        foregroundTask?.cancel()
+        // Since deinit is nonisolated, we cannot cancel actor properties directly.
+        // Instead, the Task capturing [weak self] will automatically complete when self is released.
     }
 
     private func setBackground(_ isBg: Bool) {
         self.isBackground = isBg
     }
 
+    private func startObservingNotificationsIfNeeded() {
+        guard !isObservingNotifications else { return }
+        isObservingNotifications = true
+        
+        Task { [weak self] in
+            let initialBg = await MainActor.run { UIApplication.shared.applicationState == .background }
+            await self?.setBackground(initialBg)
+            
+            let bgTask = Task { [weak self] in
+                for await _ in NotificationCenter.default.notifications(named: UIApplication.didEnterBackgroundNotification) {
+                    await self?.setBackground(true)
+                }
+            }
+            
+            let fgTask = Task { [weak self] in
+                for await _ in NotificationCenter.default.notifications(named: UIApplication.willEnterForegroundNotification) {
+                    await self?.setBackground(false)
+                }
+            }
+            
+            // Store reference inside actor context
+            await self?.storeObservationTasks(bg: bgTask, fg: fgTask)
+        }
+    }
+
+    private func storeObservationTasks(bg: Task<Void, Never>, fg: Task<Void, Never>) {
+        self.backgroundTask = bg
+        self.foregroundTask = fg
+    }
+
     func beginAsset(assetLocalID: String, filename: String, expectedByteSize: Int64) {
+        startObservingNotificationsIfNeeded()
         currentFilename = filename
         activeUploads[assetLocalID] = ActiveUploadState(
             filename: filename,
