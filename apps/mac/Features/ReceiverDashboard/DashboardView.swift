@@ -837,7 +837,7 @@ final class DashboardViewModel: ObservableObject {
 
     @Published var pairedDevices: [PairedDeviceRecord] = []
     @Published var activeUploads: [DashboardActiveUpload] = []
-    @Published var allAssets: [BackupAssetRecord] = []
+    @Published var deviceStats: [String: DatabaseManager.DeviceBackupStats] = [:]
     @Published var visibleAssets: [BackupAssetRecord] = []
     @Published fileprivate var visibleAssetSections: [AssetHistorySection] = []
     @Published fileprivate var scrubberSections: [AssetHistorySection] = []
@@ -880,12 +880,12 @@ final class DashboardViewModel: ObservableObject {
             self.backupFolderPath = appCoordinator.backupFolder.path
             
             let devices = try await databaseManager.fetchAllDevices()
-            let assets = try await databaseManager.fetchAllAssets()
+            let stats = try await databaseManager.fetchBackupStatsByDevice()
             let sessions = try await databaseManager.fetchAllSessions()
             let coverageSummaries = try await databaseManager.fetchLatestBackupCoverageSummaries()
             
             self.pairedDevices = devices
-            self.allAssets = assets
+            self.deviceStats = stats
             self.latestCoverageSummariesByDevice = Dictionary(
                 uniqueKeysWithValues: coverageSummaries.map { ($0.deviceId, $0) }
             )
@@ -922,6 +922,7 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
+
     func loadSelectedDeviceAssets(reset: Bool) async {
         guard let deviceId = selectedDevice else {
             visibleAssets = []
@@ -938,7 +939,7 @@ final class DashboardViewModel: ObservableObject {
         defer { isLoadingAssetPage = false }
 
         if reset {
-            filteredAssets = matchingAssetsForSelectedDevice()
+            filteredAssets = await matchingAssetsForSelectedDevice()
             visibleAssetWindowRange = 0..<0
             rebuildScrubberSections()
             scheduleThumbnailBackfillIfNeeded(for: deviceId)
@@ -979,26 +980,23 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func assets(for deviceId: String) -> [BackupAssetRecord] {
-        allAssets.filter { $0.deviceId == deviceId && $0.status == "completed" }
+        []
     }
 
     func assetCount(for deviceId: String) -> Int {
-        allAssets.filter { $0.deviceId == deviceId && $0.status == "completed" }.count
+        deviceStats[deviceId]?.completedCount ?? 0
     }
 
     func duplicateCount(for deviceId: String) -> Int {
-        allAssets.filter { $0.deviceId == deviceId && $0.status == "duplicate" }.count
+        deviceStats[deviceId]?.duplicateCount ?? 0
     }
 
     func failedCount(for deviceId: String) -> Int {
-        allAssets.filter { $0.deviceId == deviceId && $0.status == "failed" }.count
+        deviceStats[deviceId]?.failedCount ?? 0
     }
 
     func lastBackupDate(for deviceId: String) -> Date? {
-        allAssets
-            .filter { $0.deviceId == deviceId && ($0.status == "completed" || $0.status == "duplicate") }
-            .compactMap(\.completedAt)
-            .max()
+        deviceStats[deviceId]?.lastBackupDate
     }
 
     func latestCoverageSummary(for deviceId: String) -> BackupRunCoverageSummary? {
@@ -1046,30 +1044,21 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    private func matchingAssetsForSelectedDevice() -> [BackupAssetRecord] {
+    private func matchingAssetsForSelectedDevice() async -> [BackupAssetRecord] {
         guard let deviceId = selectedDevice else { return [] }
 
-        return allAssets.filter { asset in
-            guard asset.deviceId == deviceId else { return false }
-
-            if let mediaType = assetHistoryMediaFilter.databaseValue,
-               asset.mediaType.caseInsensitiveCompare(mediaType) != .orderedSame {
-                return false
-            }
-
-            let trimmedQuery = assetSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedQuery.isEmpty,
-               asset.originalFilename.range(of: trimmedQuery, options: [.caseInsensitive, .diacriticInsensitive]) == nil {
-                return false
-            }
-
-            return true
-        }
-        .sorted { lhs, rhs in
-            if lhs.creationDate == rhs.creationDate {
-                return lhs.backupId > rhs.backupId
-            }
-            return lhs.creationDate > rhs.creationDate
+        do {
+            return try await databaseManager.fetchAssets(
+                deviceId: deviceId,
+                searchQuery: assetSearchQuery,
+                status: nil, // fetch all statuses (completed, duplicate, failed)
+                mediaType: assetHistoryMediaFilter.databaseValue,
+                limit: 100000, // a high limit to get all matching assets for the scrubber
+                offset: 0
+            )
+        } catch {
+            print("Failed to fetch matching assets: \(error)")
+            return []
         }
     }
 

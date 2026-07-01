@@ -263,12 +263,16 @@ actor DatabaseManager {
     static let shared = DatabaseManager()
 
     private var dbQueue: DatabaseQueue?
+    private var pendingInserts: [BackupAssetRecord] = []
+    private var insertWaiters: [CheckedContinuation<Void, any Error>] = []
+    private var isFlushing = false
 
     private init() {}
 
     func open(at path: String) throws {
         var config = Configuration()
         config.label = "iCherri-DB"
+        config.journalMode = .wal // Enable Write-Ahead Logging
         let queue = try DatabaseQueue(path: path, configuration: config)
         try migrate(queue)
         dbQueue = queue
@@ -447,9 +451,43 @@ actor DatabaseManager {
 
     // MARK: - Backup Assets
 
-    func insertBackupAsset(_ record: BackupAssetRecord) throws {
-        try queue.write { db in
-            try record.insert(db)
+    func insertBackupAsset(_ record: BackupAssetRecord) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            pendingInserts.append(record)
+            insertWaiters.append(continuation)
+
+            if !isFlushing {
+                isFlushing = true
+                Task {
+                    await flushInserts()
+                }
+            }
+        }
+    }
+
+    private func flushInserts() {
+        let records = pendingInserts
+        let waiters = insertWaiters
+        pendingInserts.removeAll()
+        insertWaiters.removeAll()
+        isFlushing = false
+
+        guard !records.isEmpty else { return }
+
+        do {
+            let q = try queue
+            try q.write { db in
+                for record in records {
+                    try record.insert(db)
+                }
+            }
+            for waiter in waiters {
+                waiter.resume()
+            }
+        } catch {
+            for waiter in waiters {
+                waiter.resume(throwing: error)
+            }
         }
     }
 
@@ -893,6 +931,46 @@ actor DatabaseManager {
                 .fetchAll(db)
         }
     }
+
+    struct DeviceBackupStats: Codable {
+        let completedCount: Int
+        let duplicateCount: Int
+        let failedCount: Int
+        let lastBackupDate: Date?
+    }
+
+    func fetchBackupStatsByDevice() throws -> [String: DeviceBackupStats] {
+        try queue.read { db in
+            var result: [String: DeviceBackupStats] = [:]
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT 
+                    device_id,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
+                    SUM(CASE WHEN status = 'duplicate' THEN 1 ELSE 0 END) as duplicate_count,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count,
+                    MAX(completed_at) as last_backup
+                FROM backup_assets
+                GROUP BY device_id
+            """)
+            
+            for row in rows {
+                let deviceID: String = row["device_id"]
+                let completed: Int = row["completed_count"] ?? 0
+                let duplicate: Int = row["duplicate_count"] ?? 0
+                let failed: Int = row["failed_count"] ?? 0
+                let lastBackup: Date? = row["last_backup"]
+                
+                result[deviceID] = DeviceBackupStats(
+                    completedCount: completed,
+                    duplicateCount: duplicate,
+                    failedCount: failed,
+                    lastBackupDate: lastBackup
+                )
+            }
+            return result
+        }
+    }
+
 
     func deletePairedDevice(deviceId: String) throws -> [String] {
         try queue.write { db in
