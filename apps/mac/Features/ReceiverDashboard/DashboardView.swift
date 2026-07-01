@@ -1412,7 +1412,7 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
 
         guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return nil }
         let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: Int(size * 2)
         ]
