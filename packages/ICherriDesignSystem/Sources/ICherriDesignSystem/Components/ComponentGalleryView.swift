@@ -13,6 +13,7 @@ public struct ComponentGalleryView: View {
     @State private var photoPermissionGranted: Bool = true
     @State private var localNetworkGranted: Bool = true
     @State private var selectedMacReceiver: String = "Yangeok-Mac"
+    @State private var isScanningReceiversSimulated: Bool = false
     
     enum SimulatedBackupPhase: String, CaseIterable, Identifiable {
         case scanning = "스캔 중"
@@ -66,7 +67,7 @@ public struct ComponentGalleryView: View {
                     expandedCardView
                 }
             }
-            .frame(height: 190)
+            .frame(height: isBackingUpSimulated ? 270 : 190) // 썸네일 리스트 추가로 인한 가변 높이 확장
             .animation(.spring(response: 0.5, dampingFraction: 0.78), value: isBackingUpSimulated)
             .background(morphingBackgroundGlow)
             
@@ -80,18 +81,27 @@ public struct ComponentGalleryView: View {
     private var defaultDiscView: some View {
         VStack(spacing: 8) {
             HStack(spacing: 4) {
-                Circle()
-                    .fill(selectedMacReceiver == "Office-Mini" ? .orange : .green)
-                    .frame(width: 8, height: 8)
-                Text(selectedMacReceiver == "Office-Mini" ? "Offline" : "Online")
-                    .font(.system(.caption2, design: .rounded, weight: .bold))
-                    .foregroundColor(selectedMacReceiver == "Office-Mini" ? .orange : .green)
+                if selectedMacReceiver == "선택 안 됨" {
+                    Circle()
+                        .fill(.gray)
+                        .frame(width: 8, height: 8)
+                    Text("연결 없음")
+                        .font(.system(.caption2, design: .rounded, weight: .bold))
+                        .foregroundColor(.gray)
+                } else {
+                    Circle()
+                        .fill(selectedMacReceiver == "Office-Mini" ? .orange : .green)
+                        .frame(width: 8, height: 8)
+                    Text(selectedMacReceiver == "Office-Mini" ? "Offline" : "Online")
+                        .font(.system(.caption2, design: .rounded, weight: .bold))
+                        .foregroundColor(selectedMacReceiver == "Office-Mini" ? .orange : .green)
+                }
             }
             
             Text(selectedMacReceiver)
                 .font(.system(.headline, design: .rounded, weight: .bold))
             
-            Text("최근 백업: 3시간 전")
+            Text(selectedMacReceiver == "선택 안 됨" ? "기기를 먼저 등록해 주세요" : "최근 백업: 3시간 전")
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundColor(.secondary)
         }
@@ -117,20 +127,6 @@ public struct ComponentGalleryView: View {
                     Text(simulatedPhaseDescription)
                         .font(.system(.caption2, design: .rounded))
                         .foregroundColor(.secondary)
-                    
-                    // ⭐️ [요구사항 반영] 실시간 전송 파일명 Glassmorphism 라벨 노출!
-                    if simulatedPhase == .uploading {
-                        Text(simulatedFilename)
-                            .font(.system(.caption2, design: .monospaced, weight: .semibold))
-                            .foregroundColor(.accentColor.opacity(0.85))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color.accentColor.opacity(0.15), lineWidth: 0.5)
-                            )
-                    }
                 }
                 Spacer()
                 
@@ -146,6 +142,53 @@ public struct ComponentGalleryView: View {
                     ProgressView()
                         .controlSize(.small)
                 }
+            }
+            
+            // ⭐️ [요구사항 반영] 실시간 병렬 다중 전송 썸네일 리스트 렌더링!
+            if simulatedPhase == .uploading {
+                HStack(spacing: 10) {
+                    ForEach(0..<3) { idx in
+                        VStack(alignment: .leading, spacing: 4) {
+                            // 썸네일 가상 이미지 뷰 (Glassmorphism & Shimmer 느낌)
+                            ZStack {
+                                LinearGradient(
+                                    colors: [
+                                        Color.blue.opacity(0.1 + Double(idx) * 0.05),
+                                        Color.purple.opacity(0.15 - Double(idx) * 0.05)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                                
+                                Image(systemName: idx % 2 == 0 ? "photo.fill" : "video.fill")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.4))
+                            }
+                            .frame(width: 54, height: 54)
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(.white.opacity(0.15), lineWidth: 0.5)
+                            )
+                            
+                            // 파일명 텍스트
+                            Text(simulatedConcurrentFilename(index: idx))
+                                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .frame(width: 54)
+                            
+                            // 미니 진행바 (병렬 전송 상태 연동)
+                            ProgressView(value: min(1.0, max(0.0, sampleProgress + Double(idx) * 0.15 - 0.1)))
+                                .progressViewStyle(.linear)
+                                .scaleEffect(x: 1, y: 0.5, anchor: .center)
+                                .tint(.accentColor)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
             
             // 리퀴드 프로그레스 바
@@ -231,6 +274,7 @@ public struct ComponentGalleryView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.accentColor)
+                .disabled(selectedMacReceiver == "선택 안 됨" || selectedMacReceiver == "Office-Mini")
             } else {
                 Button(action: {
                     isBackingUpSimulated = false
@@ -281,10 +325,18 @@ public struct ComponentGalleryView: View {
     
     private var settingsGridSection: some View {
         VStack(spacing: 16) {
-            Text("설정 및 기기 연결 상태 (2열 그리드)")
-                .font(.system(.subheadline, design: .rounded, weight: .bold))
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Text("설정 및 기기 연결 상태 (2열 그리드)")
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundColor(.secondary)
+                Spacer()
+                if isScanningReceiversSimulated {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
             
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 // 자동 백업 카드
@@ -366,12 +418,34 @@ public struct ComponentGalleryView: View {
                         .stroke(.white.opacity(0.18), lineWidth: 0.5)
                 )
                 
-                // ⭐️ [요구사항 반영] 백업 대상 카드를 터치하여 가상 Mac 기기를 선택 가능한 대화형 Menu로 변경!
+                // ⭐️ [요구사항 완벽 반영] 백업 대상 카드에 스캔(Refresh) 및 잊기(Forget) 기능을 유기적으로 통합한 다기능 Menu!
                 Menu {
-                    Button("Yangeok-Mac (🟢 Online)") { selectedMacReceiver = "Yangeok-Mac" }
-                    Button("Minyoung-Mac (🟢 Online)") { selectedMacReceiver = "Minyoung-Mac" }
-                    Button("Office-Mini (🟠 Offline)") { selectedMacReceiver = "Office-Mini" }
-                    Button("Studio-Pro (🟢 Online)") { selectedMacReceiver = "Studio-Pro" }
+                    Section("감지된 기기 (자동 탐색 완료)") {
+                        Button("Yangeok-Mac (🟢 Online)") { selectedMacReceiver = "Yangeok-Mac" }
+                        Button("Minyoung-Mac (🟢 Online)") { selectedMacReceiver = "Minyoung-Mac" }
+                        Button("Office-Mini (🟠 Offline)") { selectedMacReceiver = "Office-Mini" }
+                        Button("Studio-Pro (🟢 Online)") { selectedMacReceiver = "Studio-Pro" }
+                    }
+                    
+                    Section("제어 및 해제") {
+                        // 수동 기기 탐색 시뮬레이션
+                        Button(action: {
+                            isScanningReceiversSimulated = true
+                            Task {
+                                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                                isScanningReceiversSimulated = false
+                            }
+                        }) {
+                            Label("주변 기기 새로고침 (Refresh)", systemImage: "arrow.clockwise")
+                        }
+                        
+                        // 기기 연결 해제
+                        Button(role: .destructive, action: {
+                            selectedMacReceiver = "선택 안 됨"
+                        }) {
+                            Label("이 기기 연결 끊기 (Forget)", systemImage: "trash")
+                        }
+                    }
                 } label: {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -389,9 +463,15 @@ public struct ComponentGalleryView: View {
                             .foregroundColor(.primary)
                             .lineLimit(1)
                         
-                        Text(selectedMacReceiver == "Office-Mini" ? "🟠 Offline" : "🟢 Online")
-                            .font(.system(.caption2, design: .rounded))
-                            .foregroundColor(selectedMacReceiver == "Office-Mini" ? .orange : .green)
+                        if selectedMacReceiver == "선택 안 됨" {
+                            Text("연결 없음")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundColor(.gray)
+                        } else {
+                            Text(selectedMacReceiver == "Office-Mini" ? "🟠 Offline" : "🟢 Online")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundColor(selectedMacReceiver == "Office-Mini" ? .orange : .green)
+                        }
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -434,12 +514,15 @@ public struct ComponentGalleryView: View {
         }
     }
     
-    // ⭐️ [요구사항 반영] 진행률에 따른 실시간 전송 파일명 변환 로직
-    private var simulatedFilename: String {
-        guard simulatedPhase == .uploading else { return simulatedPhase == .complete ? "백업 완료됨" : "준비 중…" }
-        let fileIndex = Int(sampleProgress * 100) + 1024
-        let isVideo = fileIndex % 4 == 0
-        return isVideo ? "MV_\(fileIndex).mp4" : "IMG_\(fileIndex).heic"
+    // ⭐️ [요구사항 반영] 다중 병렬 전송 썸네일용 개별 파일명 계산
+    private func simulatedConcurrentFilename(index: Int) -> String {
+        let baseIndex = Int(sampleProgress * 100) + 1024 + index
+        let isVideo = baseIndex % 3 == 0
+        return isVideo ? "MV_\(baseIndex).mp4" : "IMG_\(idxStr(baseIndex)).heic"
+    }
+    
+    private func idxStr(_ val: Int) -> String {
+        return "\(val)"
     }
 }
 
