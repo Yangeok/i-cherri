@@ -1662,9 +1662,9 @@ actor AssetHistoryThumbnailCache {
     }
 
     private func cacheKey(for fileURL: URL, size: CGFloat) -> String? {
-        let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path)
-        let modificationDate = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let rawKey = "\(Self.cacheVersion)|\(fileURL.path)|\(Int(size.rounded()))|\(modificationDate)"
+        // Backup files are immutable, so path and size are sufficient for the cache key.
+        // This avoids blocking fileManager.attributesOfItem disk calls during scrolling.
+        let rawKey = "\(Self.cacheVersion)|\(fileURL.path)|\(Int(size.rounded()))"
         let digest = SHA256.hash(data: Data(rawKey.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
