@@ -1255,7 +1255,12 @@ private struct AssetHistoryThumbnailView: View {
                 .appendingPathComponent(asset.finalPath)
                 .path
         }
-        _loader = StateObject(wrappedValue: AssetHistoryThumbnailLoader(path: resolvedPath, mediaType: asset.mediaType, size: size))
+        _loader = StateObject(wrappedValue: AssetHistoryThumbnailLoader(
+            path: resolvedPath,
+            relativePath: asset.finalPath,
+            mediaType: asset.mediaType,
+            size: size
+        ))
     }
 
     var body: some View {
@@ -1331,18 +1336,32 @@ private struct AssetHistoryThumbnailView: View {
     }
 }
 
+extension Notification.Name {
+    static let thumbnailDidCache = Notification.Name("thumbnailDidCache")
+}
+
+@MainActor
 private final class AssetHistoryThumbnailLoader: ObservableObject {
     @Published var image: NSImage?
 
     private let path: String
+    private let relativePath: String
     private let mediaType: String
     private let size: CGFloat
     private var hasLoaded = false
+    private var notificationObserver: AnyObject?
 
-    init(path: String, mediaType: String, size: CGFloat) {
+    init(path: String, relativePath: String, mediaType: String, size: CGFloat) {
         self.path = path
+        self.relativePath = relativePath
         self.mediaType = mediaType
         self.size = size
+    }
+
+    deinit {
+        if let observer = notificationObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func loadIfNeeded() async {
@@ -1358,13 +1377,49 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
             for: fileURL,
             mediaType: mediaType,
             size: size,
-            scale: displayScale
+            scale: displayScale,
+            generateIfAbsent: false
         ) {
-            // Decode image on the background thread
             let nsImage = NSImage(data: thumbnailData)
-            await MainActor.run {
-                if image == nil {
-                    image = nsImage
+            self.image = nsImage
+        } else {
+            setupNotificationObserver()
+
+            let relativePath = self.relativePath
+            let mediaType = self.mediaType
+            let size = self.size
+            Task {
+                await AssetHistoryThumbnailPrefetchCoordinator.shared.enqueue(
+                    relativePath: relativePath,
+                    mediaType: mediaType,
+                    workload: .neighborhoodPrefetch,
+                    sizes: [size]
+                )
+            }
+        }
+    }
+
+    private func setupNotificationObserver() {
+        guard notificationObserver == nil else { return }
+
+        notificationObserver = NotificationCenter.default.addObserver(
+            forName: .thumbnailDidCache,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            guard let path = notification.userInfo?["path"] as? String,
+                  let size = notification.userInfo?["size"] as? CGFloat else { return }
+
+            if path == self.path && abs(size - self.size) < 1.0 {
+                if let observer = self.notificationObserver {
+                    NotificationCenter.default.removeObserver(observer)
+                    self.notificationObserver = nil
+                }
+
+                self.hasLoaded = false
+                Task {
+                    await self.loadIfNeeded()
                 }
             }
         }
@@ -1619,12 +1674,20 @@ actor AssetHistoryThumbnailCache {
         store(data, cacheKey: cacheKey, size: size)
     }
 
-    func thumbnailData(for fileURL: URL, mediaType: String, size: CGFloat, scale: CGFloat) async -> Data? {
+    func thumbnailData(
+        for fileURL: URL,
+        mediaType: String,
+        size: CGFloat,
+        scale: CGFloat,
+        generateIfAbsent: Bool = true
+    ) async -> Data? {
         guard let cacheKey = cacheKey(for: fileURL, size: size) else { return nil }
 
         if let cachedData = cachedImageData(for: fileURL, size: size) {
             return cachedData
         }
+
+        guard generateIfAbsent else { return nil }
 
         if let existingTask = inFlightTasks[cacheKey] {
             return await existingTask.value
@@ -1645,6 +1708,15 @@ actor AssetHistoryThumbnailCache {
 
         if let generatedData {
             store(generatedData, cacheKey: cacheKey, size: size)
+
+            let path = fileURL.path
+            Task { @MainActor in
+                NotificationCenter.default.post(
+                    name: .thumbnailDidCache,
+                    object: nil,
+                    userInfo: ["path": path, "size": size]
+                )
+            }
         }
 
         return generatedData
