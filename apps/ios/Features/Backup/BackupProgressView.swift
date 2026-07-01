@@ -337,7 +337,7 @@ public final class BackupProgressViewModel: ObservableObject {
 
     public func setTotalCount(_ count: Int) {
         sessionTotalCount = count
-        progress = count > 0 ? Double(completedCount) / Double(count) : 0
+        progress = totalCount > 0 ? Double(overallBackedUpCount) / Double(totalCount) : 0
         if completedCount < count {
             isComplete = false
         }
@@ -408,7 +408,7 @@ public final class BackupProgressViewModel: ObservableObject {
             failedUploads = failedUploadItems
         }
 
-        progress = sessionTotalCount > 0 ? Double(completed) / Double(sessionTotalCount) : 0
+        progress = totalCount > 0 ? Double(self.overallBackedUpCount) / Double(totalCount) : 0
         formattedSpeed = formatSpeed(bytesPerSecond)
         formattedTransfer = formatTransfer(sentBytes: self.sentBytes, totalBytes: self.totalBytes)
         if sessionTotalCount > 0, completed >= sessionTotalCount {
