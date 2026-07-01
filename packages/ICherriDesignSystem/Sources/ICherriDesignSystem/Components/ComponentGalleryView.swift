@@ -81,11 +81,11 @@ public struct ComponentGalleryView: View {
         VStack(spacing: 8) {
             HStack(spacing: 4) {
                 Circle()
-                    .fill(.green)
+                    .fill(selectedMacReceiver == "Office-Mini" ? .orange : .green)
                     .frame(width: 8, height: 8)
-                Text("Online")
+                Text(selectedMacReceiver == "Office-Mini" ? "Offline" : "Online")
                     .font(.system(.caption2, design: .rounded, weight: .bold))
-                    .foregroundColor(.green)
+                    .foregroundColor(selectedMacReceiver == "Office-Mini" ? .orange : .green)
             }
             
             Text(selectedMacReceiver)
@@ -117,6 +117,20 @@ public struct ComponentGalleryView: View {
                     Text(simulatedPhaseDescription)
                         .font(.system(.caption2, design: .rounded))
                         .foregroundColor(.secondary)
+                    
+                    // ⭐️ [요구사항 반영] 실시간 전송 파일명 Glassmorphism 라벨 노출!
+                    if simulatedPhase == .uploading {
+                        Text(simulatedFilename)
+                            .font(.system(.caption2, design: .monospaced, weight: .semibold))
+                            .foregroundColor(.accentColor.opacity(0.85))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Color.accentColor.opacity(0.15), lineWidth: 0.5)
+                            )
+                    }
                 }
                 Spacer()
                 
@@ -218,7 +232,6 @@ public struct ComponentGalleryView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.accentColor)
             } else {
-                // ⭐️ [iOS 26 디자인 언어 반영] 로즈골드 보더 글래스 버튼
                 Button(action: {
                     isBackingUpSimulated = false
                 }) {
@@ -353,29 +366,43 @@ public struct ComponentGalleryView: View {
                         .stroke(.white.opacity(0.18), lineWidth: 0.5)
                 )
                 
-                // 연결 기기 선택 카드
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("백업 대상", systemImage: "macbook.and.iphone")
-                        .font(.system(.caption, design: .rounded, weight: .bold))
-                        .foregroundColor(.secondary)
-                    
-                    Text(selectedMacReceiver)
-                        .font(.system(.footnote, design: .rounded, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                    
-                    Text("🟢 Online")
-                        .font(.system(.caption2, design: .rounded))
-                        .foregroundColor(.green)
+                // ⭐️ [요구사항 반영] 백업 대상 카드를 터치하여 가상 Mac 기기를 선택 가능한 대화형 Menu로 변경!
+                Menu {
+                    Button("Yangeok-Mac (🟢 Online)") { selectedMacReceiver = "Yangeok-Mac" }
+                    Button("Minyoung-Mac (🟢 Online)") { selectedMacReceiver = "Minyoung-Mac" }
+                    Button("Office-Mini (🟠 Offline)") { selectedMacReceiver = "Office-Mini" }
+                    Button("Studio-Pro (🟢 Online)") { selectedMacReceiver = "Studio-Pro" }
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Label("백업 대상", systemImage: "macbook.and.iphone")
+                                .font(.system(.caption, design: .rounded, weight: .bold))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Text(selectedMacReceiver)
+                            .font(.system(.footnote, design: .rounded, weight: .semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                        
+                        Text(selectedMacReceiver == "Office-Mini" ? "🟠 Offline" : "🟢 Online")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundColor(selectedMacReceiver == "Office-Mini" ? .orange : .green)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(16)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(.white.opacity(0.18), lineWidth: 0.5)
+                    )
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                )
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal)
@@ -405,6 +432,14 @@ public struct ComponentGalleryView: View {
         case .complete:
             return "20,000 / 20,000"
         }
+    }
+    
+    // ⭐️ [요구사항 반영] 진행률에 따른 실시간 전송 파일명 변환 로직
+    private var simulatedFilename: String {
+        guard simulatedPhase == .uploading else { return simulatedPhase == .complete ? "백업 완료됨" : "준비 중…" }
+        let fileIndex = Int(sampleProgress * 100) + 1024
+        let isVideo = fileIndex % 4 == 0
+        return isVideo ? "MV_\(fileIndex).mp4" : "IMG_\(fileIndex).heic"
     }
 }
 
