@@ -533,6 +533,23 @@ actor DatabaseManager {
 
     // MARK: - Backup Runs
 
+    /// Mac DB 기준 특정 디바이스의 완료+중복 파일 총 수 반환 — iOS SSOT 동기화에 사용
+    func fetchCompletedAssetCount(deviceID: String) throws -> Int {
+        try queue.read { db in
+            let count = try Int.fetchOne(
+                db,
+                sql: """
+                SELECT COUNT(*)
+                FROM backup_assets
+                WHERE device_id = ?
+                  AND status IN ('completed', 'duplicate')
+                """,
+                arguments: [deviceID]
+            )
+            return count ?? 0
+        }
+    }
+
     func replaceBackupRunSnapshot(
         runID: String,
         device: DeviceInfo,

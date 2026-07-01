@@ -107,17 +107,21 @@ public struct CheckBatchResponse: Codable, Sendable {
     public let alreadyBackedUp: [String]
     public let duplicates: [String]
     public let unsupported: [String]
+    /// Mac DB 기준 이미 완료된 파일 수 — iOS 로컬 추정값 대신 이 값을 SSOT로 사용
+    public let completedAssetCount: Int
 
     public init(
         requiredUploads: [UploadRequirement],
         alreadyBackedUp: [String] = [],
         duplicates: [String] = [],
-        unsupported: [String] = []
+        unsupported: [String] = [],
+        completedAssetCount: Int = 0
     ) {
         self.requiredUploads = requiredUploads
         self.alreadyBackedUp = alreadyBackedUp
         self.duplicates = duplicates
         self.unsupported = unsupported
+        self.completedAssetCount = completedAssetCount
     }
 }
 

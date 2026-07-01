@@ -1017,14 +1017,13 @@ final class BackupDashboardViewModel: ObservableObject {
                     return
                 }
 
-                let alreadyBackedUpCount = max(scanPlan.libraryAssetCount - scanPlan.runAssetCount, 0)
-
+                // batchResponse 도착 전까지는 0으로 초기화 — 실제값은 Mac DB SSOT로 아래서 보정
                 let progressCoordinator = await MainActor.run {
                     BackupUploadProgressCoordinator(
                         viewModel: progressViewModel,
                         totalExpectedBytes: scanPlan.runAssetBytes,
                         totalCount: scanPlan.libraryAssetCount,
-                        initialOverallBackedUpCount: alreadyBackedUpCount
+                        initialOverallBackedUpCount: 0
                     )
                 }
 
@@ -1034,7 +1033,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     success: 0,
                     duplicates: 0,
                     failed: 0,
-                    overallBackedUpCount: alreadyBackedUpCount,
+                    overallBackedUpCount: 0,
                     phase: .checking,
                     bytesPerSecond: 0
                 )
@@ -1056,6 +1055,14 @@ final class BackupDashboardViewModel: ObservableObject {
                     totalAssetBytes: scanPlan.libraryAssetBytes
                 )
                 let assetIndex = Dictionary(uniqueKeysWithValues: runAssets.map { ($0.assetLocalID, $0) })
+
+                // ✅ Mac DB SSOT: 로컬 추정값을 버리고 Mac이 응답한 실제 완료 파일 수로 즉시 보정
+                let ssotCompletedCount = batchResponse.completedAssetCount
+                await progressCoordinator.setInitialOverallBackedUpCount(ssotCompletedCount)
+                await MainActor.run {
+                    progressViewModel.overallBackedUpCount = ssotCompletedCount
+                    progressViewModel.totalCount = scanPlan.libraryAssetCount
+                }
 
                 let duplicateAssetIDs = Set(batchResponse.alreadyBackedUp + batchResponse.duplicates)
                 let reconcileState = BackupRunReconcileState(
@@ -1862,6 +1869,11 @@ private actor BackupUploadProgressCoordinator {
             totalBytes: max(expectedByteSize, 0)
         )
         pushUpdate(bytesPerSecond: aggregateBytesPerSecond)
+    }
+
+    /// checkBatch 응답 수신 후 Mac DB SSOT 기준 완료 수로 베이스라인 보정
+    func setInitialOverallBackedUpCount(_ count: Int) {
+        self.overallBackedUpCount = count
     }
 
     func updateSnapshot(

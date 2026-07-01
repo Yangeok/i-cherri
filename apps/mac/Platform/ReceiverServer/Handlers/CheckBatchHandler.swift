@@ -31,7 +31,18 @@ struct CheckBatchHandler: Sendable {
                     candidates: body.candidates
                 )
             }
-            let response = try await processor.process(request: body)
+            var response = try await processor.process(request: body)
+
+            // Mac DB 기준 완료 파일 수를 조회해 iOS가 로컬 추정값 대신 이 값을 SSOT로 쓸 수 있도록 주입
+            let completedCount = (try? await databaseManager.fetchCompletedAssetCount(deviceID: body.device.deviceID)) ?? 0
+            response = CheckBatchResponse(
+                requiredUploads: response.requiredUploads,
+                alreadyBackedUp: response.alreadyBackedUp,
+                duplicates: response.duplicates,
+                unsupported: response.unsupported,
+                completedAssetCount: completedCount
+            )
+
             await progressStore.recordCheckBatch(request: body, response: response)
             return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Failed to encode response", status: 500)
         } catch {
