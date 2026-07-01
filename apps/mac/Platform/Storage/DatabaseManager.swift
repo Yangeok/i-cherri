@@ -944,4 +944,20 @@ extension DatabaseManager: BackupIndexQuerying {
         }
         return nil
     }
+
+    public func registerDuplicate(candidate: AssetMetadata, duplicateOfBackupID: String) async throws {
+        try insertDuplicateAsset(
+            deviceId: candidate.deviceID,
+            assetLocalId: candidate.assetLocalID,
+            originalFilename: candidate.originalFilename,
+            mediaType: candidate.mediaType.rawValue,
+            creationDate: candidate.creationDate,
+            modificationDate: candidate.modificationDate,
+            byteSize: candidate.byteSize,
+            pixelWidth: candidate.pixelWidth,
+            pixelHeight: candidate.pixelHeight,
+            quickFingerprint: candidate.quickFingerprint,
+            duplicateOfBackupId: duplicateOfBackupID
+        )
+    }
 }

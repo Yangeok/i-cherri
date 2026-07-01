@@ -167,4 +167,6 @@ struct MockBackupIndex: BackupIndexQuerying {
     func findBySHA256(_ sha256: String) async throws -> BackupIndexEntry? {
         sha256Entries[sha256]
     }
+
+    func registerDuplicate(candidate: AssetMetadata, duplicateOfBackupID: String) async throws {}
 }

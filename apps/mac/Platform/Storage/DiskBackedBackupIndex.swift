@@ -47,6 +47,10 @@ actor DiskBackedBackupIndex: BackupIndexQuerying {
         try await databaseManager.findBySHA256(sha256)
     }
 
+    func registerDuplicate(candidate: AssetMetadata, duplicateOfBackupID: String) async throws {
+        try await databaseManager.registerDuplicate(candidate: candidate, duplicateOfBackupID: duplicateOfBackupID)
+    }
+
     private func rehydrateIndexIfNeeded(for candidate: AssetMetadata) async throws {
         guard try await databaseManager.findByDeviceAndAssetID(deviceID: candidate.deviceID, assetLocalID: candidate.assetLocalID) == nil else {
             return

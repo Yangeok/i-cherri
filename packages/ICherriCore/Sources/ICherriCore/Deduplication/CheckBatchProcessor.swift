@@ -8,6 +8,7 @@ public protocol BackupIndexQuerying: Sendable {
     func findByFingerprint(_ fingerprint: String) async throws -> BackupIndexEntry?
     func findByCandidate(_ candidate: AssetMetadata) async throws -> BackupIndexEntry?
     func findBySHA256(_ sha256: String) async throws -> BackupIndexEntry?
+    func registerDuplicate(candidate: AssetMetadata, duplicateOfBackupID: String) async throws
 }
 
 public struct BackupIndexEntry: Sendable {
@@ -43,8 +44,10 @@ public actor CheckBatchProcessor {
                 requiredUploads.append(UploadRequirement(assetLocalID: candidate.assetLocalID, uploadReason: reason))
             case .alreadyBackedUp:
                 alreadyBackedUp.append(candidate.assetLocalID)
-            case .duplicate:
+            case .duplicate(let duplicateOfBackupID):
                 duplicates.append(candidate.assetLocalID)
+                // Register duplicate record in database
+                try await index.registerDuplicate(candidate: candidate, duplicateOfBackupID: duplicateOfBackupID)
             }
         }
 
@@ -60,7 +63,7 @@ public actor CheckBatchProcessor {
     private enum Decision {
         case required(UploadReason)
         case alreadyBackedUp
-        case duplicate
+        case duplicate(duplicateOfBackupID: String)
     }
 
     private func classify(_ candidate: AssetMetadata) async throws -> Decision {
@@ -79,7 +82,8 @@ public actor CheckBatchProcessor {
         case .alreadyBackedUp:
             return .alreadyBackedUp
         case .duplicate:
-            return .duplicate
+            let duplicateOfBackupID = fingerprintEntry?.backupID ?? ""
+            return .duplicate(duplicateOfBackupID: duplicateOfBackupID)
         case .upload:
             return .required(.notFound)
         }
