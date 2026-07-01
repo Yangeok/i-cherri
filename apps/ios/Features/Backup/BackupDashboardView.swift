@@ -1818,6 +1818,9 @@ private actor BackupUploadProgressCoordinator {
     private var backgroundTask: Task<Void, Never>?
     private var foregroundTask: Task<Void, Never>?
 
+    private var lastNonZeroSpeed: Double = 0
+    private var lastSpeedUpdateTime = Date()
+
     init(viewModel: BackupProgressViewModel, totalExpectedBytes: Int64, totalCount: Int, initialOverallBackedUpCount: Int = 0) {
         self.viewModel = viewModel
         self.totalExpectedBytes = totalExpectedBytes
@@ -1964,6 +1967,11 @@ private actor BackupUploadProgressCoordinator {
         phase: BackupProgressPhase = .uploading,
         immediate: Bool = false
     ) {
+        if bytesPerSecond > 0 {
+            lastNonZeroSpeed = bytesPerSecond
+            lastSpeedUpdateTime = Date()
+        }
+
         if immediate {
             pendingEmissionTask?.cancel()
             pendingEmissionTask = nil
@@ -2026,6 +2034,16 @@ private actor BackupUploadProgressCoordinator {
         let snapshotFailedUploads = failedUploads
         let snapshotViewModel = viewModel
 
+        // 5초 간의 속도 래치(Latch) 적용: 파일 간 전환 기 혹은 잠깐 업로드 정지 시 0으로 요동치는 방지
+        let effectiveSpeed: Double
+        if bytesPerSecond > 0 {
+            effectiveSpeed = bytesPerSecond
+        } else if Date().timeIntervalSince(lastSpeedUpdateTime) < 5.0 {
+            effectiveSpeed = lastNonZeroSpeed
+        } else {
+            effectiveSpeed = 0
+        }
+
         await MainActor.run {
             snapshotViewModel.update(
                 filename: snapshotFilename,
@@ -2035,7 +2053,7 @@ private actor BackupUploadProgressCoordinator {
                 failed: snapshotFailed,
                 overallBackedUpCount: snapshotOverallBackedUpCount,
                 phase: phase,
-                bytesPerSecond: bytesPerSecond,
+                bytesPerSecond: effectiveSpeed,
                 sentBytes: snapshotSentBytes,
                 totalBytes: snapshotTotalBytes,
                 activeUploads: snapshotActiveCount,
@@ -2044,12 +2062,12 @@ private actor BackupUploadProgressCoordinator {
             )
 
             let formattedSpeed: String
-            if bytesPerSecond > 0 {
-                let mb = bytesPerSecond / (1024.0 * 1024.0)
+            if effectiveSpeed > 0 {
+                let mb = effectiveSpeed / (1024.0 * 1024.0)
                 if mb >= 1.0 {
                     formattedSpeed = String(format: "%.1fM/s", mb)
                 } else {
-                    let kb = bytesPerSecond / 1024.0
+                    let kb = effectiveSpeed / 1024.0
                     formattedSpeed = String(format: "%.0fK/s", kb)
                 }
             } else {
