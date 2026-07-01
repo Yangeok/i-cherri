@@ -1017,11 +1017,14 @@ final class BackupDashboardViewModel: ObservableObject {
                     return
                 }
 
+                let alreadyBackedUpCount = max(scanPlan.libraryAssetCount - scanPlan.runAssetCount, 0)
+
                 let progressCoordinator = await MainActor.run {
                     BackupUploadProgressCoordinator(
                         viewModel: progressViewModel,
                         totalExpectedBytes: scanPlan.runAssetBytes,
-                        totalCount: scanPlan.libraryAssetCount
+                        totalCount: scanPlan.libraryAssetCount,
+                        initialOverallBackedUpCount: alreadyBackedUpCount
                     )
                 }
 
@@ -1031,7 +1034,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     success: 0,
                     duplicates: 0,
                     failed: 0,
-                    overallBackedUpCount: 0,
+                    overallBackedUpCount: alreadyBackedUpCount,
                     phase: .checking,
                     bytesPerSecond: 0
                 )
@@ -1794,7 +1797,7 @@ private actor BackupUploadProgressCoordinator {
     private var success: Int = 0
     private var duplicates: Int = 0
     private var failed: Int = 0
-    private var overallBackedUpCount: Int = 0
+    private var overallBackedUpCount: Int  // 이미 백업된 파일 수를 초기값으로 받아 0부터 세는 버그를 제거
     private var activeUploads: [String: ActiveUploadState] = [:]
     private var failedUploads: [FailedUploadProgressItem] = []
     private var lastEmissionUptime: UInt64 = 0
@@ -1805,10 +1808,11 @@ private actor BackupUploadProgressCoordinator {
     private var backgroundTask: Task<Void, Never>?
     private var foregroundTask: Task<Void, Never>?
 
-    init(viewModel: BackupProgressViewModel, totalExpectedBytes: Int64, totalCount: Int) {
+    init(viewModel: BackupProgressViewModel, totalExpectedBytes: Int64, totalCount: Int, initialOverallBackedUpCount: Int = 0) {
         self.viewModel = viewModel
         self.totalExpectedBytes = totalExpectedBytes
         self.totalCount = totalCount
+        self.overallBackedUpCount = initialOverallBackedUpCount
     }
 
     deinit {
