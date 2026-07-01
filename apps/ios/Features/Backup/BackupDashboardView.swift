@@ -83,7 +83,7 @@ public struct BackupDashboardView: View {
             // 디스크 & 카드 Morphing 컨테이너
             VStack {
                 if let progressViewModel = viewModel.activeBackupProgressViewModel {
-                    expandedCardView(progressViewModel)
+                    ExpandedBackupCardView(progressViewModel: progressViewModel)
                 } else {
                     defaultDiscView
                 }
@@ -142,130 +142,6 @@ public struct BackupDashboardView: View {
                         .stroke(LinearGradient(colors: [.white.opacity(0.35), .clear], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
                 )
                 .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
-        )
-    }
-    
-    private func expandedCardView(_ progressViewModel: BackupProgressViewModel) -> some View {
-        VStack(spacing: 16) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(phaseTitle(for: progressViewModel.phase))
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                    Text(phaseDescription(for: progressViewModel.phase))
-                        .font(.system(.caption2, design: .rounded))
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                
-                if progressViewModel.phase == .uploading {
-                    Text(String(format: "%.1f%%", progressViewModel.progress * 100))
-                        .font(.system(.title3, design: .rounded, weight: .black))
-                        .foregroundColor(.accentColor)
-                } else if progressViewModel.phase == .complete {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                        .font(.title3)
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-            }
-            
-            // ⭐️ [요구사항 반영] 실시간 병렬 다중 전송 썸네일 리스트 렌더링 (실제 데이터 매핑!)
-            if progressViewModel.phase == .uploading && !progressViewModel.activeUploads.isEmpty {
-                HStack(spacing: 10) {
-                    ForEach(progressViewModel.activeUploads) { upload in
-                        VStack(alignment: .leading, spacing: 4) {
-                            ActiveUploadThumbnailView(assetLocalID: upload.assetLocalID)
-                                .frame(width: 54, height: 54)
-                                .cornerRadius(8)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(.white.opacity(0.15), lineWidth: 0.5)
-                                )
-                            
-                            Text(upload.filename)
-                                .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .frame(width: 54)
-                            
-                            ProgressView(value: upload.progress)
-                                .progressViewStyle(.linear)
-                                .scaleEffect(x: 1, y: 0.5, anchor: .center)
-                                .tint(.accentColor)
-                        }
-                    }
-                }
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            } else if progressViewModel.phase == .uploading {
-                Text(progressViewModel.currentFilename ?? "준비 중...")
-                    .font(.system(.caption2, design: .monospaced, weight: .semibold))
-                    .foregroundColor(.accentColor.opacity(0.85))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.accentColor.opacity(0.15), lineWidth: 0.5)
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            
-            // 리퀴드 프로그레스 바
-            LiquidProgressBar(
-                progress: progressViewModel.phase == .complete ? 1.0 : (progressViewModel.phase == .uploading ? progressViewModel.progress : 0.0),
-                tint: progressViewModel.phase == .complete ? .green : .accentColor
-            )
-            .frame(height: 14)
-            
-            // 진행 상세 보조 지표 배지 그리드
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("전송 속도")
-                        .font(.system(.caption2, design: .rounded))
-                        .foregroundColor(.secondary)
-                    Text(progressViewModel.phase == .uploading ? progressViewModel.formattedSpeed : "—")
-                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
-                )
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("백업 진행률")
-                        .font(.system(.caption2, design: .rounded))
-                        .foregroundColor(.secondary)
-                    Text(simulatedProgressText(for: progressViewModel))
-                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
-                )
-            }
-        }
-        .padding(20)
-        .transition(.scale.combined(with: .opacity))
-        .background(
-            RoundedRectangle(cornerRadius: 24)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24)
-                        .stroke(LinearGradient(colors: [.white.opacity(0.25), .clear], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
-                )
-                .shadow(color: .purple.opacity(0.08), radius: 15, y: 8)
         )
     }
     
@@ -2344,4 +2220,164 @@ public final class BackupLiveActivityManager {
         }
     }
 }
+
+// ObservedObject 기반의 실시간 렌더링 카드 뷰
+struct ExpandedBackupCardView: View {
+    @ObservedObject var progressViewModel: BackupProgressViewModel
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(phaseTitle(for: progressViewModel.phase))
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                    Text(phaseDescription(for: progressViewModel.phase))
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                
+                if progressViewModel.phase == .uploading {
+                    Text(String(format: "%.1f%%", progressViewModel.progress * 100))
+                        .font(.system(.title3, design: .rounded, weight: .black))
+                        .foregroundColor(.accentColor)
+                } else if progressViewModel.phase == .complete {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.title3)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            
+            // ⭐️ [요구사항 반영] 실시간 병렬 다중 전송 썸네일 리스트 렌더링 (실제 데이터 매핑!)
+            if progressViewModel.phase == .uploading && !progressViewModel.activeUploads.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(progressViewModel.activeUploads) { upload in
+                        VStack(alignment: .leading, spacing: 4) {
+                            ActiveUploadThumbnailView(assetLocalID: upload.assetLocalID)
+                                .frame(width: 54, height: 54)
+                                .cornerRadius(8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(.white.opacity(0.15), lineWidth: 0.5)
+                                )
+                            
+                            Text(upload.filename)
+                                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .frame(width: 54)
+                            
+                            ProgressView(value: upload.progress)
+                                .progressViewStyle(.linear)
+                                .scaleEffect(x: 1, y: 0.5, anchor: .center)
+                                .tint(.accentColor)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            } else if progressViewModel.phase == .uploading {
+                // 업로드가 막 시작되어 activeUploads가 빌드되기 전에는 파일명 배지만 노출
+                Text(progressViewModel.currentFilename ?? "준비 중...")
+                    .font(.system(.caption2, design: .monospaced, weight: .semibold))
+                    .foregroundColor(.accentColor.opacity(0.85))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.accentColor.opacity(0.15), lineWidth: 0.5)
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            
+            // 리퀴드 프로그레스 바
+            LiquidProgressBar(
+                progress: progressViewModel.phase == .complete ? 1.0 : (progressViewModel.phase == .uploading ? progressViewModel.progress : 0.0),
+                tint: progressViewModel.phase == .complete ? .green : .accentColor
+            )
+            .frame(height: 14)
+            
+            // 진행 상세 보조 지표 배지 그리드
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("전송 속도")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundColor(.secondary)
+                    Text(progressViewModel.phase == .uploading ? progressViewModel.formattedSpeed : "—")
+                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                )
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("백업 진행률")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundColor(.secondary)
+                    Text(simulatedProgressText(for: progressViewModel))
+                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                )
+            }
+        }
+        .padding(20)
+        .transition(.scale.combined(with: .opacity))
+        .background(
+            RoundedRectangle(cornerRadius: 24)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(LinearGradient(colors: [.white.opacity(0.25), .clear], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
+                )
+                .shadow(color: .purple.opacity(0.08), radius: 15, y: 8)
+        )
+    }
+    
+    private func phaseTitle(for phase: BackupProgressPhase) -> String {
+        switch phase {
+        case .scanning: return "스캔 중"
+        case .checking: return "백업 확인 중"
+        case .uploading: return "전송 중"
+        case .complete: return "완료"
+        case .failed: return "실패"
+        }
+    }
+    
+    private func phaseDescription(for phase: BackupProgressPhase) -> String {
+        switch phase {
+        case .scanning: return "최근 촬영된 라이브러리 스캔 중…"
+        case .checking: return "Mac 리시버의 해시 파일과 비교 중…"
+        case .uploading: return "iPhone 사진 라이브러리 전송 중"
+        case .complete: return "모든 사진이 Mac에 동기화되었습니다."
+        case .failed: return "백업 도중 오류가 발생했습니다."
+        }
+    }
+    
+    private func simulatedProgressText(for progressViewModel: BackupProgressViewModel) -> String {
+        switch progressViewModel.phase {
+        case .scanning, .checking:
+            return "계산 중…"
+        case .uploading, .complete, .failed:
+            return "\(progressViewModel.completedCount) / \(progressViewModel.totalCount)"
+        }
+    }
+}
+
 
