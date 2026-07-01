@@ -238,14 +238,33 @@ struct DashboardView: View {
         return ScrollViewReader { scrollProxy in
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        ForEach(viewModel.visibleAssetSections, id: \.id) { section in
-                            historySectionView(section, gridColumns: gridColumns, gridItemSize: gridItemSize)
+                    if viewModel.assetHistoryViewMode == .grid {
+                        LazyVGrid(columns: gridColumns, spacing: 8, pinnedViews: [.sectionHeaders]) {
+                            ForEach(viewModel.visibleAssetSections, id: \.id) { section in
+                                Section(header: sectionHeaderView(section.title)) {
+                                    ForEach(section.entries) { entry in
+                                        assetHistoryGridItem(entry.asset, index: entry.index, itemSize: gridItemSize)
+                                    }
+                                }
+                                .id(section.id)
+                            }
                         }
-
-                        historyPaginationFooter
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 8, pinnedViews: [.sectionHeaders]) {
+                            ForEach(viewModel.visibleAssetSections, id: \.id) { section in
+                                Section(header: sectionHeaderView(section.title)) {
+                                    ForEach(section.entries) { entry in
+                                        assetHistoryListItem(entry.asset, index: entry.index)
+                                    }
+                                }
+                                .id(section.id)
+                            }
+                        }
                     }
-                    .padding(.bottom, 96)
+
+                    historyPaginationFooter
+                        .padding(.vertical, 16)
+                        .padding(.bottom, 96)
                 }
                 .scrollContentBackground(.hidden)
                 .gesture(historyGridMagnificationGesture)
@@ -266,31 +285,16 @@ struct DashboardView: View {
         }
     }
 
-    private func historySectionView(
-        _ section: AssetHistorySection,
-        gridColumns: [GridItem],
-        gridItemSize: CGFloat
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(section.title)
+    private func sectionHeaderView(_ title: String) -> some View {
+        HStack {
+            Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-
-            if viewModel.assetHistoryViewMode == .grid {
-                LazyVGrid(columns: gridColumns, spacing: 8) {
-                    ForEach(section.entries) { entry in
-                        assetHistoryGridItem(entry.asset, index: entry.index, itemSize: gridItemSize)
-                    }
-                }
-            } else {
-                LazyVStack(spacing: 8) {
-                    ForEach(section.entries) { entry in
-                        assetHistoryListItem(entry.asset, index: entry.index)
-                    }
-                }
-            }
+                .padding(.vertical, 6)
+            Spacer()
         }
-        .id(section.id)
+        .padding(.horizontal, 4)
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
     private var historyPaginationFooter: some View {
