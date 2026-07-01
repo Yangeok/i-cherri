@@ -2251,33 +2251,16 @@ struct ExpandedBackupCardView: View {
                 }
             }
             
-            // ⭐️ [요구사항 반영] 실시간 병렬 다중 전송 썸네일 리스트 렌더링 (실제 데이터 매핑!)
+            // ⭐️ [요구사항 반영] 실시간 병렬 다중 전송 대형 썸네일 리스트 렌더링 (가로 스크롤 & 파일명 + 생성일자 제공!)
             if progressViewModel.phase == .uploading && !progressViewModel.activeUploads.isEmpty {
-                HStack(spacing: 10) {
-                    ForEach(progressViewModel.activeUploads) { upload in
-                        VStack(alignment: .leading, spacing: 4) {
-                            ActiveUploadThumbnailView(assetLocalID: upload.assetLocalID)
-                                .frame(width: 54, height: 54)
-                                .cornerRadius(8)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(.white.opacity(0.15), lineWidth: 0.5)
-                                )
-                            
-                            Text(upload.filename)
-                                .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .frame(width: 54)
-                            
-                            ProgressView(value: upload.progress)
-                                .progressViewStyle(.linear)
-                                .scaleEffect(x: 1, y: 0.5, anchor: .center)
-                                .tint(.accentColor)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(progressViewModel.activeUploads) { upload in
+                            ActiveUploadItemView(upload: upload)
                         }
                     }
+                    .padding(.horizontal, 4)
                 }
-                .padding(.vertical, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .transition(.move(edge: .top).combined(with: .opacity))
             } else if progressViewModel.phase == .uploading {
@@ -2379,5 +2362,59 @@ struct ExpandedBackupCardView: View {
         }
     }
 }
+
+// ⭐️ [요구사항 반영] 파일별 미니 pbar 제거 및 파일명 - 생성일자 매핑을 지원하는 가로 72x72 스크롤 썸네일 카드 뷰
+struct ActiveUploadItemView: View {
+    let upload: ActiveUploadProgressItem
+    @StateObject private var loader: AssetThumbnailLoader
+    
+    init(upload: ActiveUploadProgressItem) {
+        self.upload = upload
+        _loader = StateObject(wrappedValue: AssetThumbnailLoader(assetLocalID: upload.assetLocalID))
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack {
+                if let image = loader.image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.secondary.opacity(0.18))
+                        .overlay {
+                            Image(systemName: "photo")
+                                .foregroundStyle(.secondary)
+                        }
+                }
+            }
+            .frame(width: 72, height: 72)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(LinearGradient(colors: [.white.opacity(0.2), .clear], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
+            )
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(upload.filename)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .frame(width: 72, alignment: .leading)
+                
+                Text(loader.creationDateText ?? "확인 중...")
+                    .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .frame(width: 72, alignment: .leading)
+            }
+        }
+        .task {
+            await loader.loadIfNeeded()
+        }
+    }
+}
+
 
 

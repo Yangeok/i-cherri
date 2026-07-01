@@ -642,6 +642,7 @@ struct ActiveUploadThumbnailView: View {
 @MainActor
 final class AssetThumbnailLoader: ObservableObject {
     @Published var image: UIImage?
+    @Published var creationDateText: String?
 
     private let assetLocalID: String
     private var hasLoaded = false
@@ -657,7 +658,13 @@ final class AssetThumbnailLoader: ObservableObject {
         let result = PHAsset.fetchAssets(withLocalIdentifiers: [assetLocalID], options: nil)
         guard let asset = result.firstObject else { return }
 
-        let targetSize = CGSize(width: 104, height: 104)
+        if let creationDate = asset.creationDate {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd HH:mm"
+            self.creationDateText = formatter.string(from: creationDate)
+        }
+
+        let targetSize = CGSize(width: 144, height: 144) // 72x72 scale 2x 대비 썸네일 해상도 타겟 사이즈 상향!
         let options = PHImageRequestOptions()
         options.deliveryMode = .fastFormat
         options.resizeMode = .fast
