@@ -2289,6 +2289,27 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
 // Custom CollectionView Cell Item
 class AssetHistoryCollectionViewItem: NSCollectionViewItem {
     private var hostingView: NSHostingView<AssetHistoryCollectionViewCellWrapper>?
+    private var currentAsset: BackupAssetRecord?
+    private var imageLoadTask: Task<Void, Never>?
+    private var notificationObserver: AnyObject?
+
+    override func loadView() {
+        self.view = NSView()
+        self.view.wantsLayer = true
+    }
+
+    deinit {
+        cleanup()
+    }
+
+    private func cleanup() {
+        imageLoadTask?.cancel()
+        imageLoadTask = nil
+        if let observer = notificationObserver {
+            NotificationCenter.default.removeObserver(observer)
+            notificationObserver = nil
+        }
+    }
 
     func configure(
         asset: BackupAssetRecord,
@@ -2297,18 +2318,112 @@ class AssetHistoryCollectionViewItem: NSCollectionViewItem {
         onOpen: ((BackupAssetRecord) -> Void)?,
         onReveal: ((BackupAssetRecord) -> Void)?
     ) {
-        let cellView = AssetHistoryCollectionViewCellWrapper(
+        cleanup()
+        self.currentAsset = asset
+
+        // 1. Show placeholder initially
+        updateContent(image: nil, size: size, onPreview: onPreview, onOpen: onOpen, onReveal: onReveal)
+
+        // 2. Resolve paths
+        let resolvedPath: String
+        if (asset.finalPath as NSString).isAbsolutePath {
+            resolvedPath = asset.finalPath
+        } else {
+            resolvedPath = AppCoordinator.shared.backupFolder
+                .appendingPathComponent(asset.finalPath)
+                .path
+        }
+        let fileURL = URL(fileURLWithPath: resolvedPath)
+        let mediaType = asset.mediaType
+        let displayScale = self.view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+
+        // 3. Load image from cache
+        imageLoadTask = Task { @MainActor in
+            if let nsImage = await AssetHistoryThumbnailCache.shared.thumbnailImage(
+                for: fileURL,
+                mediaType: mediaType,
+                size: size,
+                scale: displayScale,
+                generateIfAbsent: false
+            ) {
+                guard self.currentAsset?.backupId == asset.backupId else { return }
+                self.updateContent(image: nsImage, size: size, onPreview: onPreview, onOpen: onOpen, onReveal: onReveal)
+            } else {
+                guard self.currentAsset?.backupId == asset.backupId else { return }
+                
+                setupNotificationObserver(for: asset, size: size, onPreview: onPreview, onOpen: onOpen, onReveal: onReveal)
+
+                await AssetHistoryThumbnailPrefetchCoordinator.shared.enqueue(
+                    relativePath: asset.finalPath,
+                    mediaType: mediaType,
+                    workload: .neighborhoodPrefetch,
+                    sizes: [size]
+                )
+            }
+        }
+    }
+
+    private func setupNotificationObserver(
+        for asset: BackupAssetRecord,
+        size: CGFloat,
+        onPreview: ((BackupAssetRecord) -> Void)?,
+        onOpen: ((BackupAssetRecord) -> Void)?,
+        onReveal: ((BackupAssetRecord) -> Void)?
+    ) {
+        let path = (asset.finalPath as NSString).isAbsolutePath ? asset.finalPath : AppCoordinator.shared.backupFolder.appendingPathComponent(asset.finalPath).path
+        
+        notificationObserver = NotificationCenter.default.addObserver(
+            forName: .thumbnailDidCache,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let current = self.currentAsset,
+                  current.backupId == asset.backupId else { return }
+            
+            guard let userInfo = notification.userInfo,
+                  let cachedPath = userInfo["path"] as? String,
+                  let cachedSize = userInfo["size"] as? CGFloat else {
+                return
+            }
+
+            let p1 = URL(fileURLWithPath: path).standardized.path
+            let p2 = URL(fileURLWithPath: cachedPath).standardized.path
+            
+            if p1.caseInsensitiveCompare(p2) == .orderedSame && abs(cachedSize - size) < 1.0 {
+                self.cleanup()
+                self.configure(asset: asset, size: size, onPreview: onPreview, onOpen: onOpen, onReveal: onReveal)
+            }
+        }
+    }
+
+    private func updateContent(
+        image: NSImage?,
+        size: CGFloat,
+        onPreview: ((BackupAssetRecord) -> Void)?,
+        onOpen: ((BackupAssetRecord) -> Void)?,
+        onReveal: ((BackupAssetRecord) -> Void)?
+    ) {
+        guard let asset = currentAsset else { return }
+        
+        let cellView = AssetHistoryCollectionViewCellContent(
             asset: asset,
-            size: size,
+            image: image,
+            size: size
+        )
+        
+        let cellWrapper = AssetHistoryCollectionViewCellWrapper(
+            content: cellView,
+            asset: asset,
             onPreview: onPreview,
             onOpen: onOpen,
             onReveal: onReveal
         )
 
         if let hosting = hostingView {
-            hosting.rootView = cellView
+            hosting.rootView = cellWrapper
         } else {
-            let hosting = NSHostingView(rootView: cellView)
+            let hosting = NSHostingView(rootView: cellWrapper)
             hosting.translatesAutoresizingMaskIntoConstraints = false
             self.view.addSubview(hosting)
             
@@ -2320,11 +2435,6 @@ class AssetHistoryCollectionViewItem: NSCollectionViewItem {
             ])
             self.hostingView = hosting
         }
-    }
-    
-    override func loadView() {
-        self.view = NSView()
-        self.view.wantsLayer = true
     }
 }
 
@@ -2375,14 +2485,14 @@ class AssetHistoryCollectionViewHeader: NSView {
 
 // Cell Wrapper View
 struct AssetHistoryCollectionViewCellWrapper: View {
+    let content: AssetHistoryCollectionViewCellContent
     let asset: BackupAssetRecord
-    let size: CGFloat
     let onPreview: ((BackupAssetRecord) -> Void)?
     let onOpen: ((BackupAssetRecord) -> Void)?
     let onReveal: ((BackupAssetRecord) -> Void)?
 
     var body: some View {
-        AssetHistoryCollectionViewCellContent(asset: asset, size: size)
+        content
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .onTapGesture(count: 2) {
                 onPreview?(asset)
@@ -2403,11 +2513,65 @@ struct AssetHistoryCollectionViewCellWrapper: View {
 
 struct AssetHistoryCollectionViewCellContent: View {
     let asset: BackupAssetRecord
+    let image: NSImage?
     let size: CGFloat
 
     var body: some View {
-        AssetHistoryThumbnailView(asset: asset, size: size)
-            .id(asset.backupId)
-            .frame(maxWidth: .infinity, alignment: .center)
+        Group {
+            if let image = image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(color.opacity(0.12))
+                    Image(systemName: iconName)
+                        .foregroundStyle(color)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(alignment: .bottomTrailing) {
+            if let durationLabel {
+                Text(durationLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.black.opacity(0.72), in: Capsule())
+                    .padding(6)
+            }
+        }
+    }
+
+    private var iconName: String {
+        switch asset.mediaType.lowercased() {
+        case "video":
+            return "video.fill"
+        default:
+            return "photo.fill"
+        }
+    }
+
+    private var color: Color {
+        switch asset.status {
+        case "completed":
+            return .green
+        case "duplicate":
+            return .orange
+        case "failed":
+            return .red
+        default:
+            return .blue
+        }
+    }
+
+    private var durationLabel: String? {
+        guard let duration = asset.durationSeconds, duration > 0 else { return nil }
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }
