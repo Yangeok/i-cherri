@@ -247,7 +247,8 @@ struct DashboardView: View {
                             onReveal: { asset in revealAsset(asset) },
                             onLoadMore: { index in
                                 Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
-                            }
+                            },
+                            viewModel: viewModel
                         )
                         .gesture(historyGridMagnificationGesture)
 
@@ -548,8 +549,12 @@ struct DashboardView: View {
             guard !Task.isCancelled else { return }
 
             await MainActor.run {
-                withAnimation(.easeOut(duration: 0.12)) {
-                    scrollProxy.scrollTo(targetSectionID, anchor: .top)
+                if viewModel.assetHistoryViewMode == .grid {
+                    viewModel.scrollToSectionID = targetSectionID
+                } else {
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        scrollProxy.scrollTo(targetSectionID, anchor: .top)
+                    }
                 }
             }
         }
@@ -673,6 +678,7 @@ struct DashboardView: View {
     private func assetHistoryRow(_ asset: BackupAssetRecord) -> some View {
         HStack(alignment: .top, spacing: 12) {
             AssetHistoryThumbnailView(asset: asset, size: 48)
+                .id(asset.backupId)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top) {
@@ -876,6 +882,7 @@ final class DashboardViewModel: ObservableObject {
     }
     @Published var assetHistoryMediaFilter: AssetHistoryMediaFilter = .all
     @Published var gridColumnCount: Int = 4
+    @Published var scrollToSectionID: String? = nil
 
     private var filteredAssets: [BackupAssetRecord] = []
     private var visibleAssetWindowRange: Range<Int> = 0..<0
@@ -1835,12 +1842,22 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
     private func enqueue(_ requests: [Request]) {
         guard !requests.isEmpty else { return }
 
-        for request in requests where !queuedRequestSet.contains(request) {
-            queuedRequestSet.insert(request)
-            if request.workload == .backgroundBackfill {
-                queuedRequests.append(request)
+        for request in requests {
+            if let existingIndex = queuedRequests.firstIndex(where: { $0.path == request.path && $0.size == request.size }) {
+                let existingRequest = queuedRequests[existingIndex]
+                if request.workload != .backgroundBackfill && existingRequest.workload == .backgroundBackfill {
+                    queuedRequests.remove(at: existingIndex)
+                    queuedRequestSet.remove(existingRequest)
+                    queuedRequestSet.insert(request)
+                    queuedRequests.insert(request, at: 0)
+                }
             } else {
-                queuedRequests.insert(request, at: 0)
+                queuedRequestSet.insert(request)
+                if request.workload == .backgroundBackfill {
+                    queuedRequests.append(request)
+                } else {
+                    queuedRequests.insert(request, at: 0)
+                }
             }
         }
 
@@ -2092,6 +2109,7 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
     let onOpen: (BackupAssetRecord) -> Void
     let onReveal: (BackupAssetRecord) -> Void
     let onLoadMore: (Int) -> Void
+    @ObservedObject var viewModel: DashboardViewModel
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -2136,6 +2154,13 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             onReveal: onReveal,
             onLoadMore: onLoadMore
         )
+
+        if let targetID = viewModel.scrollToSectionID {
+            context.coordinator.scrollToSection(id: targetID)
+            DispatchQueue.main.async {
+                viewModel.scrollToSectionID = nil
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -2167,6 +2192,21 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             self.onLoadMore = onLoadMore
             
             collectionView?.reloadData()
+        }
+
+        fileprivate func scrollToSection(id: String) {
+            guard let collectionView = collectionView,
+                  let sectionIndex = sections.firstIndex(where: { $0.id == id }) else { return }
+            
+            let itemCount = sections[sectionIndex].entries.count
+            guard itemCount > 0 else { return }
+            let indexPath = IndexPath(item: 0, section: sectionIndex)
+            
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                context.allowsImplicitAnimation = true
+                collectionView.animator().scrollToItems(at: [indexPath], scrollPosition: .top)
+            }
         }
 
         func numberOfSections(in collectionView: NSCollectionView) -> Int {
@@ -2368,6 +2408,7 @@ struct AssetHistoryCollectionViewCellContent: View {
 
     var body: some View {
         AssetHistoryThumbnailView(asset: asset, size: size)
+            .id(asset.backupId)
             .frame(maxWidth: .infinity, alignment: .center)
     }
 }
