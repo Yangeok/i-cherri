@@ -1779,7 +1779,7 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
     static let shared = AssetHistoryThumbnailPrefetchCoordinator()
 
     private struct Request: Hashable {
-        let path: String
+        let relativePath: String
         let mediaType: String
         let size: Int
         let workload: AssetHistoryThumbnailWorkloadKind
@@ -1791,30 +1791,30 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
     private var activeVideoWorkerCount = 0
 
     fileprivate func enqueue(relativePath: String, mediaType: String, workload: AssetHistoryThumbnailWorkloadKind, sizes: [CGFloat]) async {
-        guard let fileURL = await AssetHistoryThumbnailPrefetcher.resolvedFileURL(for: relativePath) else { return }
-        enqueue(fileURL: fileURL, mediaType: mediaType, workload: workload, sizes: sizes)
+        let profile = AssetHistoryThumbnailWorkloadProfile.current()
+        let requests = profile.sizes(for: mediaType, workload: workload, requestedSizes: sizes).map {
+            Request(
+                relativePath: relativePath,
+                mediaType: mediaType,
+                size: max(Int($0.rounded()), 1),
+                workload: workload
+            )
+        }
+        enqueue(requests)
     }
 
     fileprivate func enqueue(assets: [BackupAssetRecord], workload: AssetHistoryThumbnailWorkloadKind, sizes: [CGFloat]) async {
         guard !assets.isEmpty else { return }
 
-        let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
         let profile = AssetHistoryThumbnailWorkloadProfile.current()
         var requests: [Request] = []
         requests.reserveCapacity(assets.count * sizes.count)
 
         for asset in assets {
-            guard let resolvedPath = AssetHistoryThumbnailPrefetcher.resolvedPath(
-                for: asset.finalPath,
-                backupFolder: backupFolder
-            ) else {
-                continue
-            }
-
             for size in profile.sizes(for: asset.mediaType, workload: workload, requestedSizes: sizes) {
                 requests.append(
                     Request(
-                        path: resolvedPath,
+                        relativePath: asset.finalPath,
                         mediaType: asset.mediaType,
                         size: max(Int(size.rounded()), 1),
                         workload: workload
@@ -1826,24 +1826,11 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
         enqueue(requests)
     }
 
-    private func enqueue(fileURL: URL, mediaType: String, workload: AssetHistoryThumbnailWorkloadKind, sizes: [CGFloat]) {
-        let profile = AssetHistoryThumbnailWorkloadProfile.current()
-        let requests = profile.sizes(for: mediaType, workload: workload, requestedSizes: sizes).map {
-            Request(
-                path: fileURL.path,
-                mediaType: mediaType,
-                size: max(Int($0.rounded()), 1),
-                workload: workload
-            )
-        }
-        enqueue(requests)
-    }
-
     private func enqueue(_ requests: [Request]) {
         guard !requests.isEmpty else { return }
 
         for request in requests {
-            if let existingIndex = queuedRequests.firstIndex(where: { $0.path == request.path && $0.size == request.size }) {
+            if let existingIndex = queuedRequests.firstIndex(where: { $0.relativePath == request.relativePath && $0.size == request.size }) {
                 let existingRequest = queuedRequests[existingIndex]
                 if request.workload != .backgroundBackfill && existingRequest.workload == .backgroundBackfill {
                     queuedRequests.remove(at: existingIndex)
@@ -1867,8 +1854,11 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
     private func spawnWorkersIfNeeded() {
         while let request = reserveNextRequest() {
             Task.detached(priority: .utility) {
+                let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
+                let fileURL = backupFolder.appendingPathComponent(request.relativePath)
+
                 await AssetHistoryThumbnailPrefetcher.prefetch(
-                    fileURL: URL(fileURLWithPath: request.path),
+                    fileURL: fileURL,
                     mediaType: request.mediaType,
                     size: CGFloat(request.size)
                 )
