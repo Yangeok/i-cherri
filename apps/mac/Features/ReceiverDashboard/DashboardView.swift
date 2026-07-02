@@ -237,19 +237,37 @@ struct DashboardView: View {
 
         return ScrollViewReader { scrollProxy in
             ZStack(alignment: .bottom) {
-                ScrollView {
-                    if viewModel.assetHistoryViewMode == .grid {
-                        LazyVGrid(columns: gridColumns, spacing: 8, pinnedViews: [.sectionHeaders]) {
-                            ForEach(viewModel.visibleAssetSections, id: \.id) { section in
-                                Section(header: sectionHeaderView(section.title)) {
-                                    ForEach(section.entries) { entry in
-                                        assetHistoryGridItem(entry.asset, index: entry.index, itemSize: gridItemSize)
-                                    }
-                                }
-                                .id(section.id)
+                if viewModel.assetHistoryViewMode == .grid {
+                    ZStack(alignment: .bottom) {
+                        AssetHistoryCollectionView(
+                            sections: viewModel.visibleAssetSections,
+                            gridItemSize: gridItemSize,
+                            onPreview: { asset in previewAsset(asset) },
+                            onOpen: { asset in openAsset(asset) },
+                            onReveal: { asset in revealAsset(asset) },
+                            onLoadMore: { index in
+                                Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
                             }
+                        )
+                        .gesture(historyGridMagnificationGesture)
+
+                        if viewModel.isLoadingAssetPage {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Loading…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
+                            .padding(.bottom, 110)
                         }
-                    } else {
+                    }
+                } else {
+                    ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8, pinnedViews: [.sectionHeaders]) {
                             ForEach(viewModel.visibleAssetSections, id: \.id) { section in
                                 Section(header: sectionHeaderView(section.title)) {
@@ -260,14 +278,13 @@ struct DashboardView: View {
                                 .id(section.id)
                             }
                         }
-                    }
 
-                    historyPaginationFooter
-                        .padding(.vertical, 16)
-                        .padding(.bottom, 96)
+                        historyPaginationFooter
+                            .padding(.vertical, 16)
+                            .padding(.bottom, 96)
+                    }
+                    .scrollContentBackground(.hidden)
                 }
-                .scrollContentBackground(.hidden)
-                .gesture(historyGridMagnificationGesture)
 
                 historyFloatingControls
                     .padding(.bottom, 16)
@@ -1373,14 +1390,13 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         let displayScale = NSScreen.main?.backingScaleFactor ?? 2
 
-        if let thumbnailData = await AssetHistoryThumbnailCache.shared.thumbnailData(
+        if let nsImage = await AssetHistoryThumbnailCache.shared.thumbnailImage(
             for: fileURL,
             mediaType: mediaType,
             size: size,
             scale: displayScale,
             generateIfAbsent: false
         ) {
-            let nsImage = NSImage(data: thumbnailData)
             self.image = nsImage
         } else {
             setupNotificationObserver()
@@ -1631,12 +1647,13 @@ private enum HardwareCapabilities {
     }()
 }
 
-actor AssetHistoryThumbnailCache {
+@MainActor
+final class AssetHistoryThumbnailCache {
     static let shared = AssetHistoryThumbnailCache()
 
     private static let cacheVersion = "v2"
 
-    private let memoryCache = NSCache<NSString, NSData>()
+    private let memoryCache = NSCache<NSString, NSImage>()
     private let fileManager = FileManager.default
     private let diskCacheURL: URL
     private var inFlightTasks: [String: Task<Data?, Never>] = [:]
@@ -1652,45 +1669,54 @@ actor AssetHistoryThumbnailCache {
         try? fileManager.createDirectory(at: diskCacheURL, withIntermediateDirectories: true, attributes: nil)
     }
 
-    func cachedImageData(for fileURL: URL, size: CGFloat) -> Data? {
+    func cachedImage(for fileURL: URL, size: CGFloat) -> NSImage? {
         guard let cacheKey = cacheKey(for: fileURL, size: size) else { return nil }
         let nsCacheKey = cacheKey as NSString
 
-        if let imageData = memoryCache.object(forKey: nsCacheKey) {
-            return imageData as Data
+        if let cached = memoryCache.object(forKey: nsCacheKey) {
+            return cached
         }
 
         let cachedFileURL = diskCacheURL.appendingPathComponent(cacheKey).appendingPathExtension("jpg")
-        guard let data = try? Data(contentsOf: cachedFileURL, options: [.mappedIfSafe]) else {
+        guard let data = try? Data(contentsOf: cachedFileURL, options: [.mappedIfSafe]),
+              let image = NSImage(data: data) else {
             return nil
         }
 
-        memoryCache.setObject(data as NSData, forKey: nsCacheKey, cost: estimatedCost(for: size))
-        return data
+        memoryCache.setObject(image, forKey: nsCacheKey, cost: estimatedCost(for: size))
+        return image
     }
 
     func store(_ data: Data, for fileURL: URL, size: CGFloat) {
         guard let cacheKey = cacheKey(for: fileURL, size: size) else { return }
+        let nsCacheKey = cacheKey as NSString
+        if let image = NSImage(data: data) {
+            memoryCache.setObject(image, forKey: nsCacheKey, cost: estimatedCost(for: size))
+        }
         store(data, cacheKey: cacheKey, size: size)
     }
 
-    func thumbnailData(
+    func thumbnailImage(
         for fileURL: URL,
         mediaType: String,
         size: CGFloat,
         scale: CGFloat,
         generateIfAbsent: Bool = true
-    ) async -> Data? {
+    ) async -> NSImage? {
         guard let cacheKey = cacheKey(for: fileURL, size: size) else { return nil }
+        let nsCacheKey = cacheKey as NSString
 
-        if let cachedData = cachedImageData(for: fileURL, size: size) {
-            return cachedData
+        if let cached = cachedImage(for: fileURL, size: size) {
+            return cached
         }
 
         guard generateIfAbsent else { return nil }
 
         if let existingTask = inFlightTasks[cacheKey] {
-            return await existingTask.value
+            if let data = await existingTask.value {
+                return NSImage(data: data)
+            }
+            return nil
         }
 
         let task = Task.detached(priority: .utility) {
@@ -1706,8 +1732,9 @@ actor AssetHistoryThumbnailCache {
         let generatedData = await task.value
         inFlightTasks[cacheKey] = nil
 
-        if let generatedData {
+        if let generatedData, let image = NSImage(data: generatedData) {
             store(generatedData, cacheKey: cacheKey, size: size)
+            memoryCache.setObject(image, forKey: nsCacheKey, cost: estimatedCost(for: size))
 
             let path = fileURL.path
             Task { @MainActor in
@@ -1717,9 +1744,10 @@ actor AssetHistoryThumbnailCache {
                     userInfo: ["path": path, "size": size]
                 )
             }
+            return image
         }
 
-        return generatedData
+        return nil
     }
 
     private func cacheKey(for fileURL: URL, size: CGFloat) -> String? {
@@ -1735,9 +1763,6 @@ actor AssetHistoryThumbnailCache {
     }
 
     private func store(_ data: Data, cacheKey: String, size: CGFloat) {
-        let nsCacheKey = cacheKey as NSString
-        memoryCache.setObject(data as NSData, forKey: nsCacheKey, cost: estimatedCost(for: size))
-
         let cachedFileURL = diskCacheURL.appendingPathComponent(cacheKey).appendingPathExtension("jpg")
         try? data.write(to: cachedFileURL, options: .atomic)
     }
@@ -1904,7 +1929,7 @@ enum AssetHistoryThumbnailPrefetcher {
 
     static func prefetch(fileURL: URL, mediaType: String, size: CGFloat) async {
         let displayScale = NSScreen.main?.backingScaleFactor ?? 2
-        _ = await AssetHistoryThumbnailCache.shared.thumbnailData(
+        _ = await AssetHistoryThumbnailCache.shared.thumbnailImage(
             for: fileURL,
             mediaType: mediaType,
             size: size,
@@ -2056,5 +2081,293 @@ struct DashboardActiveUpload: Identifiable {
 
     private var shortUploadID: String {
         String(uploadID.prefix(6)).uppercased()
+    }
+}
+
+// MARK: - AppKit Collection View Wrapper
+fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
+    fileprivate let sections: [AssetHistorySection]
+    let gridItemSize: CGFloat
+    let onPreview: (BackupAssetRecord) -> Void
+    let onOpen: (BackupAssetRecord) -> Void
+    let onReveal: (BackupAssetRecord) -> Void
+    let onLoadMore: (Int) -> Void
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+
+        let layout = NSCollectionViewFlowLayout()
+        layout.minimumLineSpacing = 8
+        layout.minimumInteritemSpacing = 8
+        layout.sectionHeadersPinToVisibleBounds = true
+
+        let collectionView = NSCollectionView()
+        collectionView.collectionViewLayout = layout
+        collectionView.isSelectable = true
+        collectionView.backgroundColors = [.clear]
+        collectionView.dataSource = context.coordinator
+        collectionView.delegate = context.coordinator
+
+        // Register custom item and header
+        collectionView.register(
+            AssetHistoryCollectionViewItem.self,
+            forItemWithIdentifier: NSUserInterfaceItemIdentifier("AssetItem")
+        )
+        collectionView.register(
+            AssetHistoryCollectionViewHeader.self,
+            forSupplementaryViewOfKind: NSCollectionView.elementKindSectionHeader,
+            withIdentifier: NSUserInterfaceItemIdentifier("SectionHeader")
+        )
+
+        scrollView.documentView = collectionView
+        context.coordinator.collectionView = collectionView
+
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        context.coordinator.update(
+            sections: sections,
+            gridItemSize: gridItemSize,
+            onPreview: onPreview,
+            onOpen: onOpen,
+            onReveal: onReveal,
+            onLoadMore: onLoadMore
+        )
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate, NSCollectionViewDelegateFlowLayout {
+        fileprivate var sections: [AssetHistorySection] = []
+        var gridItemSize: CGFloat = 180
+        var onPreview: ((BackupAssetRecord) -> Void)?
+        var onOpen: ((BackupAssetRecord) -> Void)?
+        var onReveal: ((BackupAssetRecord) -> Void)?
+        var onLoadMore: ((Int) -> Void)?
+        weak var collectionView: NSCollectionView?
+
+        fileprivate func update(
+            sections: [AssetHistorySection],
+            gridItemSize: CGFloat,
+            onPreview: @escaping (BackupAssetRecord) -> Void,
+            onOpen: @escaping (BackupAssetRecord) -> Void,
+            onReveal: @escaping (BackupAssetRecord) -> Void,
+            onLoadMore: @escaping (Int) -> Void
+        ) {
+            self.sections = sections
+            self.gridItemSize = gridItemSize
+            self.onPreview = onPreview
+            self.onOpen = onOpen
+            self.onReveal = onReveal
+            self.onLoadMore = onLoadMore
+            
+            collectionView?.reloadData()
+        }
+
+        func numberOfSections(in collectionView: NSCollectionView) -> Int {
+            sections.count
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
+            sections[section].entries.count
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            itemForRepresentedObjectAt indexPath: IndexPath
+        ) -> NSCollectionViewItem {
+            let item = collectionView.makeItem(
+                withIdentifier: NSUserInterfaceItemIdentifier("AssetItem"),
+                for: indexPath
+            ) as! AssetHistoryCollectionViewItem
+
+            let entry = sections[indexPath.section].entries[indexPath.item]
+            
+            item.configure(
+                asset: entry.asset,
+                size: gridItemSize,
+                onPreview: onPreview,
+                onOpen: onOpen,
+                onReveal: onReveal
+            )
+
+            // Trigger load more near the bottom
+            if let onLoadMore = onLoadMore {
+                var absIndex = 0
+                for s in 0..<indexPath.section {
+                    absIndex += sections[s].entries.count
+                }
+                absIndex += indexPath.item
+                onLoadMore(absIndex)
+            }
+
+            return item
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            viewForSupplementaryElementOfKind kind: String,
+            at indexPath: IndexPath
+        ) -> NSView {
+            if kind == NSCollectionView.elementKindSectionHeader {
+                let header = collectionView.makeSupplementaryView(
+                    ofKind: kind,
+                    withIdentifier: NSUserInterfaceItemIdentifier("SectionHeader"),
+                    for: indexPath
+                ) as! AssetHistoryCollectionViewHeader
+                
+                let title = sections[indexPath.section].title
+                header.configure(title: title)
+                return header
+            }
+            return NSView()
+        }
+
+        // Layout delegate
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            layout collectionViewLayout: NSCollectionViewLayout,
+            sizeForItemAt indexPath: IndexPath
+        ) -> NSSize {
+            NSSize(width: gridItemSize, height: gridItemSize)
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            layout collectionViewLayout: NSCollectionViewLayout,
+            referenceSizeForHeaderInSection section: Int
+        ) -> NSSize {
+            NSSize(width: 0, height: 32)
+        }
+    }
+}
+
+// Custom CollectionView Cell Item
+class AssetHistoryCollectionViewItem: NSCollectionViewItem {
+    private var hostingView: NSHostingView<AssetHistoryCollectionViewCellWrapper>?
+
+    func configure(
+        asset: BackupAssetRecord,
+        size: CGFloat,
+        onPreview: ((BackupAssetRecord) -> Void)?,
+        onOpen: ((BackupAssetRecord) -> Void)?,
+        onReveal: ((BackupAssetRecord) -> Void)?
+    ) {
+        let cellView = AssetHistoryCollectionViewCellWrapper(
+            asset: asset,
+            size: size,
+            onPreview: onPreview,
+            onOpen: onOpen,
+            onReveal: onReveal
+        )
+
+        if let hosting = hostingView {
+            hosting.rootView = cellView
+        } else {
+            let hosting = NSHostingView(rootView: cellView)
+            hosting.translatesAutoresizingMaskIntoConstraints = false
+            self.view.addSubview(hosting)
+            
+            NSLayoutConstraint.activate([
+                hosting.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
+                hosting.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
+                hosting.topAnchor.constraint(equalTo: self.view.topAnchor),
+                hosting.bottomAnchor.constraint(equalTo: self.view.bottomAnchor)
+            ])
+            self.hostingView = hosting
+        }
+    }
+    
+    override func loadView() {
+        self.view = NSView()
+        self.view.wantsLayer = true
+    }
+}
+
+// Custom CollectionView Section Header
+class AssetHistoryCollectionViewHeader: NSView {
+    private var hostingView: NSHostingView<AnyView>?
+
+    func configure(title: String) {
+        let headerView = HStack {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 6)
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .background(Color(NSColor.windowBackgroundColor))
+        
+        let anyView = AnyView(headerView)
+
+        if let hosting = hostingView {
+            hosting.rootView = anyView
+        } else {
+            let hosting = NSHostingView(rootView: anyView)
+            hosting.translatesAutoresizingMaskIntoConstraints = false
+            self.addSubview(hosting)
+            
+            NSLayoutConstraint.activate([
+                hosting.leadingAnchor.constraint(equalTo: self.leadingAnchor),
+                hosting.trailingAnchor.constraint(equalTo: self.trailingAnchor),
+                hosting.topAnchor.constraint(equalTo: self.topAnchor),
+                hosting.bottomAnchor.constraint(equalTo: self.bottomAnchor)
+            ])
+            self.hostingView = hosting
+        }
+    }
+    
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        self.wantsLayer = true
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        self.wantsLayer = true
+    }
+}
+
+// Cell Wrapper View
+struct AssetHistoryCollectionViewCellWrapper: View {
+    let asset: BackupAssetRecord
+    let size: CGFloat
+    let onPreview: ((BackupAssetRecord) -> Void)?
+    let onOpen: ((BackupAssetRecord) -> Void)?
+    let onReveal: ((BackupAssetRecord) -> Void)?
+
+    var body: some View {
+        AssetHistoryCollectionViewCellContent(asset: asset, size: size)
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .onTapGesture(count: 2) {
+                onPreview?(asset)
+            }
+            .contextMenu {
+                Button("Preview") {
+                    onPreview?(asset)
+                }
+                Button("Open") {
+                    onOpen?(asset)
+                }
+                Button("Reveal in Finder") {
+                    onReveal?(asset)
+                }
+            }
+    }
+}
+
+struct AssetHistoryCollectionViewCellContent: View {
+    let asset: BackupAssetRecord
+    let size: CGFloat
+
+    var body: some View {
+        AssetHistoryThumbnailView(asset: asset, size: size)
+            .frame(maxWidth: .infinity, alignment: .center)
     }
 }
