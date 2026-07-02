@@ -1393,8 +1393,8 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         hasLoaded = true
         guard !path.isEmpty else { return }
 
-        let fileURL = URL(fileURLWithPath: path)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        let backupFolder = AppCoordinator.shared.backupFolder
+        let fileURL = backupFolder.appendingPathComponent(relativePath)
         let displayScale = NSScreen.main?.backingScaleFactor ?? 2
 
         if let nsImage = await AssetHistoryThumbnailCache.shared.thumbnailImage(
@@ -1449,6 +1449,15 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
     }
 
     static func generateThumbnailData(fileURL: URL, mediaType: String, size: CGFloat, scale: CGFloat) async -> Data? {
+        let access = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if access {
+                fileURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+
         if let directImage = loadDirectThumbnail(fileURL: fileURL, mediaType: mediaType, size: size) {
             return jpegData(from: directImage)
         }
