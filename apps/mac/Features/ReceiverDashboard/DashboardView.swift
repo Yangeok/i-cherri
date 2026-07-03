@@ -9,6 +9,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import Darwin
 import CoreLocation
+import MapKit
 import ICherriDesignSystem
 import ICherriProtocol
 import Inject
@@ -35,6 +36,7 @@ struct DashboardView: View {
     @State private var detailLastOffset: CGSize = .zero
     @State private var detailShowInfo = false
     @State private var detailGPSLocation: String? = nil
+    @State private var detailCoordinate: CLLocationCoordinate2D? = nil
     @State private var isLivePhotoVideoHovering = false
 
     var body: some View {
@@ -132,23 +134,29 @@ struct DashboardView: View {
     // MARK: - Detail
 
     private var detailContent: some View {
-        Group {
+        ZStack {
+            // Always keep the browser mounted to preserve scroll position
+            if let device = viewModel.selectedDeviceInfo {
+                deviceDetailView(device)
+            } else {
+                placeholderView
+            }
+
+            // Detail viewer overlays within the detail pane (toolbar stays native)
             if let asset = selectedDetailAsset {
                 AssetHistoryDetailViewer(
                     asset: asset,
                     gpsLocation: $detailGPSLocation,
+                    gpsCoordinate: $detailCoordinate,
                     onClose: {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             selectedDetailAsset = nil
                             detailGPSLocation = nil
+                            detailCoordinate = nil
                         }
                     }
                 )
                 .transition(.opacity)
-            } else if let device = viewModel.selectedDeviceInfo {
-                deviceDetailView(device)
-            } else {
-                placeholderView
             }
         }
     }
@@ -2720,6 +2728,7 @@ struct AssetHistoryCollectionViewCellContent: View {
 fileprivate struct AssetHistoryDetailViewer: View {
     let asset: BackupAssetRecord
     @Binding var gpsLocation: String?
+    @Binding var gpsCoordinate: CLLocationCoordinate2D?
     let onClose: () -> Void
 
     @State private var scale: CGFloat = 1.0
@@ -2848,6 +2857,13 @@ fileprivate struct AssetHistoryDetailViewer: View {
 
                             Divider()
 
+                            // Map (GPS가 있을 때만)
+                            if let coord = gpsCoordinate {
+                                MapPinView(coordinate: coord)
+                                    .frame(height: 160)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+
                             Group {
                                 InfoRow(label: "Filename", value: asset.originalFilename)
                                 InfoRow(label: "Size", value: ByteCountFormatter.string(fromByteCount: asset.byteSize, countStyle: .file))
@@ -2947,6 +2963,9 @@ fileprivate struct AssetHistoryDetailViewer: View {
 
         guard let coord = finalCoordinate, CLLocationCoordinate2DIsValid(coord) else { return nil }
 
+        // coordinate를 부모에게 올려줌 (맵 표시용)
+        await MainActor.run { gpsCoordinate = coord }
+
         // Step 2: Reverse geocode to human-readable address
         let location = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
         return await withCheckedContinuation { continuation in
@@ -2955,12 +2974,17 @@ fileprivate struct AssetHistoryDetailViewer: View {
                     continuation.resume(returning: String(format: "%.4f°, %.4f°", coord.latitude, coord.longitude))
                     return
                 }
+                // 중복 없이 순서대로 조합
                 var parts: [String] = []
-                if let admin = p.administrativeArea { parts.append(admin) }          // 서울특별시
-                if let subAdmin = p.subAdministrativeArea { parts.append(subAdmin) } // 강남구
-                if let locality = p.locality, !parts.contains(locality) { parts.append(locality) }
-                if let subLocality = p.subLocality { parts.append(subLocality) }     // 역삼동
-                if let thoroughfare = p.thoroughfare { parts.append(thoroughfare) }
+                func addIfNew(_ s: String?) {
+                    guard let s = s, !s.isEmpty, !parts.contains(s) else { return }
+                    parts.append(s)
+                }
+                addIfNew(p.administrativeArea)    // 서울특별시
+                addIfNew(p.subAdministrativeArea) // 노원구
+                addIfNew(p.locality)              // 서울시 등 (중복이면 스킵)
+                addIfNew(p.subLocality)           // 월계동
+                addIfNew(p.thoroughfare)          // 도로명
                 let address = parts.joined(separator: " ")
                 continuation.resume(returning: address.isEmpty ? nil : address)
             }
@@ -3017,5 +3041,33 @@ fileprivate struct NativeVideoPlayerView: NSViewRepresentable {
 
     func updateNSView(_ nsView: AVPlayerView, context: Context) {
         // No updates needed
+    }
+}
+
+fileprivate struct MapPinView: NSViewRepresentable {
+    let coordinate: CLLocationCoordinate2D
+
+    func makeNSView(context: Context) -> MKMapView {
+        let mapView = MKMapView()
+        mapView.isZoomEnabled = false
+        mapView.isScrollEnabled = false
+        mapView.isPitchEnabled = false
+        mapView.isRotateEnabled = false
+        mapView.showsCompass = false
+        mapView.showsZoomControls = false
+        return mapView
+    }
+
+    func updateNSView(_ mapView: MKMapView, context: Context) {
+        mapView.removeAnnotations(mapView.annotations)
+        let region = MKCoordinateRegion(
+            center: coordinate,
+            latitudinalMeters: 800,
+            longitudinalMeters: 800
+        )
+        mapView.setRegion(region, animated: false)
+        let pin = MKPointAnnotation()
+        pin.coordinate = coordinate
+        mapView.addAnnotation(pin)
     }
 }
