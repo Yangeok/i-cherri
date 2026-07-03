@@ -1702,7 +1702,8 @@ final class AssetHistoryThumbnailCache {
     private let memoryCache = NSCache<NSString, NSImage>()
     private let fileManager = FileManager.default
     private let diskCacheURL: URL
-    private var inFlightTasks: [String: Task<Data?, Never>] = [:]
+    private var inFlightTasks: [String: (task: Task<(data: Data, isNew: Bool)?, Never>, generateIfAbsent: Bool, id: UInt64)] = [:]
+    private var taskCounter: UInt64 = 0
 
     init() {
         memoryCache.countLimit = 512
@@ -1719,27 +1720,7 @@ final class AssetHistoryThumbnailCache {
         guard let cacheKey = cacheKey(for: fileURL, size: size) else { return nil }
         let nsCacheKey = cacheKey as NSString
 
-        if let cached = memoryCache.object(forKey: nsCacheKey) {
-            return cached
-        }
-
-        let cachedFileURL = diskCacheURL.appendingPathComponent(cacheKey).appendingPathExtension("jpg")
-        guard let data = try? Data(contentsOf: cachedFileURL, options: [.mappedIfSafe]),
-              let image = NSImage(data: data) else {
-            return nil
-        }
-
-        memoryCache.setObject(image, forKey: nsCacheKey, cost: estimatedCost(for: size))
-        return image
-    }
-
-    func store(_ data: Data, for fileURL: URL, size: CGFloat) {
-        guard let cacheKey = cacheKey(for: fileURL, size: size) else { return }
-        let nsCacheKey = cacheKey as NSString
-        if let image = NSImage(data: data) {
-            memoryCache.setObject(image, forKey: nsCacheKey, cost: estimatedCost(for: size))
-        }
-        store(data, cacheKey: cacheKey, size: size)
+        return memoryCache.object(forKey: nsCacheKey)
     }
 
     func thumbnailImage(
@@ -1756,34 +1737,62 @@ final class AssetHistoryThumbnailCache {
             return cached
         }
 
-        guard generateIfAbsent else { return nil }
+        if let existing = inFlightTasks[cacheKey] {
+            if !generateIfAbsent || existing.generateIfAbsent {
+                if let result = await existing.task.value {
+                    if let image = NSImage(data: result.data) {
+                        memoryCache.setObject(image, forKey: nsCacheKey, cost: estimatedCost(for: size))
+                        return image
+                    }
+                }
+                return nil
+            }
+        }
 
-        if let existingTask = inFlightTasks[cacheKey] {
-            if let data = await existingTask.value {
-                return NSImage(data: data)
+        let taskId = taskCounter
+        taskCounter += 1
+
+        let diskCacheURL = self.diskCacheURL
+        let task = Task.detached(priority: .utility) { [diskCacheURL] () -> (data: Data, isNew: Bool)? in
+            let cachedFileURL = diskCacheURL.appendingPathComponent(cacheKey).appendingPathExtension("jpg")
+
+            // 1. Try reading from disk cache asynchronously
+            if FileManager.default.fileExists(atPath: cachedFileURL.path) {
+                if let data = try? Data(contentsOf: cachedFileURL, options: [.mappedIfSafe]) {
+                    return (data: data, isNew: false)
+                }
+            }
+
+            // 2. Generate if requested
+            if generateIfAbsent {
+                let generatedData = await AssetHistoryThumbnailLoader.generateThumbnailData(
+                    fileURL: fileURL,
+                    mediaType: mediaType,
+                    size: size,
+                    scale: scale
+                )
+                if let generatedData {
+                    // Store to disk cache asynchronously
+                    try? generatedData.write(to: cachedFileURL, options: .atomic)
+                    return (data: generatedData, isNew: true)
+                }
             }
             return nil
         }
 
-        let task = Task.detached(priority: .utility) {
-            await AssetHistoryThumbnailLoader.generateThumbnailData(
-                fileURL: fileURL,
-                mediaType: mediaType,
-                size: size,
-                scale: scale
-            )
+        inFlightTasks[cacheKey] = (task: task, generateIfAbsent: generateIfAbsent, id: taskId)
+
+        let result = await task.value
+
+        if inFlightTasks[cacheKey]?.id == taskId {
+            inFlightTasks[cacheKey] = nil
         }
-        inFlightTasks[cacheKey] = task
 
-        let generatedData = await task.value
-        inFlightTasks[cacheKey] = nil
-
-        if let generatedData, let image = NSImage(data: generatedData) {
-            store(generatedData, cacheKey: cacheKey, size: size)
+        if let result, let image = NSImage(data: result.data) {
             memoryCache.setObject(image, forKey: nsCacheKey, cost: estimatedCost(for: size))
 
-            let path = fileURL.path
-            Task { @MainActor in
+            if result.isNew {
+                let path = fileURL.path
                 NSLog("iCherri-Thumbnail: Posting thumbnailDidCache for \(fileURL.lastPathComponent) size \(size)")
                 NotificationCenter.default.post(
                     name: .thumbnailDidCache,
@@ -1807,11 +1816,6 @@ final class AssetHistoryThumbnailCache {
 
     private func estimatedCost(for size: CGFloat) -> Int {
         Int(size * size * 4)
-    }
-
-    private func store(_ data: Data, cacheKey: String, size: CGFloat) {
-        let cachedFileURL = diskCacheURL.appendingPathComponent(cacheKey).appendingPathExtension("jpg")
-        try? data.write(to: cachedFileURL, options: .atomic)
     }
 }
 
