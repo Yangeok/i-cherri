@@ -37,69 +37,59 @@ struct DashboardView: View {
     @State private var isLivePhotoVideoHovering = false
 
     var body: some View {
-        ZStack {
-            NavigationSplitView {
-                sidebar
-            } detail: {
-                detailContent
-            }
-            .navigationTitle("iCherri Receiver")
-            .enableInjection()
-            .toolbar { toolbarContent }
-            .task {
-                await viewModel.load()
-                viewModel.startObservation()
-            }
-            .onDisappear {
-                viewModel.stopObservation()
-            }
-            .onChange(of: viewModel.selectedDevice) { _, _ in
-                Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
-            }
-            .quickLookPreview($previewURL)
-            .alert(
-                "Delete Paired Device?",
-                isPresented: Binding(
-                    get: { devicePendingDeletion != nil },
-                    set: { isPresented in
-                        if !isPresented {
-                            devicePendingDeletion = nil
-                        }
-                    }
-                ),
-                presenting: devicePendingDeletion
-            ) { device in
-                Button("Delete", role: .destructive) {
-                    Task { await viewModel.confirmDeleteDevice(device) }
-                }
-                Button("Cancel", role: .cancel) {
-                    devicePendingDeletion = nil
-                }
-            } message: { device in
-                Text("This removes \(device.deviceName), its backup history, active sessions, and failure logs from this Mac.")
-            }
-            .alert("File Unavailable", isPresented: Binding(
-                get: { assetActionError != nil },
+        NavigationSplitView {
+            sidebar
+        } detail: {
+            detailContent
+        }
+        .navigationTitle(selectedDetailAsset == nil ? "iCherri Receiver" : "")
+        .enableInjection()
+        .toolbar { toolbarContent }
+        .task {
+            await viewModel.load()
+            viewModel.startObservation()
+        }
+        .onDisappear {
+            viewModel.stopObservation()
+        }
+        .onChange(of: viewModel.selectedDevice) { _, _ in
+            Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
+        }
+        .quickLookPreview($previewURL)
+        .alert(
+            "Delete Paired Device?",
+            isPresented: Binding(
+                get: { devicePendingDeletion != nil },
                 set: { isPresented in
                     if !isPresented {
-                        assetActionError = nil
+                        devicePendingDeletion = nil
                     }
                 }
-            )) {
-                Button("OK", role: .cancel) {
+            ),
+            presenting: devicePendingDeletion
+        ) { device in
+            Button("Delete", role: .destructive) {
+                Task { await viewModel.confirmDeleteDevice(device) }
+            }
+            Button("Cancel", role: .cancel) {
+                devicePendingDeletion = nil
+            }
+        } message: { device in
+            Text("This removes \(device.deviceName), its backup history, active sessions, and failure logs from this Mac.")
+        }
+        .alert("File Unavailable", isPresented: Binding(
+            get: { assetActionError != nil },
+            set: { isPresented in
+                if !isPresented {
                     assetActionError = nil
                 }
-            } message: {
-                Text(assetActionError ?? "The backup file could not be found.")
             }
-
-            if let asset = selectedDetailAsset {
-                AssetHistoryDetailViewer(
-                    asset: asset,
-                    onClose: { selectedDetailAsset = nil }
-                )
-                .transition(.opacity)
+        )) {
+            Button("OK", role: .cancel) {
+                assetActionError = nil
             }
+        } message: {
+            Text(assetActionError ?? "The backup file could not be found.")
         }
     }
 
@@ -142,7 +132,17 @@ struct DashboardView: View {
 
     private var detailContent: some View {
         Group {
-            if let device = viewModel.selectedDeviceInfo {
+            if let asset = selectedDetailAsset {
+                AssetHistoryDetailViewer(
+                    asset: asset,
+                    onClose: {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            selectedDetailAsset = nil
+                        }
+                    }
+                )
+                .transition(.opacity)
+            } else if let device = viewModel.selectedDeviceInfo {
                 deviceDetailView(device)
             } else {
                 placeholderView
