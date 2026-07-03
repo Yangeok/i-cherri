@@ -27,6 +27,8 @@ struct DashboardView: View {
     @State private var scrubberActiveSectionTitle: String?
     @State private var scrubberCommitTask: Task<Void, Never>?
     @State private var selectedDetailAsset: BackupAssetRecord? = nil
+    @State private var magnificationScale: CGFloat = 1.0
+    @State private var isPinching = false
 
     var body: some View {
         ZStack {
@@ -249,7 +251,8 @@ struct DashboardView: View {
             repeating: GridItem(.flexible(), spacing: 8, alignment: .top),
             count: columnCount
         )
-        let gridItemSize = (contentWidth - CGFloat(max(columnCount - 1, 0)) * 8) / CGFloat(columnCount)
+        let baseGridItemSize = (contentWidth - CGFloat(max(columnCount - 1, 0)) * 8) / CGFloat(columnCount)
+        let gridItemSize = baseGridItemSize * magnificationScale
 
         return ScrollViewReader { scrollProxy in
             ZStack(alignment: .bottom) {
@@ -264,6 +267,7 @@ struct DashboardView: View {
                             onLoadMore: { index in
                                 Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
                             },
+                            isPinching: isPinching,
                             viewModel: viewModel
                         )
                         .gesture(historyGridMagnificationGesture)
@@ -356,19 +360,22 @@ struct DashboardView: View {
         MagnificationGesture()
             .onChanged { value in
                 guard viewModel.assetHistoryViewMode == .grid else { return }
+                isPinching = true
                 let start = gridPinchStartColumns ?? viewModel.gridColumnCount
                 if gridPinchStartColumns == nil {
                     gridPinchStartColumns = start
                 }
-                if let proposed = proposedGridColumnCount(start: start, magnificationValue: value) {
-                    viewModel.gridColumnCount = proposed
-                }
+                magnificationScale = max(0.5, min(value, 2.0))
             }
             .onEnded { value in
                 guard viewModel.assetHistoryViewMode == .grid else { return }
+                isPinching = false
                 let start = gridPinchStartColumns ?? viewModel.gridColumnCount
-                if let proposed = proposedGridColumnCount(start: start, magnificationValue: value) {
+                let proposed = proposedGridColumnCount(start: start, magnificationValue: value) ?? start
+                
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                     viewModel.gridColumnCount = proposed
+                    magnificationScale = 1.0
                 }
                 gridPinchStartColumns = nil
             }
@@ -2174,6 +2181,7 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
     let onOpen: (BackupAssetRecord) -> Void
     let onReveal: (BackupAssetRecord) -> Void
     let onLoadMore: (Int) -> Void
+    let isPinching: Bool
     @ObservedObject var viewModel: DashboardViewModel
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -2218,7 +2226,8 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             onOpen: onOpen,
             onReveal: onReveal,
             onLoadMore: onLoadMore,
-            isJumpingToSection: viewModel.scrollToSectionID != nil
+            isJumpingToSection: viewModel.scrollToSectionID != nil,
+            isPinching: isPinching
         )
 
         if let targetID = viewModel.scrollToSectionID {
@@ -2251,7 +2260,8 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             onOpen: @escaping (BackupAssetRecord) -> Void,
             onReveal: @escaping (BackupAssetRecord) -> Void,
             onLoadMore: @escaping (Int) -> Void,
-            isJumpingToSection: Bool
+            isJumpingToSection: Bool,
+            isPinching: Bool
         ) {
             let sectionsChanged = self.sections != sections
             let sizeChanged = self.gridItemSize != gridItemSize
@@ -2284,7 +2294,15 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
                     lockedAnchorIndexPath = collectionView?.indexPathsForVisibleItems().sorted().first
                 }
                 
-                collectionView?.collectionViewLayout?.invalidateLayout()
+                if isPinching {
+                    collectionView?.collectionViewLayout?.invalidateLayout()
+                } else {
+                    NSAnimationContext.runAnimationGroup { context in
+                        context.duration = 0.3
+                        context.allowsImplicitAnimation = true
+                        collectionView?.collectionViewLayout?.invalidateLayout()
+                    }
+                }
                 
                 if let anchorPath = lockedAnchorIndexPath {
                     // Force immediate layout reflow so scrollToItems uses correct updated positions
