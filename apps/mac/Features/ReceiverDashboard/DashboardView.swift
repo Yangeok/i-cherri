@@ -2684,7 +2684,6 @@ fileprivate struct AssetHistoryDetailViewer: View {
     @State private var showInfo = false
     @State private var gpsLocation: String? = nil
     @State private var isLivePhotoVideoHovering = false
-    @State private var livePhotoPlayer: AVPlayer? = nil
 
     private var fileURL: URL? {
         guard !asset.finalPath.isEmpty else { return nil }
@@ -2730,10 +2729,10 @@ fileprivate struct AssetHistoryDetailViewer: View {
                     if let fileURL = fileURL {
                         ZStack {
                             if isVideo {
-                                VideoPlayerView(url: fileURL)
+                                NativeVideoPlayerView(url: fileURL, autoPlay: true, showControls: true)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else if let liveVideoURL = livePhotoVideoURL, isLivePhotoVideoHovering {
-                                LiveVideoHoverPlayer(videoURL: liveVideoURL, player: $livePhotoPlayer)
+                                NativeVideoPlayerView(url: liveVideoURL, autoPlay: true, showControls: false)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else {
                                 if let nsImage = NSImage(contentsOf: fileURL) {
@@ -2772,12 +2771,6 @@ fileprivate struct AssetHistoryDetailViewer: View {
                         .onHover { hovering in
                             if livePhotoVideoURL != nil {
                                 isLivePhotoVideoHovering = hovering
-                                if hovering {
-                                    livePhotoPlayer?.seek(to: .zero)
-                                    livePhotoPlayer?.play()
-                                } else {
-                                    livePhotoPlayer?.pause()
-                                }
                             }
                         }
                     } else {
@@ -3017,32 +3010,36 @@ fileprivate struct InfoRow: View {
     }
 }
 
-fileprivate struct VideoPlayerView: View {
+fileprivate struct NativeVideoPlayerView: NSViewRepresentable {
     let url: URL
-    @State private var player: AVPlayer? = nil
+    let autoPlay: Bool
+    let showControls: Bool
 
-    var body: some View {
-        VideoPlayer(player: player)
-            .onAppear {
-                player = AVPlayer(url: url)
+    func makeNSView(context: Context) -> AVPlayerView {
+        let playerView = AVPlayerView()
+        playerView.player = AVPlayer(url: url)
+        playerView.controlsStyle = showControls ? .floating : .none
+        playerView.videoGravity = .resizeAspect
+        
+        // Loop video for live photos (when controls are hidden)
+        if !showControls {
+            NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: playerView.player?.currentItem,
+                queue: .main
+            ) { [weak player = playerView.player] _ in
+                player?.seek(to: .zero)
                 player?.play()
             }
-            .onDisappear {
-                player?.pause()
-            }
+        }
+        
+        if autoPlay {
+            playerView.player?.play()
+        }
+        return playerView
     }
-}
 
-fileprivate struct LiveVideoHoverPlayer: View {
-    let videoURL: URL
-    @Binding var player: AVPlayer?
-
-    var body: some View {
-        VideoPlayer(player: player)
-            .onAppear {
-                if player == nil {
-                    player = AVPlayer(url: videoURL)
-                }
-            }
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        // No updates needed
     }
 }
