@@ -1457,7 +1457,7 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
             }
         }
 
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        guard (try? fileURL.checkResourceIsReachable()) == true else { return nil }
 
         if let directImage = loadDirectThumbnail(fileURL: fileURL, mediaType: mediaType, size: size) {
             return jpegData(from: directImage)
