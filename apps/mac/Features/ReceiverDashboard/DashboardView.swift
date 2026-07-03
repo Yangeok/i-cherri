@@ -8,6 +8,7 @@ import CryptoKit
 import ImageIO
 import UniformTypeIdentifiers
 import Darwin
+import CoreLocation
 import ICherriDesignSystem
 import ICherriProtocol
 import Inject
@@ -2912,35 +2913,61 @@ fileprivate struct AssetHistoryDetailViewer: View {
     }
 
     private func extractLocation(from url: URL, isVideo: Bool) async -> String? {
+        // Step 1: Extract raw GPS coordinates
+        var finalCoordinate: CLLocationCoordinate2D? = nil
+
         if isVideo {
-            let asset = AVAsset(url: url)
-            guard let metadata = try? await asset.load(.metadata) else { return nil }
-            for item in metadata {
-                if item.commonKey == .commonKeyLocation {
-                    if let stringValue = try? await item.load(.stringValue) {
-                        return stringValue
+            let avAsset = AVAsset(url: url)
+            if let metadata = try? await avAsset.load(.metadata) {
+                for item in metadata where item.commonKey == .commonKeyLocation {
+                    if let str = try? await item.load(.stringValue) {
+                        // ISO 6709: ±DD.DDDD±DDD.DDDD/
+                        let scanner = Scanner(string: str)
+                        if let lat = scanner.scanDouble(), let lon = scanner.scanDouble() {
+                            finalCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                        }
                     }
                 }
             }
-            return nil
         } else {
-            return await Task.detached(priority: .userInitiated) {
-                guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-                guard let imageProperties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any] else { return nil }
-                guard let gpsProperties = imageProperties[kCGImagePropertyGPSDictionary] as? [CFString: Any] else { return nil }
-
-                guard let latitudeRef = gpsProperties[kCGImagePropertyGPSLatitudeRef] as? String,
-                      let latitude = gpsProperties[kCGImagePropertyGPSLatitude] as? Double,
-                      let longitudeRef = gpsProperties[kCGImagePropertyGPSLongitudeRef] as? String,
-                      let longitude = gpsProperties[kCGImagePropertyGPSLongitude] as? Double else {
-                    return nil
-                }
-
-                return String(format: "%.4f° %@, %.4f° %@", latitude, latitudeRef, longitude, longitudeRef)
+            finalCoordinate = await Task.detached(priority: .userInitiated) {
+                guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
+                      let props = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any],
+                      let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+                      let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
+                      let latRef = gps[kCGImagePropertyGPSLatitudeRef] as? String,
+                      let lon = gps[kCGImagePropertyGPSLongitude] as? Double,
+                      let lonRef = gps[kCGImagePropertyGPSLongitudeRef] as? String
+                else { return nil }
+                let signedLat = latRef == "S" ? -lat : lat
+                let signedLon = lonRef == "W" ? -lon : lon
+                return CLLocationCoordinate2D(latitude: signedLat, longitude: signedLon)
             }.value
+        }
+
+        guard let coord = finalCoordinate, CLLocationCoordinate2DIsValid(coord) else { return nil }
+
+        // Step 2: Reverse geocode to human-readable address
+        let location = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+        return await withCheckedContinuation { continuation in
+            CLGeocoder().reverseGeocodeLocation(location, preferredLocale: Locale(identifier: "ko_KR")) { placemarks, _ in
+                guard let p = placemarks?.first else {
+                    continuation.resume(returning: String(format: "%.4f°, %.4f°", coord.latitude, coord.longitude))
+                    return
+                }
+                var parts: [String] = []
+                if let admin = p.administrativeArea { parts.append(admin) }          // 서울특별시
+                if let subAdmin = p.subAdministrativeArea { parts.append(subAdmin) } // 강남구
+                if let locality = p.locality, !parts.contains(locality) { parts.append(locality) }
+                if let subLocality = p.subLocality { parts.append(subLocality) }     // 역삼동
+                if let thoroughfare = p.thoroughfare { parts.append(thoroughfare) }
+                let address = parts.joined(separator: " ")
+                continuation.resume(returning: address.isEmpty ? nil : address)
+            }
         }
     }
 }
+
 
 fileprivate struct InfoRow: View {
     let label: String
