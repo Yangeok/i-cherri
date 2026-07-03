@@ -154,8 +154,6 @@ struct DashboardView: View {
     private func deviceDetailView(_ device: PairedDeviceRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             deviceHeader(device)
-            historySearchBar
-            historyMediaFilterBar
             historyBrowser
         }
         .padding(24)
@@ -164,7 +162,7 @@ struct DashboardView: View {
 
     private func deviceHeader(_ device: PairedDeviceRecord) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.deviceName)
                         .font(.title2.weight(.semibold))
@@ -178,8 +176,15 @@ struct DashboardView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                
                 Spacer()
-                statusPill(device.pairingStatus)
+                
+                // 1) Search bar pushed up
+                historySearchBar
+                    .frame(width: 220)
+                
+                // 2) media filters (All, Photos, Videos) in place of paired badge
+                historyMediaFilterBar
             }
 
             Text(historySummary(for: device))
@@ -197,7 +202,7 @@ struct DashboardView: View {
                     .textFieldStyle(.plain)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .padding(.vertical, 6)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .onChange(of: viewModel.assetSearchQuery) { _, _ in
@@ -206,11 +211,10 @@ struct DashboardView: View {
     }
 
     private var historyMediaFilterBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             ForEach(AssetHistoryMediaFilter.allCases) { filter in
                 mediaFilterChip(filter)
             }
-            Spacer()
         }
     }
 
@@ -832,7 +836,7 @@ private struct AssetHistoryInteractionModifier: ViewModifier {
         content
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .onTapGesture(count: 2) {
-                onPreview()
+                onOpen()
             }
             .contextMenu {
                 Button("Preview") {
@@ -2218,14 +2222,17 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             let sizeChanged = self.gridItemSize != gridItemSize
 
             self.sections = sections
-            self.gridItemSize = gridItemSize
             self.onPreview = onPreview
             self.onOpen = onOpen
             self.onReveal = onReveal
             self.onLoadMore = onLoadMore
             
-            if sectionsChanged || sizeChanged {
+            if sectionsChanged {
+                self.gridItemSize = gridItemSize
                 collectionView?.reloadData()
+            } else if sizeChanged {
+                self.gridItemSize = gridItemSize
+                collectionView?.collectionViewLayout?.invalidateLayout()
             }
         }
 
@@ -2342,6 +2349,20 @@ class AssetHistoryCollectionViewItem: NSCollectionViewItem {
         imageLoadTask = nil
     }
 
+    static func bucketedSize(for size: CGFloat) -> CGFloat {
+        if size <= 80 {
+            return 80
+        } else if size <= 160 {
+            return 160
+        } else if size <= 240 {
+            return 240
+        } else if size <= 320 {
+            return 320
+        } else {
+            return (size / 80.0).rounded(.up) * 80.0
+        }
+    }
+
     func configure(
         asset: BackupAssetRecord,
         size: CGFloat,
@@ -2371,13 +2392,14 @@ class AssetHistoryCollectionViewItem: NSCollectionViewItem {
         let fileURL = URL(fileURLWithPath: resolvedPath)
         let mediaType = asset.mediaType
         let displayScale = self.view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let bucketed = Self.bucketedSize(for: size)
 
         // 3. Load/Generate thumbnail immediately in real-time!
         imageLoadTask = Task { @MainActor in
             if let nsImage = await AssetHistoryThumbnailCache.shared.thumbnailImage(
                 for: fileURL,
                 mediaType: mediaType,
-                size: size,
+                size: bucketed,
                 scale: displayScale,
                 generateIfAbsent: true // <-- Generate immediately in background!
             ) {
@@ -2485,7 +2507,7 @@ struct AssetHistoryCollectionViewCellWrapper: View {
         content
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .onTapGesture(count: 2) {
-                onPreview?(asset)
+                onOpen?(asset)
             }
             .contextMenu {
                 Button("Preview") {
@@ -2521,7 +2543,7 @@ struct AssetHistoryCollectionViewCellContent: View {
                 }
             }
         }
-        .frame(width: size, height: size)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(alignment: .bottomTrailing) {
             if let durationLabel {
