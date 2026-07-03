@@ -549,13 +549,17 @@ struct DashboardView: View {
 
         scrubberCommitTask?.cancel()
         scrubberCommitTask = Task {
-            await viewModel.ensureSectionVisible(targetSectionID)
-            guard !Task.isCancelled else { return }
-
             await MainActor.run {
                 if viewModel.assetHistoryViewMode == .grid {
                     viewModel.scrollToSectionID = targetSectionID
-                } else {
+                }
+            }
+
+            await viewModel.ensureSectionVisible(targetSectionID)
+            guard !Task.isCancelled else { return }
+
+            if viewModel.assetHistoryViewMode != .grid {
+                await MainActor.run {
                     withAnimation(.easeOut(duration: 0.12)) {
                         scrollProxy.scrollTo(targetSectionID, anchor: .top)
                     }
@@ -2190,7 +2194,8 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             onPreview: onPreview,
             onOpen: onOpen,
             onReveal: onReveal,
-            onLoadMore: onLoadMore
+            onLoadMore: onLoadMore,
+            isJumpingToSection: viewModel.scrollToSectionID != nil
         )
 
         if let targetID = viewModel.scrollToSectionID {
@@ -2222,7 +2227,8 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             onPreview: @escaping (BackupAssetRecord) -> Void,
             onOpen: @escaping (BackupAssetRecord) -> Void,
             onReveal: @escaping (BackupAssetRecord) -> Void,
-            onLoadMore: @escaping (Int) -> Void
+            onLoadMore: @escaping (Int) -> Void,
+            isJumpingToSection: Bool
         ) {
             let sectionsChanged = self.sections != sections
             let sizeChanged = self.gridItemSize != gridItemSize
@@ -2236,7 +2242,7 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             if sectionsChanged {
                 let isSameDataset = !self.sections.isEmpty && !sections.isEmpty &&
                                     self.sections[0].entries.first?.id == sections[0].entries.first?.id
-                let anchorPath = isSameDataset ? collectionView?.indexPathsForVisibleItems().sorted().first : nil
+                let anchorPath = (isSameDataset && !isJumpingToSection) ? collectionView?.indexPathsForVisibleItems().sorted().first : nil
 
                 self.gridItemSize = gridItemSize
                 collectionView?.reloadData()
@@ -2280,6 +2286,8 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             let itemCount = sections[sectionIndex].entries.count
             guard itemCount > 0 else { return }
             let indexPath = IndexPath(item: 0, section: sectionIndex)
+            
+            collectionView.layoutSubtreeIfNeeded()
             
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.2
