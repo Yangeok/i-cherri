@@ -3,6 +3,7 @@ import AppKit
 import QuickLook
 import QuickLookThumbnailing
 import AVFoundation
+import AVKit
 import CryptoKit
 import ImageIO
 import UniformTypeIdentifiers
@@ -25,61 +26,72 @@ struct DashboardView: View {
     @State private var scrubberActiveSectionID: String?
     @State private var scrubberActiveSectionTitle: String?
     @State private var scrubberCommitTask: Task<Void, Never>?
+    @State private var selectedDetailAsset: BackupAssetRecord? = nil
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-        } detail: {
-            detailContent
-        }
-        .navigationTitle("iCherri Receiver")
-        .enableInjection()
-        .toolbar { toolbarContent }
-        .task {
-            await viewModel.load()
-            viewModel.startObservation()
-        }
-        .onDisappear {
-            viewModel.stopObservation()
-        }
-        .onChange(of: viewModel.selectedDevice) { _, _ in
-            Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
-        }
-        .quickLookPreview($previewURL)
-        .alert(
-            "Delete Paired Device?",
-            isPresented: Binding(
-                get: { devicePendingDeletion != nil },
+        ZStack {
+            NavigationSplitView {
+                sidebar
+            } detail: {
+                detailContent
+            }
+            .navigationTitle("iCherri Receiver")
+            .enableInjection()
+            .toolbar { toolbarContent }
+            .task {
+                await viewModel.load()
+                viewModel.startObservation()
+            }
+            .onDisappear {
+                viewModel.stopObservation()
+            }
+            .onChange(of: viewModel.selectedDevice) { _, _ in
+                Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
+            }
+            .quickLookPreview($previewURL)
+            .alert(
+                "Delete Paired Device?",
+                isPresented: Binding(
+                    get: { devicePendingDeletion != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            devicePendingDeletion = nil
+                        }
+                    }
+                ),
+                presenting: devicePendingDeletion
+            ) { device in
+                Button("Delete", role: .destructive) {
+                    Task { await viewModel.confirmDeleteDevice(device) }
+                }
+                Button("Cancel", role: .cancel) {
+                    devicePendingDeletion = nil
+                }
+            } message: { device in
+                Text("This removes \(device.deviceName), its backup history, active sessions, and failure logs from this Mac.")
+            }
+            .alert("File Unavailable", isPresented: Binding(
+                get: { assetActionError != nil },
                 set: { isPresented in
                     if !isPresented {
-                        devicePendingDeletion = nil
+                        assetActionError = nil
                     }
                 }
-            ),
-            presenting: devicePendingDeletion
-        ) { device in
-            Button("Delete", role: .destructive) {
-                Task { await viewModel.confirmDeleteDevice(device) }
-            }
-            Button("Cancel", role: .cancel) {
-                devicePendingDeletion = nil
-            }
-        } message: { device in
-            Text("This removes \(device.deviceName), its backup history, active sessions, and failure logs from this Mac.")
-        }
-        .alert("File Unavailable", isPresented: Binding(
-            get: { assetActionError != nil },
-            set: { isPresented in
-                if !isPresented {
+            )) {
+                Button("OK", role: .cancel) {
                     assetActionError = nil
                 }
+            } message: {
+                Text(assetActionError ?? "The backup file could not be found.")
             }
-        )) {
-            Button("OK", role: .cancel) {
-                assetActionError = nil
+
+            if let asset = selectedDetailAsset {
+                AssetHistoryDetailViewer(
+                    asset: asset,
+                    onClose: { selectedDetailAsset = nil }
+                )
+                .transition(.opacity)
             }
-        } message: {
-            Text(assetActionError ?? "The backup file could not be found.")
         }
     }
 
@@ -703,7 +715,18 @@ struct DashboardView: View {
                 }
 
                 HStack(spacing: 14) {
-                    Label(asset.mediaType.capitalized, systemImage: "photo")
+                    if asset.mediaType.lowercased() == "video" {
+                        if let duration = asset.durationSeconds, duration > 0 {
+                            let minutes = Int(duration) / 60
+                            let seconds = Int(duration) % 60
+                            let durationStr = String(format: "%d:%02d", minutes, seconds)
+                            Label("Video (\(durationStr))", systemImage: "video")
+                        } else {
+                            Label("Video", systemImage: "video")
+                        }
+                    } else {
+                        Label(asset.mediaType.capitalized, systemImage: "photo")
+                    }
                     Label(ByteCountFormatter.string(fromByteCount: asset.byteSize, countStyle: .file), systemImage: "externaldrive")
                     Label(asset.creationDate.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
                 }
@@ -801,11 +824,11 @@ struct DashboardView: View {
     }
 
     private func openAsset(_ asset: BackupAssetRecord) {
-        guard let url = assetFileURL(asset) else {
+        guard assetFileURL(asset) != nil else {
             assetActionError = missingFileMessage(for: asset)
             return
         }
-        NSWorkspace.shared.open(url)
+        selectedDetailAsset = asset
     }
 
     private func revealAsset(_ asset: BackupAssetRecord) {
@@ -1315,12 +1338,12 @@ private struct AssetHistoryThumbnailView: View {
         .overlay(alignment: .bottomTrailing) {
             if let durationLabel {
                 Text(durationLabel)
-                    .font(.caption2.weight(.semibold))
+                    .font(.system(size: size < 60 ? 8 : 10, weight: .bold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(.black.opacity(0.72), in: Capsule())
-                    .padding(6)
+                    .padding(.horizontal, size < 60 ? 3 : 6)
+                    .padding(.vertical, size < 60 ? 1.5 : 3)
+                    .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
+                    .padding(size < 60 ? 2 : 6)
             }
         }
         .task {
@@ -2630,5 +2653,378 @@ struct AssetHistoryCollectionViewCellContent: View {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+fileprivate struct AssetHistoryDetailViewer: View {
+    let asset: BackupAssetRecord
+    let onClose: () -> Void
+
+    @State private var scale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+    @State private var showInfo = false
+    @State private var gpsLocation: String? = nil
+    @State private var isLivePhotoVideoHovering = false
+    @State private var livePhotoPlayer: AVPlayer? = nil
+
+    private var fileURL: URL? {
+        guard !asset.finalPath.isEmpty else { return nil }
+        if (asset.finalPath as NSString).isAbsolutePath {
+            return URL(fileURLWithPath: asset.finalPath)
+        } else {
+            return AppCoordinator.shared.backupFolder.appendingPathComponent(asset.finalPath)
+        }
+    }
+
+    private var isVideo: Bool {
+        asset.mediaType.lowercased() == "video"
+    }
+
+    private var livePhotoVideoURL: URL? {
+        guard !isVideo, let fileURL = fileURL else { return nil }
+        let videoURL = fileURL.deletingPathExtension().appendingPathExtension("mov")
+        if FileManager.default.fileExists(atPath: videoURL.path) {
+            return videoURL
+        }
+        let mp4URL = fileURL.deletingPathExtension().appendingPathExtension("mp4")
+        if FileManager.default.fileExists(atPath: mp4URL.path) {
+            return mp4URL
+        }
+        return nil
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // 1. Dark glassmorphic background
+                Color.black.opacity(0.85)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        onClose()
+                    }
+
+                // 2. Content Area
+                VStack(spacing: 0) {
+                    // Spacer for header offset
+                    Spacer().frame(height: 60)
+
+                    if let fileURL = fileURL {
+                        ZStack {
+                            if isVideo {
+                                VideoPlayerView(url: fileURL)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else if let liveVideoURL = livePhotoVideoURL, isLivePhotoVideoHovering {
+                                LiveVideoHoverPlayer(videoURL: liveVideoURL, player: $livePhotoPlayer)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else {
+                                if let nsImage = NSImage(contentsOf: fileURL) {
+                                    Image(nsImage: nsImage)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .scaleEffect(scale)
+                                        .offset(offset)
+                                        .gesture(
+                                            DragGesture()
+                                                .onChanged { value in
+                                                    if scale > 1.0 {
+                                                        offset = CGSize(
+                                                            width: lastOffset.width + value.translation.width,
+                                                            height: lastOffset.height + value.translation.height
+                                                        )
+                                                    }
+                                                }
+                                                .onEnded { _ in
+                                                    lastOffset = offset
+                                                }
+                                        )
+                                } else {
+                                    VStack(spacing: 12) {
+                                        Image(systemName: "exclamationmark.triangle")
+                                            .font(.largeTitle)
+                                            .foregroundStyle(.red)
+                                        Text("Failed to load image")
+                                            .font(.headline)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                        .onHover { hovering in
+                            if livePhotoVideoURL != nil {
+                                isLivePhotoVideoHovering = hovering
+                                if hovering {
+                                    livePhotoPlayer?.seek(to: .zero)
+                                    livePhotoPlayer?.play()
+                                } else {
+                                    livePhotoPlayer?.pause()
+                                }
+                            }
+                        }
+                    } else {
+                        VStack(spacing: 12) {
+                            Image(systemName: "questionmark.folder")
+                                .font(.largeTitle)
+                                .foregroundStyle(.secondary)
+                            Text("File not found")
+                                .font(.headline)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+
+                // 3. Floating Premium Header
+                VStack {
+                    HStack(spacing: 16) {
+                        // Left: Back button
+                        Button(action: onClose) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "chevron.left")
+                                    .font(.body.bold())
+                                Text("Back")
+                                    .font(.body)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.white.opacity(0.1), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        // Center: Title & Metadata
+                        VStack(spacing: 4) {
+                            Text(asset.originalFilename)
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+
+                            HStack(spacing: 8) {
+                                Text(asset.creationDate.formatted(date: .abbreviated, time: .shortened))
+                                if let gps = gpsLocation {
+                                    Text("•")
+                                    Image(systemName: "mappin.and.ellipse")
+                                    Text(gps)
+                                }
+                                if livePhotoVideoURL != nil {
+                                    Text("•")
+                                    Text("Live")
+                                        .font(.caption2.bold())
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(.blue, in: RoundedRectangle(cornerRadius: 3))
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                        }
+
+                        Spacer()
+
+                        // Right: Controls
+                        HStack(spacing: 12) {
+                            if !isVideo {
+                                Button(action: {
+                                    scale = max(1.0, scale - 0.25)
+                                    if scale == 1.0 {
+                                        offset = .zero
+                                        lastOffset = .zero
+                                    }
+                                }) {
+                                    Image(systemName: "magnifyingglass.minus")
+                                        .font(.title3)
+                                        .padding(8)
+                                        .background(.white.opacity(0.1), in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(scale <= 1.0)
+
+                                Button(action: {
+                                    scale = min(4.0, scale + 0.25)
+                                }) {
+                                    Image(systemName: "magnifyingglass.plus")
+                                        .font(.title3)
+                                        .padding(8)
+                                        .background(.white.opacity(0.1), in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(scale >= 4.0)
+
+                                if scale > 1.0 {
+                                    Button(action: {
+                                        scale = 1.0
+                                        offset = .zero
+                                        lastOffset = .zero
+                                    }) {
+                                        Text("Reset")
+                                            .font(.caption.bold())
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 8)
+                                            .background(.white.opacity(0.15), in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+
+                            Button(action: {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                    showInfo.toggle()
+                                }
+                            }) {
+                                Image(systemName: "info.circle")
+                                    .font(.title3)
+                                    .padding(8)
+                                    .foregroundStyle(showInfo ? .blue : .white)
+                                    .background(showInfo ? .blue.opacity(0.15) : .white.opacity(0.1), in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .frame(height: 60)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: .black.opacity(0.3), radius: 10, y: 5)
+                    .padding(12)
+
+                    Spacer()
+                }
+
+                // 4. Info Panel Overlay
+                if showInfo {
+                    HStack {
+                        Spacer()
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Text("Asset Info")
+                                    .font(.title3.bold())
+                                Spacer()
+                                Button(action: {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                        showInfo = false
+                                    }
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.title3)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+
+                            Divider()
+
+                            Group {
+                                InfoRow(label: "Filename", value: asset.originalFilename)
+                                InfoRow(label: "Size", value: ByteCountFormatter.string(fromByteCount: asset.byteSize, countStyle: .file))
+                                InfoRow(label: "Dimensions", value: "\(asset.pixelWidth) x \(asset.pixelHeight)")
+                                InfoRow(label: "Created", value: asset.creationDate.formatted(date: .long, time: .standard))
+                                if let gps = gpsLocation {
+                                    InfoRow(label: "Location", value: gps)
+                                }
+                                InfoRow(label: "Media Type", value: asset.mediaType.uppercased())
+                                InfoRow(label: "Status", value: asset.status.capitalized)
+                                InfoRow(label: "Local ID", value: asset.assetLocalId)
+                                InfoRow(label: "Device ID", value: asset.deviceId)
+                            }
+                            
+                            Spacer()
+                        }
+                        .padding(20)
+                        .frame(width: 320)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .shadow(color: .black.opacity(0.4), radius: 15, y: 5)
+                        .transition(.move(edge: .trailing))
+                        .padding(12)
+                        .padding(.top, 72)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            if let fileURL = fileURL {
+                Task {
+                    self.gpsLocation = await extractLocation(from: fileURL, isVideo: isVideo)
+                }
+            }
+        }
+    }
+
+    private func extractLocation(from url: URL, isVideo: Bool) async -> String? {
+        if isVideo {
+            let asset = AVAsset(url: url)
+            guard let metadata = try? await asset.load(.metadata) else { return nil }
+            for item in metadata {
+                if item.commonKey == .commonKeyLocation {
+                    if let stringValue = try? await item.load(.stringValue) {
+                        return stringValue
+                    }
+                }
+            }
+            return nil
+        } else {
+            return await Task.detached(priority: .userInitiated) {
+                guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+                guard let imageProperties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any] else { return nil }
+                guard let gpsProperties = imageProperties[kCGImagePropertyGPSDictionary] as? [CFString: Any] else { return nil }
+
+                guard let latitudeRef = gpsProperties[kCGImagePropertyGPSLatitudeRef] as? String,
+                      let latitude = gpsProperties[kCGImagePropertyGPSLatitude] as? Double,
+                      let longitudeRef = gpsProperties[kCGImagePropertyGPSLongitudeRef] as? String,
+                      let longitude = gpsProperties[kCGImagePropertyGPSLongitude] as? Double else {
+                    return nil
+                }
+
+                return String(format: "%.4f° %@, %.4f° %@", latitude, latitudeRef, longitude, longitudeRef)
+            }.value
+        }
+    }
+}
+
+fileprivate struct InfoRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+fileprivate struct VideoPlayerView: View {
+    let url: URL
+    @State private var player: AVPlayer? = nil
+
+    var body: some View {
+        VideoPlayer(player: player)
+            .onAppear {
+                player = AVPlayer(url: url)
+                player?.play()
+            }
+            .onDisappear {
+                player?.pause()
+            }
+    }
+}
+
+fileprivate struct LiveVideoHoverPlayer: View {
+    let videoURL: URL
+    @Binding var player: AVPlayer?
+
+    var body: some View {
+        VideoPlayer(player: player)
+            .onAppear {
+                if player == nil {
+                    player = AVPlayer(url: videoURL)
+                }
+            }
     }
 }
