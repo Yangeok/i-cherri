@@ -2200,7 +2200,6 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
-
     class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate, NSCollectionViewDelegateFlowLayout {
         fileprivate var sections: [AssetHistorySection] = []
         var gridItemSize: CGFloat = 180
@@ -2209,6 +2208,9 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
         var onReveal: ((BackupAssetRecord) -> Void)?
         var onLoadMore: ((Int) -> Void)?
         weak var collectionView: NSCollectionView?
+        
+        private var lockedAnchorIndexPath: IndexPath?
+        private var anchorResetWorkItem: DispatchWorkItem?
 
         fileprivate func update(
             sections: [AssetHistorySection],
@@ -2233,17 +2235,26 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             } else if sizeChanged {
                 self.gridItemSize = gridItemSize
                 
-                // Track top-most visible item index path before reflow
-                let firstVisiblePath = collectionView?.indexPathsForVisibleItems().sorted().first
+                // Track top-most visible item index path before reflow, lock it during continuous resize/pinch
+                if lockedAnchorIndexPath == nil {
+                    lockedAnchorIndexPath = collectionView?.indexPathsForVisibleItems().sorted().first
+                }
                 
                 collectionView?.collectionViewLayout?.invalidateLayout()
                 
-                // Scroll back to anchor the same item at the top of viewport
-                if let firstVisiblePath = firstVisiblePath {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.collectionView?.scrollToItems(at: [firstVisiblePath], scrollPosition: .top)
-                    }
+                if let anchorPath = lockedAnchorIndexPath {
+                    // Force immediate layout reflow so scrollToItems uses correct updated positions
+                    collectionView?.layoutSubtreeIfNeeded()
+                    collectionView?.scrollToItems(at: [anchorPath], scrollPosition: .top)
                 }
+                
+                // Debounce resetting the locked anchor (e.g. 0.3 seconds after resizing/pinching stops)
+                anchorResetWorkItem?.cancel()
+                let workItem = DispatchWorkItem { [weak self] in
+                    self?.lockedAnchorIndexPath = nil
+                }
+                anchorResetWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
             }
         }
 
