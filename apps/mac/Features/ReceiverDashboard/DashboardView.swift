@@ -2046,10 +2046,14 @@ private struct AssetHistoryEntry: Identifiable {
     var id: String { asset.backupId }
 }
 
-private struct AssetHistorySection: Identifiable {
+private struct AssetHistorySection: Identifiable, Equatable {
     let id: String
     let title: String
     var entries: [AssetHistoryEntry]
+
+    static func == (lhs: AssetHistorySection, rhs: AssetHistorySection) -> Bool {
+        lhs.id == rhs.id && lhs.title == rhs.title && lhs.entries.map(\.id) == rhs.entries.map(\.id)
+    }
 }
 
 private struct AssetHistorySectionKey: Hashable {
@@ -2184,6 +2188,9 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             onReveal: @escaping (BackupAssetRecord) -> Void,
             onLoadMore: @escaping (Int) -> Void
         ) {
+            let sectionsChanged = self.sections != sections
+            let sizeChanged = self.gridItemSize != gridItemSize
+
             self.sections = sections
             self.gridItemSize = gridItemSize
             self.onPreview = onPreview
@@ -2191,7 +2198,9 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             self.onReveal = onReveal
             self.onLoadMore = onLoadMore
             
-            collectionView?.reloadData()
+            if sectionsChanged || sizeChanged {
+                collectionView?.reloadData()
+            }
         }
 
         fileprivate func scrollToSection(id: String) {
@@ -2319,6 +2328,10 @@ class AssetHistoryCollectionViewItem: NSCollectionViewItem {
         onOpen: ((BackupAssetRecord) -> Void)?,
         onReveal: ((BackupAssetRecord) -> Void)?
     ) {
+        if currentAsset?.backupId == asset.backupId {
+            return
+        }
+
         cleanup()
         self.currentAsset = asset
 
@@ -2391,7 +2404,15 @@ class AssetHistoryCollectionViewItem: NSCollectionViewItem {
             let p1 = URL(fileURLWithPath: path).standardized.path
             let p2 = URL(fileURLWithPath: cachedPath).standardized.path
             
-            if p1.caseInsensitiveCompare(p2) == .orderedSame && abs(cachedSize - size) < 1.0 {
+            let profile = AssetHistoryThumbnailWorkloadProfile.current()
+            let expectedSize: CGFloat
+            if asset.mediaType.caseInsensitiveCompare("video") == .orderedSame {
+                expectedSize = min(size, profile.maxVideoPixelSize)
+            } else {
+                expectedSize = size
+            }
+            
+            if p1.caseInsensitiveCompare(p2) == .orderedSame && abs(cachedSize - expectedSize) < 1.0 {
                 self.cleanup()
                 self.configure(asset: asset, size: size, onPreview: onPreview, onOpen: onOpen, onReveal: onReveal)
             }
