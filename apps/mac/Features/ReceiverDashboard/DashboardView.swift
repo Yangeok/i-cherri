@@ -1488,13 +1488,27 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         }
 
         guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return nil }
-        let options: [CFString: Any] = [
+        
+        // 1. Try to load using ONLY the embedded EXIF thumbnail (fast path!)
+        let fastOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: false,
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: false,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(size * 2)
+        ]
+        
+        if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, fastOptions as CFDictionary) {
+            return squareCroppedImage(from: cgImage, size: size)
+        }
+        
+        // 2. Fallback to full image decode if no embedded thumbnail is present (slow path)
+        let slowOptions: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: Int(size * 2)
         ]
 
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, slowOptions as CFDictionary) else {
             return nil
         }
 
@@ -1593,8 +1607,8 @@ private struct AssetHistoryThumbnailWorkloadProfile {
         if lowSpecHardware || constrainedPower || constrainedThermals {
             return AssetHistoryThumbnailWorkloadProfile(
                 allowsBackgroundBackfill: false,
-                maxConcurrentPhotoPrefetches: 1,
-                maxConcurrentVideoPrefetches: 1,
+                maxConcurrentPhotoPrefetches: 4,
+                maxConcurrentVideoPrefetches: 2,
                 maxVideoPixelSize: 96,
                 committedPhotoSizes: [48, 96, 160],
                 committedVideoSizes: [48, 96],
@@ -1605,8 +1619,8 @@ private struct AssetHistoryThumbnailWorkloadProfile {
 
         return AssetHistoryThumbnailWorkloadProfile(
             allowsBackgroundBackfill: true,
-            maxConcurrentPhotoPrefetches: 2,
-            maxConcurrentVideoPrefetches: 1,
+            maxConcurrentPhotoPrefetches: 12,
+            maxConcurrentVideoPrefetches: 4,
             maxVideoPixelSize: 160,
             committedPhotoSizes: [48, 96, 160, 240],
             committedVideoSizes: [48, 96, 160],
