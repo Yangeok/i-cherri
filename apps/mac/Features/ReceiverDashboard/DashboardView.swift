@@ -2984,7 +2984,20 @@ fileprivate struct AssetHistoryDetailViewer: View {
                 addIfNew(p.subAdministrativeArea) // 노원구
                 addIfNew(p.locality)              // 서울시 등 (중복이면 스킵)
                 addIfNew(p.subLocality)           // 월계동
-                addIfNew(p.thoroughfare)          // 도로명
+
+                // 도로명 + 번지
+                if let road = p.thoroughfare {
+                    if let num = p.subThoroughfare {
+                        addIfNew("\(road) \(num)")   // 광운로 53
+                    } else {
+                        addIfNew(road)
+                    }
+                }
+
+                // p.name은 "광운로 53" 같은 전체 주소이거나 POI명일 수 있음.
+                // 이미 thoroughfare로 커버됐으면 스킵, 아니면 추가
+                addIfNew(p.name)
+
                 let address = parts.joined(separator: " ")
                 continuation.resume(returning: address.isEmpty ? nil : address)
             }
