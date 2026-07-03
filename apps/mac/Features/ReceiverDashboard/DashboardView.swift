@@ -2327,7 +2327,6 @@ class AssetHistoryCollectionViewItem: NSCollectionViewItem {
     private var hostingView: NSHostingView<AssetHistoryCollectionViewCellWrapper>?
     private var currentAsset: BackupAssetRecord?
     private var imageLoadTask: Task<Void, Never>?
-    private var notificationObserver: AnyObject?
 
     override func loadView() {
         self.view = NSView()
@@ -2341,21 +2340,16 @@ class AssetHistoryCollectionViewItem: NSCollectionViewItem {
     private func cleanup() {
         imageLoadTask?.cancel()
         imageLoadTask = nil
-        if let observer = notificationObserver {
-            NotificationCenter.default.removeObserver(observer)
-            notificationObserver = nil
-        }
     }
 
     func configure(
         asset: BackupAssetRecord,
         size: CGFloat,
-        forceReload: Bool = false,
         onPreview: ((BackupAssetRecord) -> Void)?,
         onOpen: ((BackupAssetRecord) -> Void)?,
         onReveal: ((BackupAssetRecord) -> Void)?
     ) {
-        if !forceReload && currentAsset?.backupId == asset.backupId {
+        if currentAsset?.backupId == asset.backupId {
             return
         }
 
@@ -2378,81 +2372,17 @@ class AssetHistoryCollectionViewItem: NSCollectionViewItem {
         let mediaType = asset.mediaType
         let displayScale = self.view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
 
-        // 3. Load image from cache
+        // 3. Load/Generate thumbnail immediately in real-time!
         imageLoadTask = Task { @MainActor in
             if let nsImage = await AssetHistoryThumbnailCache.shared.thumbnailImage(
                 for: fileURL,
                 mediaType: mediaType,
                 size: size,
                 scale: displayScale,
-                generateIfAbsent: false
+                generateIfAbsent: true // <-- Generate immediately in background!
             ) {
                 guard self.currentAsset?.backupId == asset.backupId else { return }
                 self.updateContent(image: nsImage, size: size, onPreview: onPreview, onOpen: onOpen, onReveal: onReveal)
-            } else {
-                guard self.currentAsset?.backupId == asset.backupId else { return }
-                
-                setupNotificationObserver(for: asset, size: size, onPreview: onPreview, onOpen: onOpen, onReveal: onReveal)
-
-                await AssetHistoryThumbnailPrefetchCoordinator.shared.enqueue(
-                    relativePath: asset.finalPath,
-                    mediaType: mediaType,
-                    workload: .neighborhoodPrefetch,
-                    sizes: [size]
-                )
-            }
-        }
-    }
-
-    private func setupNotificationObserver(
-        for asset: BackupAssetRecord,
-        size: CGFloat,
-        onPreview: ((BackupAssetRecord) -> Void)?,
-        onOpen: ((BackupAssetRecord) -> Void)?,
-        onReveal: ((BackupAssetRecord) -> Void)?
-    ) {
-        let path = (asset.finalPath as NSString).isAbsolutePath ? asset.finalPath : AppCoordinator.shared.backupFolder.appendingPathComponent(asset.finalPath).path
-        
-        notificationObserver = NotificationCenter.default.addObserver(
-            forName: .thumbnailDidCache,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self,
-                  let current = self.currentAsset,
-                  current.backupId == asset.backupId else { return }
-            
-            guard let userInfo = notification.userInfo,
-                  let cachedPath = userInfo["path"] as? String,
-                  let cachedSize = userInfo["size"] as? CGFloat else {
-                return
-            }
-
-            let p1 = URL(fileURLWithPath: path).standardized.path
-            let p2 = URL(fileURLWithPath: cachedPath).standardized.path
-            
-            let profile = AssetHistoryThumbnailWorkloadProfile.current()
-            let expectedSize: CGFloat
-            if asset.mediaType.caseInsensitiveCompare("video") == .orderedSame {
-                expectedSize = min(size, profile.maxVideoPixelSize)
-            } else {
-                expectedSize = size
-            }
-            
-            let matches = p1.caseInsensitiveCompare(p2) == .orderedSame && abs(cachedSize - expectedSize) < 1.0
-            NSLog("iCherri-Thumbnail: Received notify for \(asset.finalPath). Match path/size (\(matches)): p1=\(p1) vs p2=\(p2), size=\(cachedSize) vs exp=\(expectedSize)")
-            
-            if matches {
-                NSLog("iCherri-Thumbnail: MATCHED. Re-configuring \(asset.finalPath) with forceReload")
-                self.cleanup()
-                self.configure(
-                    asset: asset,
-                    size: size,
-                    forceReload: true,
-                    onPreview: onPreview,
-                    onOpen: onOpen,
-                    onReveal: onReveal
-                )
             }
         }
     }
