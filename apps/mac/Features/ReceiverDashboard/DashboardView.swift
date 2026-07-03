@@ -2234,8 +2234,19 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
             self.onLoadMore = onLoadMore
             
             if sectionsChanged {
+                let isSameDataset = !self.sections.isEmpty && !sections.isEmpty &&
+                                    self.sections[0].entries.first?.id == sections[0].entries.first?.id
+                let anchorPath = isSameDataset ? collectionView?.indexPathsForVisibleItems().sorted().first : nil
+
                 self.gridItemSize = gridItemSize
                 collectionView?.reloadData()
+
+                if let anchorPath = anchorPath,
+                   anchorPath.section < sections.count,
+                   anchorPath.item < sections[anchorPath.section].entries.count {
+                    collectionView?.layoutSubtreeIfNeeded()
+                    collectionView?.scrollToItems(at: [anchorPath], scrollPosition: .top)
+                }
             } else if sizeChanged {
                 self.gridItemSize = gridItemSize
                 
