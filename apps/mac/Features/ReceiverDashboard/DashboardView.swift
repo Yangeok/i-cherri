@@ -2232,7 +2232,18 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
                 collectionView?.reloadData()
             } else if sizeChanged {
                 self.gridItemSize = gridItemSize
+                
+                // Track top-most visible item index path before reflow
+                let firstVisiblePath = collectionView?.indexPathsForVisibleItems().sorted().first
+                
                 collectionView?.collectionViewLayout?.invalidateLayout()
+                
+                // Scroll back to anchor the same item at the top of viewport
+                if let firstVisiblePath = firstVisiblePath {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.collectionView?.scrollToItems(at: [firstVisiblePath], scrollPosition: .top)
+                    }
+                }
             }
         }
 
