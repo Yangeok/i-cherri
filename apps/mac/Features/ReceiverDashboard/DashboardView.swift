@@ -2998,32 +2998,17 @@ fileprivate struct AssetHistoryDetailViewer: View {
                     continuation.resume(returning: String(format: "%.4f°, %.4f°", coord.latitude, coord.longitude))
                     return
                 }
-                // 중복 없이 순서대로 조합
-                var parts: [String] = []
-                func addIfNew(_ s: String?) {
-                    guard let s = s, !s.isEmpty, !parts.contains(s) else { return }
-                    parts.append(s)
+                // 가장 구체적인 필드 하나 + "근처"
+                // subLocality(동) > locality(시) > subAdministrativeArea(구) > administrativeArea(도/시)
+                let specific = p.subLocality
+                    ?? p.locality
+                    ?? p.subAdministrativeArea
+                    ?? p.administrativeArea
+                if let s = specific, !s.isEmpty {
+                    continuation.resume(returning: "\(s) 근처")
+                } else {
+                    continuation.resume(returning: nil)
                 }
-                addIfNew(p.administrativeArea)    // 서울특별시
-                addIfNew(p.subAdministrativeArea) // 노원구
-                addIfNew(p.locality)              // 서울시 등 (중복이면 스킵)
-                addIfNew(p.subLocality)           // 월계동
-
-                // 도로명 + 번지
-                if let road = p.thoroughfare {
-                    if let num = p.subThoroughfare {
-                        addIfNew("\(road) \(num)")   // 광운로 53
-                    } else {
-                        addIfNew(road)
-                    }
-                }
-
-                // p.name은 "광운로 53" 같은 전체 주소이거나 POI명일 수 있음.
-                // 이미 thoroughfare로 커버됐으면 스킵, 아니면 추가
-                addIfNew(p.name)
-
-                let address = parts.joined(separator: " ")
-                continuation.resume(returning: address.isEmpty ? nil : address)
             }
         }
     }
