@@ -2736,6 +2736,7 @@ fileprivate struct AssetHistoryDetailViewer: View {
     @State private var lastOffset: CGSize = .zero
     @State private var showInfo = false
     @State private var isLivePhotoVideoHovering = false
+    @GestureState private var pinchScale: CGFloat = 1.0
 
     private var fileURL: URL? {
         guard !asset.finalPath.isEmpty else { return nil }
@@ -2787,9 +2788,32 @@ fileprivate struct AssetHistoryDetailViewer: View {
                                 Image(nsImage: nsImage)
                                     .resizable()
                                     .scaledToFit()
-                                    .scaleEffect(scale)
+                                    .scaleEffect(scale * pinchScale)
                                     .offset(offset)
+                                    .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.7), value: pinchScale)
                                     .gesture(
+                                        MagnificationGesture()
+                                            .updating($pinchScale) { value, state, _ in
+                                                state = value
+                                            }
+                                            .onEnded { value in
+                                                let newScale = min(max(scale * value, 0.3), 4.0)
+                                                if newScale < 1.0 {
+                                                    // 100% 아래로 당기면 뒤로가기
+                                                    withAnimation(.easeIn(duration: 0.15)) {
+                                                        scale = 0.5
+                                                    }
+                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                        onClose()
+                                                    }
+                                                } else {
+                                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                                        scale = newScale
+                                                    }
+                                                }
+                                            }
+                                    )
+                                    .simultaneousGesture(
                                         DragGesture()
                                             .onChanged { value in
                                                 if scale > 1.0 {
