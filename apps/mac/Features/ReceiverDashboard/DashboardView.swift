@@ -135,9 +135,11 @@ struct DashboardView: View {
             if let asset = selectedDetailAsset {
                 AssetHistoryDetailViewer(
                     asset: asset,
+                    gpsLocation: $detailGPSLocation,
                     onClose: {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             selectedDetailAsset = nil
+                            detailGPSLocation = nil
                         }
                     }
                 )
@@ -620,9 +622,25 @@ struct DashboardView: View {
                     .keyboardShortcut(.escape, modifiers: [])
                 }
                 ToolbarItem(placement: .principal) {
-                    Text(asset.originalFilename)
-                        .font(.headline)
-                        .lineLimit(1)
+                    VStack(spacing: 2) {
+                        Text(asset.originalFilename)
+                            .font(.headline)
+                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            Text(asset.creationDate.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let gps = detailGPSLocation {
+                                Text("•").font(.caption).foregroundStyle(.secondary)
+                                Image(systemName: "mappin.and.ellipse")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(gps)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             } else {
                 ToolbarItem(placement: .primaryAction) {
@@ -2700,13 +2718,13 @@ struct AssetHistoryCollectionViewCellContent: View {
 
 fileprivate struct AssetHistoryDetailViewer: View {
     let asset: BackupAssetRecord
+    @Binding var gpsLocation: String?
     let onClose: () -> Void
 
     @State private var scale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
     @State private var showInfo = false
-    @State private var gpsLocation: String? = nil
     @State private var isLivePhotoVideoHovering = false
 
     private var fileURL: URL? {
