@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F16701C12FF242E40058C4BA /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F16701C02FF242E40058C4BA /* WidgetKit.framework */; };
+		F16701C32FF242E40058C4BA /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F16701C22FF242E40058C4BA /* SwiftUI.framework */; };
+		F16701D42FF242E50058C4BA /* iCherriWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F16701BE2FF242E40058C4BA /* iCherriWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F1706B662FC5DBA600D3C6C1 /* ICherriProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C1 /* ICherriProtocol */; };
 		F1706B662FC5DBA600D3C6C2 /* ICherriCore in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C2 /* ICherriCore */; };
 		F1706B662FC5DBA600D3C6C3 /* ICherriDesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = F1706B652FC5DBA600D3C6C3 /* ICherriDesignSystem */; };
@@ -14,6 +17,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		F16701D22FF242E50058C4BA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F1706B912FC5DBE900D3C6C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F16701BD2FF242E40058C4BA;
+			remoteInfo = iCherriWidgetExtension;
+		};
 		F1706BAA2FC5DBEA00D3C6C7 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = F1706B912FC5DBE900D3C6C7 /* Project object */;
@@ -30,13 +40,48 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		F16701D52FF242E50058C4BA /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				F16701D42FF242E50058C4BA /* iCherriWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		F16701BE2FF242E40058C4BA /* iCherriWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = iCherriWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F16701C02FF242E40058C4BA /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		F16701C22FF242E40058C4BA /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		F1706B992FC5DBE900D3C6C7 /* iCherri-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "iCherri-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1706BA92FC5DBEA00D3C6C7 /* iCherri-iosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "iCherri-iosTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1706BB32FC5DBEA00D3C6C7 /* iCherri-iosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "iCherri-iosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F16701D82FF242E50058C4BA /* Exceptions for "iCherriWidget" folder in "iCherriWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F16701BD2FF242E40058C4BA /* iCherriWidgetExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		F16701C42FF242E40058C4BA /* iCherriWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F16701D82FF242E50058C4BA /* Exceptions for "iCherriWidget" folder in "iCherriWidgetExtension" target */,
+			);
+			path = iCherriWidget;
+			sourceTree = "<group>";
+		};
 		F1706B9B2FC5DBE900D3C6C7 /* iCherri-ios */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "iCherri-ios";
@@ -65,6 +110,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		F16701BB2FF242E40058C4BA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F16701C32FF242E40058C4BA /* SwiftUI.framework in Frameworks */,
+				F16701C12FF242E40058C4BA /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F1706B962FC5DBE900D3C6C7 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -93,6 +147,15 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		F16701BF2FF242E40058C4BA /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				F16701C02FF242E40058C4BA /* WidgetKit.framework */,
+				F16701C22FF242E40058C4BA /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		F1706B902FC5DBE900D3C6C7 = {
 			isa = PBXGroup;
 			children = (
@@ -101,6 +164,8 @@
 				F1706B9D2FC5DBE900D3C6C7 /* Features */,
 				F1706BAC2FC5DBEA00D3C6C7 /* iCherri-iosTests */,
 				F1706BB62FC5DBEA00D3C6C7 /* iCherri-iosUITests */,
+				F16701C42FF242E40058C4BA /* iCherriWidget */,
+				F16701BF2FF242E40058C4BA /* Frameworks */,
 				F1706B9A2FC5DBE900D3C6C7 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -111,6 +176,7 @@
 				F1706B992FC5DBE900D3C6C7 /* iCherri-ios.app */,
 				F1706BA92FC5DBEA00D3C6C7 /* iCherri-iosTests.xctest */,
 				F1706BB32FC5DBEA00D3C6C7 /* iCherri-iosUITests.xctest */,
+				F16701BE2FF242E40058C4BA /* iCherriWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -118,6 +184,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		F16701BD2FF242E40058C4BA /* iCherriWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F16701D92FF242E50058C4BA /* Build configuration list for PBXNativeTarget "iCherriWidgetExtension" */;
+			buildPhases = (
+				F16701BA2FF242E40058C4BA /* Sources */,
+				F16701BB2FF242E40058C4BA /* Frameworks */,
+				F16701BC2FF242E40058C4BA /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F16701C42FF242E40058C4BA /* iCherriWidget */,
+			);
+			name = iCherriWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = iCherriWidgetExtension;
+			productReference = F16701BE2FF242E40058C4BA /* iCherriWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		F1706B982FC5DBE900D3C6C7 /* iCherri-ios */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = F1706BBD2FC5DBEA00D3C6C7 /* Build configuration list for PBXNativeTarget "iCherri-ios" */;
@@ -125,10 +213,12 @@
 				F1706B952FC5DBE900D3C6C7 /* Sources */,
 				F1706B962FC5DBE900D3C6C7 /* Frameworks */,
 				F1706B972FC5DBE900D3C6C7 /* Resources */,
+				F16701D52FF242E50058C4BA /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				F16701D32FF242E50058C4BA /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				F1706B9B2FC5DBE900D3C6C7 /* iCherri-ios */,
@@ -202,6 +292,9 @@
 				LastSwiftUpdateCheck = 1620;
 				LastUpgradeCheck = 1620;
 				TargetAttributes = {
+					F16701BD2FF242E40058C4BA = {
+						CreatedOnToolsVersion = 16.2;
+					};
 					F1706B982FC5DBE900D3C6C7 = {
 						CreatedOnToolsVersion = 16.2;
 					};
@@ -224,6 +317,12 @@
 			);
 			mainGroup = F1706B902FC5DBE900D3C6C7;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F1706B622FC5DBA500D3C6C1 /* XCLocalSwiftPackageReference "../../packages/ICherriProtocol" */,
+				F1706B622FC5DBA500D3C6C2 /* XCLocalSwiftPackageReference "../../packages/ICherriCore" */,
+				F1706B622FC5DBA500D3C6C3 /* XCLocalSwiftPackageReference "../../packages/ICherriDesignSystem" */,
+				F1706B622FC5DBA500D3C6C4 /* XCRemoteSwiftPackageReference "Inject" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F1706B9A2FC5DBE900D3C6C7 /* Products */;
 			projectDirPath = "";
@@ -232,66 +331,19 @@
 				F1706B982FC5DBE900D3C6C7 /* iCherri-ios */,
 				F1706BA82FC5DBEA00D3C6C7 /* iCherri-iosTests */,
 				F1706BB22FC5DBEA00D3C6C7 /* iCherri-iosUITests */,
-			);
-			packageReferences = (
-				F1706B622FC5DBA500D3C6C1 /* XCLocalSwiftPackageReference "ICherriProtocol" */,
-				F1706B622FC5DBA500D3C6C2 /* XCLocalSwiftPackageReference "ICherriCore" */,
-				F1706B622FC5DBA500D3C6C3 /* XCLocalSwiftPackageReference "ICherriDesignSystem" */,
-				F1706B622FC5DBA500D3C6C4 /* XCRemoteSwiftPackageReference "Inject" */,
+				F16701BD2FF242E40058C4BA /* iCherriWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		F1706B622FC5DBA500D3C6C1 /* XCLocalSwiftPackageReference "ICherriProtocol" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../packages/ICherriProtocol;
-		};
-		F1706B622FC5DBA500D3C6C2 /* XCLocalSwiftPackageReference "ICherriCore" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../packages/ICherriCore;
-		};
-		F1706B622FC5DBA500D3C6C3 /* XCLocalSwiftPackageReference "ICherriDesignSystem" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../packages/ICherriDesignSystem;
-		};
-/* End XCLocalSwiftPackageReference section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		F1706B622FC5DBA500D3C6C4 /* XCRemoteSwiftPackageReference "Inject" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/krzysztofzablocki/Inject.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.5.2;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		F1706B652FC5DBA600D3C6C1 /* ICherriProtocol */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = F1706B622FC5DBA500D3C6C1 /* XCLocalSwiftPackageReference "ICherriProtocol" */;
-			productName = "ICherriProtocol";
-		};
-		F1706B652FC5DBA600D3C6C2 /* ICherriCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = F1706B622FC5DBA500D3C6C2 /* XCLocalSwiftPackageReference "ICherriCore" */;
-			productName = "ICherriCore";
-		};
-		F1706B652FC5DBA600D3C6C3 /* ICherriDesignSystem */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = F1706B622FC5DBA500D3C6C3 /* XCLocalSwiftPackageReference "ICherriDesignSystem" */;
-			productName = "ICherriDesignSystem";
-		};
-		F1706B652FC5DBA600D3C6C4 /* Inject */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = F1706B622FC5DBA500D3C6C4 /* XCRemoteSwiftPackageReference "Inject" */;
-			productName = "Inject";
-		};
-/* End XCSwiftPackageProductDependency section */
-
 /* Begin PBXResourcesBuildPhase section */
+		F16701BC2FF242E40058C4BA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F1706B972FC5DBE900D3C6C7 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -316,6 +368,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		F16701BA2FF242E40058C4BA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F1706B952FC5DBE900D3C6C7 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -340,6 +399,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		F16701D32FF242E50058C4BA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F16701BD2FF242E40058C4BA /* iCherriWidgetExtension */;
+			targetProxy = F16701D22FF242E50058C4BA /* PBXContainerItemProxy */;
+		};
 		F1706BAB2FC5DBEA00D3C6C7 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = F1706B982FC5DBE900D3C6C7 /* iCherri-ios */;
@@ -353,6 +417,62 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		F16701D62FF242E50058C4BA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YT877V7NX4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = iCherriWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = iCherriWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.yangeok.iCherri-ios.iCherriWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F16701D72FF242E50058C4BA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YT877V7NX4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = iCherriWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = iCherriWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.yangeok.iCherri-ios.iCherriWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		F1706BBB2FC5DBEA00D3C6C7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -483,7 +603,7 @@
 				DEVELOPMENT_TEAM = YT877V7NX4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Info.plist";
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -513,7 +633,7 @@
 				DEVELOPMENT_TEAM = YT877V7NX4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Info.plist";
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -607,6 +727,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		F16701D92FF242E50058C4BA /* Build configuration list for PBXNativeTarget "iCherriWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F16701D62FF242E50058C4BA /* Debug */,
+				F16701D72FF242E50058C4BA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		F1706B942FC5DBE900D3C6C7 /* Build configuration list for PBXProject "iCherri-ios" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -644,6 +773,55 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		F1706B622FC5DBA500D3C6C1 /* XCLocalSwiftPackageReference "../../packages/ICherriProtocol" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../packages/ICherriProtocol;
+		};
+		F1706B622FC5DBA500D3C6C2 /* XCLocalSwiftPackageReference "../../packages/ICherriCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../packages/ICherriCore;
+		};
+		F1706B622FC5DBA500D3C6C3 /* XCLocalSwiftPackageReference "../../packages/ICherriDesignSystem" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../packages/ICherriDesignSystem;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F1706B622FC5DBA500D3C6C4 /* XCRemoteSwiftPackageReference "Inject" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/krzysztofzablocki/Inject.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.5.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F1706B652FC5DBA600D3C6C1 /* ICherriProtocol */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F1706B622FC5DBA500D3C6C1 /* XCLocalSwiftPackageReference "../../packages/ICherriProtocol" */;
+			productName = ICherriProtocol;
+		};
+		F1706B652FC5DBA600D3C6C2 /* ICherriCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F1706B622FC5DBA500D3C6C2 /* XCLocalSwiftPackageReference "../../packages/ICherriCore" */;
+			productName = ICherriCore;
+		};
+		F1706B652FC5DBA600D3C6C3 /* ICherriDesignSystem */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F1706B622FC5DBA500D3C6C3 /* XCLocalSwiftPackageReference "../../packages/ICherriDesignSystem" */;
+			productName = ICherriDesignSystem;
+		};
+		F1706B652FC5DBA600D3C6C4 /* Inject */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F1706B622FC5DBA500D3C6C4 /* XCRemoteSwiftPackageReference "Inject" */;
+			productName = Inject;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = F1706B912FC5DBE900D3C6C7 /* Project object */;
 }
