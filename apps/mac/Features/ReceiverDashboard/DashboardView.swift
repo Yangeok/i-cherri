@@ -1449,6 +1449,7 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
     }
 
     static func generateThumbnailData(fileURL: URL, mediaType: String, size: CGFloat, scale: CGFloat) async -> Data? {
+        NSLog("iCherri-Thumbnail: generateThumbnailData START for \(fileURL.lastPathComponent) size \(size)")
         let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
         let access = backupFolder.startAccessingSecurityScopedResource()
         defer {
@@ -1457,12 +1458,19 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
             }
         }
 
-        guard (try? fileURL.checkResourceIsReachable()) == true else { return nil }
+        let reachable = (try? fileURL.checkResourceIsReachable()) == true
+        NSLog("iCherri-Thumbnail: checkResourceIsReachable for \(fileURL.lastPathComponent): \(reachable)")
+        guard reachable else {
+            NSLog("iCherri-Thumbnail: File NOT reachable: \(fileURL.path)")
+            return nil
+        }
 
         if let directImage = loadDirectThumbnail(fileURL: fileURL, mediaType: mediaType, size: size) {
+            NSLog("iCherri-Thumbnail: loadDirectThumbnail SUCCESS for \(fileURL.lastPathComponent)")
             return jpegData(from: directImage)
         }
 
+        NSLog("iCherri-Thumbnail: loadDirectThumbnail returned nil, falling back to QLThumbnailGenerator for \(fileURL.lastPathComponent)")
         let request = QLThumbnailGenerator.Request(
             fileAt: fileURL,
             size: CGSize(width: size * 2, height: size * 2),
@@ -1473,10 +1481,13 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         do {
             let thumbnail = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
             guard let croppedImage = squareCroppedImage(from: thumbnail.nsImage, size: size) else {
+                NSLog("iCherri-Thumbnail: QL squareCroppedImage returned nil for \(fileURL.lastPathComponent)")
                 return nil
             }
+            NSLog("iCherri-Thumbnail: QL SUCCESS for \(fileURL.lastPathComponent)")
             return jpegData(from: croppedImage)
         } catch {
+            NSLog("iCherri-Thumbnail: QL FAILURE for \(fileURL.lastPathComponent): \(error.localizedDescription)")
             return nil
         }
     }
@@ -1769,6 +1780,7 @@ final class AssetHistoryThumbnailCache {
 
             let path = fileURL.path
             Task { @MainActor in
+                NSLog("iCherri-Thumbnail: Posting thumbnailDidCache for \(fileURL.lastPathComponent) size \(size)")
                 NotificationCenter.default.post(
                     name: .thumbnailDidCache,
                     object: nil,
@@ -2338,11 +2350,12 @@ class AssetHistoryCollectionViewItem: NSCollectionViewItem {
     func configure(
         asset: BackupAssetRecord,
         size: CGFloat,
+        forceReload: Bool = false,
         onPreview: ((BackupAssetRecord) -> Void)?,
         onOpen: ((BackupAssetRecord) -> Void)?,
         onReveal: ((BackupAssetRecord) -> Void)?
     ) {
-        if currentAsset?.backupId == asset.backupId {
+        if !forceReload && currentAsset?.backupId == asset.backupId {
             return
         }
 
@@ -2426,9 +2439,20 @@ class AssetHistoryCollectionViewItem: NSCollectionViewItem {
                 expectedSize = size
             }
             
-            if p1.caseInsensitiveCompare(p2) == .orderedSame && abs(cachedSize - expectedSize) < 1.0 {
+            let matches = p1.caseInsensitiveCompare(p2) == .orderedSame && abs(cachedSize - expectedSize) < 1.0
+            NSLog("iCherri-Thumbnail: Received notify for \(asset.finalPath). Match path/size (\(matches)): p1=\(p1) vs p2=\(p2), size=\(cachedSize) vs exp=\(expectedSize)")
+            
+            if matches {
+                NSLog("iCherri-Thumbnail: MATCHED. Re-configuring \(asset.finalPath) with forceReload")
                 self.cleanup()
-                self.configure(asset: asset, size: size, onPreview: onPreview, onOpen: onOpen, onReveal: onReveal)
+                self.configure(
+                    asset: asset,
+                    size: size,
+                    forceReload: true,
+                    onPreview: onPreview,
+                    onOpen: onOpen,
+                    onReveal: onReveal
+                )
             }
         }
     }
