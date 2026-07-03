@@ -29,6 +29,12 @@ struct DashboardView: View {
     @State private var selectedDetailAsset: BackupAssetRecord? = nil
     @State private var magnificationScale: CGFloat = 1.0
     @State private var isPinching = false
+    @State private var detailScale: CGFloat = 1.0
+    @State private var detailOffset: CGSize = .zero
+    @State private var detailLastOffset: CGSize = .zero
+    @State private var detailShowInfo = false
+    @State private var detailGPSLocation: String? = nil
+    @State private var isLivePhotoVideoHovering = false
 
     var body: some View {
         ZStack {
@@ -602,14 +608,32 @@ struct DashboardView: View {
 
     private var toolbarContent: some ToolbarContent {
         Group {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: viewModel.selectBackupFolder) {
-                    Label("Change Folder", systemImage: "folder.badge.gear")
+            if let asset = selectedDetailAsset {
+                ToolbarItem(placement: .navigation) {
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            selectedDetailAsset = nil
+                        }
+                    }) {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                    .keyboardShortcut(.escape, modifiers: [])
                 }
-            }
-            ToolbarItem {
-                Button(action: { Task { await viewModel.load() } }) {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                ToolbarItem(placement: .principal) {
+                    Text(asset.originalFilename)
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: viewModel.selectBackupFolder) {
+                        Label("Change Folder", systemImage: "folder.badge.gear")
+                    }
+                }
+                ToolbarItem {
+                    Button(action: { Task { await viewModel.load() } }) {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
                 }
             }
         }
@@ -2714,195 +2738,75 @@ fileprivate struct AssetHistoryDetailViewer: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                // 1. Dark glassmorphic background
+                // Dimmed background — tap to go back
                 Color.black.opacity(0.85)
                     .ignoresSafeArea()
                     .onTapGesture {
                         onClose()
                     }
 
-                // 2. Content Area
-                VStack(spacing: 0) {
-                    // Spacer for header offset
-                    Spacer().frame(height: 60)
-
-                    if let fileURL = fileURL {
-                        ZStack {
-                            if isVideo {
-                                NativeVideoPlayerView(url: fileURL, autoPlay: true, showControls: true)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            } else if let liveVideoURL = livePhotoVideoURL, isLivePhotoVideoHovering {
-                                NativeVideoPlayerView(url: liveVideoURL, autoPlay: true, showControls: false)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Content area
+                if let fileURL = fileURL {
+                    ZStack {
+                        if isVideo {
+                            NativeVideoPlayerView(url: fileURL, autoPlay: true, showControls: true)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if let liveVideoURL = livePhotoVideoURL, isLivePhotoVideoHovering {
+                            NativeVideoPlayerView(url: liveVideoURL, autoPlay: true, showControls: false)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            if let nsImage = NSImage(contentsOf: fileURL) {
+                                Image(nsImage: nsImage)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .scaleEffect(scale)
+                                    .offset(offset)
+                                    .gesture(
+                                        DragGesture()
+                                            .onChanged { value in
+                                                if scale > 1.0 {
+                                                    offset = CGSize(
+                                                        width: lastOffset.width + value.translation.width,
+                                                        height: lastOffset.height + value.translation.height
+                                                    )
+                                                }
+                                            }
+                                            .onEnded { _ in
+                                                lastOffset = offset
+                                            }
+                                    )
                             } else {
-                                if let nsImage = NSImage(contentsOf: fileURL) {
-                                    Image(nsImage: nsImage)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .scaleEffect(scale)
-                                        .offset(offset)
-                                        .gesture(
-                                            DragGesture()
-                                                .onChanged { value in
-                                                    if scale > 1.0 {
-                                                        offset = CGSize(
-                                                            width: lastOffset.width + value.translation.width,
-                                                            height: lastOffset.height + value.translation.height
-                                                        )
-                                                    }
-                                                }
-                                                .onEnded { _ in
-                                                    lastOffset = offset
-                                                }
-                                        )
-                                } else {
-                                    VStack(spacing: 12) {
-                                        Image(systemName: "exclamationmark.triangle")
-                                            .font(.largeTitle)
-                                            .foregroundStyle(.red)
-                                        Text("Failed to load image")
-                                            .font(.headline)
-                                    }
+                                VStack(spacing: 12) {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .font(.largeTitle)
+                                        .foregroundStyle(.red)
+                                    Text("Failed to load image")
+                                        .font(.headline)
+                                        .foregroundStyle(.white)
                                 }
                             }
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                        .onHover { hovering in
-                            if livePhotoVideoURL != nil {
-                                isLivePhotoVideoHovering = hovering
-                            }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .allowsHitTesting(true)
+                    .onHover { hovering in
+                        if livePhotoVideoURL != nil {
+                            isLivePhotoVideoHovering = hovering
                         }
-                    } else {
-                        VStack(spacing: 12) {
-                            Image(systemName: "questionmark.folder")
-                                .font(.largeTitle)
-                                .foregroundStyle(.secondary)
-                            Text("File not found")
-                                .font(.headline)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "questionmark.folder")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text("File not found")
+                            .font(.headline)
+                            .foregroundStyle(.white)
                     }
                 }
 
-                // 3. Floating Premium Header
-                VStack {
-                    HStack(spacing: 16) {
-                        // Left: Back button
-                        Button(action: onClose) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "chevron.left")
-                                    .font(.body.bold())
-                                Text("Back")
-                                    .font(.body)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(.white.opacity(0.1), in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-
-                        Spacer()
-
-                        // Center: Title & Metadata
-                        VStack(spacing: 4) {
-                            Text(asset.originalFilename)
-                                .font(.headline.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-
-                            HStack(spacing: 8) {
-                                Text(asset.creationDate.formatted(date: .abbreviated, time: .shortened))
-                                if let gps = gpsLocation {
-                                    Text("•")
-                                    Image(systemName: "mappin.and.ellipse")
-                                    Text(gps)
-                                }
-                                if livePhotoVideoURL != nil {
-                                    Text("•")
-                                    Text("Live")
-                                        .font(.caption2.bold())
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 1)
-                                        .background(.blue, in: RoundedRectangle(cornerRadius: 3))
-                                }
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.7))
-                        }
-
-                        Spacer()
-
-                        // Right: Controls
-                        HStack(spacing: 12) {
-                            if !isVideo {
-                                Button(action: {
-                                    scale = max(1.0, scale - 0.25)
-                                    if scale == 1.0 {
-                                        offset = .zero
-                                        lastOffset = .zero
-                                    }
-                                }) {
-                                    Image(systemName: "magnifyingglass.minus")
-                                        .font(.title3)
-                                        .padding(8)
-                                        .background(.white.opacity(0.1), in: Circle())
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(scale <= 1.0)
-
-                                Button(action: {
-                                    scale = min(4.0, scale + 0.25)
-                                }) {
-                                    Image(systemName: "magnifyingglass.plus")
-                                        .font(.title3)
-                                        .padding(8)
-                                        .background(.white.opacity(0.1), in: Circle())
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(scale >= 4.0)
-
-                                if scale > 1.0 {
-                                    Button(action: {
-                                        scale = 1.0
-                                        offset = .zero
-                                        lastOffset = .zero
-                                    }) {
-                                        Text("Reset")
-                                            .font(.caption.bold())
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 8)
-                                            .background(.white.opacity(0.15), in: Capsule())
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-
-                            Button(action: {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                    showInfo.toggle()
-                                }
-                            }) {
-                                Image(systemName: "info.circle")
-                                    .font(.title3)
-                                    .padding(8)
-                                    .foregroundStyle(showInfo ? .blue : .white)
-                                    .background(showInfo ? .blue.opacity(0.15) : .white.opacity(0.1), in: Circle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .frame(height: 60)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .shadow(color: .black.opacity(0.3), radius: 10, y: 5)
-                    .padding(12)
-
-                    Spacer()
-                }
-
-                // 4. Info Panel Overlay
+                // Info Panel Overlay (trailing slide-in)
                 if showInfo {
                     HStack {
                         Spacer()
@@ -2938,7 +2842,7 @@ fileprivate struct AssetHistoryDetailViewer: View {
                                 InfoRow(label: "Local ID", value: asset.assetLocalId)
                                 InfoRow(label: "Device ID", value: asset.deviceId)
                             }
-                            
+
                             Spacer()
                         }
                         .padding(20)
@@ -2948,8 +2852,35 @@ fileprivate struct AssetHistoryDetailViewer: View {
                         .shadow(color: .black.opacity(0.4), radius: 15, y: 5)
                         .transition(.move(edge: .trailing))
                         .padding(12)
-                        .padding(.top, 72)
                     }
+                }
+            }
+        }
+        .toolbar {
+            if !isVideo {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: {
+                        scale = max(1.0, scale - 0.25)
+                        if scale == 1.0 { offset = .zero; lastOffset = .zero }
+                    }) {
+                        Image(systemName: "magnifyingglass.minus")
+                    }
+                    .disabled(scale <= 1.0)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: { scale = min(4.0, scale + 0.25) }) {
+                        Image(systemName: "magnifyingglass.plus")
+                    }
+                    .disabled(scale >= 4.0)
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        showInfo.toggle()
+                    }
+                }) {
+                    Image(systemName: showInfo ? "info.circle.fill" : "info.circle")
                 }
             }
         }
