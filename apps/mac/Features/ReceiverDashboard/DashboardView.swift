@@ -1449,10 +1449,11 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
     }
 
     static func generateThumbnailData(fileURL: URL, mediaType: String, size: CGFloat, scale: CGFloat) async -> Data? {
-        let access = fileURL.startAccessingSecurityScopedResource()
+        let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
+        let access = backupFolder.startAccessingSecurityScopedResource()
         defer {
             if access {
-                fileURL.stopAccessingSecurityScopedResource()
+                backupFolder.stopAccessingSecurityScopedResource()
             }
         }
 
