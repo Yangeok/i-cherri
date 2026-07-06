@@ -405,7 +405,7 @@ struct DashboardView: View {
         let proposed = Double(start) / safeValue
         guard proposed.isFinite, !proposed.isNaN else { return nil }
 
-        return min(max(Int(proposed.rounded()), 2), 6)
+        return min(max(Int(proposed.rounded()), 2), 8)
     }
 
     private var historyFloatingControls: some View {
