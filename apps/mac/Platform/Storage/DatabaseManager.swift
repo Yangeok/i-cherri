@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import GRDB
 import ICherriCore
 import ICherriProtocol
@@ -1037,5 +1038,48 @@ extension DatabaseManager: BackupIndexQuerying {
             quickFingerprint: candidate.quickFingerprint,
             duplicateOfBackupId: duplicateOfBackupID
         )
+    }
+
+    // MARK: - Duration Patch
+
+    /// duration_seconds 가 NULL인 video 레코드를 찾아 파일에서 읽어 DB 업데이트.
+    /// 앱 시작 시 백그라운드로 한 번 실행.
+    func patchMissingDurations(backupRoot: URL) async {
+        // Fetch NULL-duration video records using GRDB async read
+        let records: [BackupAssetRecord]
+        do {
+            records = try await queue.read { db in
+                try BackupAssetRecord
+                    .filter(Column("media_type") == "video")
+                    .filter(Column("duration_seconds") == nil)
+                    .filter(Column("status") == "completed")
+                    .fetchAll(db)
+            }
+        } catch {
+            return
+        }
+        guard !records.isEmpty else { return }
+
+        for record in records {
+            let fileURL: URL
+            if (record.finalPath as NSString).isAbsolutePath {
+                fileURL = URL(fileURLWithPath: record.finalPath)
+            } else {
+                fileURL = backupRoot.appendingPathComponent(record.finalPath)
+            }
+            guard FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+
+            let avAsset = AVURLAsset(url: fileURL)
+            guard let duration = try? await avAsset.load(.duration) else { continue }
+            let seconds = duration.seconds
+            guard seconds.isFinite, seconds > 0 else { continue }
+
+            _ = try? await queue.write { db in
+                try db.execute(
+                    sql: "UPDATE backup_assets SET duration_seconds = ? WHERE backup_id = ?",
+                    arguments: [seconds, record.backupId]
+                )
+            }
+        }
     }
 }

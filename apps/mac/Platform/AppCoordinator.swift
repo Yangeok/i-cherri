@@ -143,7 +143,13 @@ final class AppCoordinator: NSObject, ObservableObject {
             
             let dbPath = backupDir.appendingPathComponent(".i-cherri.sqlite3").path
             try await DatabaseManager.shared.open(at: dbPath)
-            
+
+            // 백그라운드: duration_seconds 가 NULL인 기존 영상 레코드 패치 (1회성)
+            let patchRoot = backupDir
+            Task.detached(priority: .utility) {
+                await DatabaseManager.shared.patchMissingDurations(backupRoot: patchRoot)
+            }
+
             let manager = SessionManager(dbManager: DatabaseManager.shared)
             self.sessionManager = manager
             
