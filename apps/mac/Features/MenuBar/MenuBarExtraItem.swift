@@ -293,25 +293,47 @@ final class MenuBarState: ObservableObject {
             let totalExpected = sessions.reduce(Int64(0)) { $0 + max($1.expectedByteSize, 0) }
             let totalReceived = sessions.reduce(Int64(0)) { $0 + max($1.receivedBytes, 0) }
             let coveredBytesByDevice = (try? await DatabaseManager.shared.fetchCoveredBytesByDevice(deviceIDs: activeDeviceIDs)) ?? [:]
+            
             let coverageSnapshot = await AppCoordinator.shared.backupRunProgressStore.snapshot(
                 activeSessions: sessions,
                 coveredBytesByDeviceID: coveredBytesByDevice
             )
+
+            let coverageSummaries = (try? await DatabaseManager.shared.fetchLatestBackupCoverageSummaries()) ?? []
+
+            var totalAssetCount = 0
+            var completedAssetCount = 0
+            var hasActiveCoverage = false
+
+            for deviceID in activeDeviceIDs {
+                if let summary = coverageSummaries.first(where: { $0.deviceId == deviceID }), summary.totalAssetCount > 0 {
+                    totalAssetCount += summary.totalAssetCount
+                    completedAssetCount += summary.completedAssetCount
+                    hasActiveCoverage = true
+                }
+            }
+
+            let overallProgress: Double
+            let summaryText: String?
+
+            if hasActiveCoverage && totalAssetCount > 0 {
+                overallProgress = min(max(Double(completedAssetCount) / Double(totalAssetCount), 0), 1)
+                summaryText = "\(completedAssetCount) / \(totalAssetCount) files backed up"
+            } else if let snapshot = coverageSnapshot {
+                overallProgress = snapshot.assetFractionCompleted
+                summaryText = "\(snapshot.completedAssetCount) / \(snapshot.totalAssetCount) files backed up"
+            } else {
+                overallProgress = totalExpected > 0 ? min(max(Double(totalReceived) / Double(totalExpected), 0), 1) : 0
+                summaryText = nil
+            }
 
             await MainActor.run {
                 self.activeUploadCount = sessions.count
                 self.activeDeviceCount = activeDeviceIDs.count
                 self.connectedDeviceName = activeDeviceIDs.count == 1 ? deviceNames[activeDeviceIDs[0]] : nil
                 self.isReceiving = !sessions.isEmpty
-
-                if let snapshot = coverageSnapshot {
-                    self.overallBackupProgress = snapshot.assetFractionCompleted
-                    self.backupProgressSummary = "\(snapshot.completedAssetCount) / \(snapshot.totalAssetCount) files backed up"
-                } else {
-                    let fallbackProgress = totalExpected > 0 ? min(max(Double(totalReceived) / Double(totalExpected), 0), 1) : 0
-                    self.overallBackupProgress = fallbackProgress
-                    self.backupProgressSummary = nil
-                }
+                self.overallBackupProgress = overallProgress
+                self.backupProgressSummary = summaryText
 
                 if self.isReceiving {
                     self.status = .receiving
