@@ -305,8 +305,8 @@ final class MenuBarState: ObservableObject {
                 self.isReceiving = !sessions.isEmpty
 
                 if let snapshot = coverageSnapshot {
-                    self.overallBackupProgress = snapshot.fractionCompleted
-                    self.backupProgressSummary = "\(Self.formatBytes(snapshot.completedBytes)) / \(Self.formatBytes(snapshot.totalBytes)) backed up"
+                    self.overallBackupProgress = snapshot.assetFractionCompleted
+                    self.backupProgressSummary = "\(snapshot.completedAssetCount) / \(snapshot.totalAssetCount) files backed up"
                 } else {
                     let fallbackProgress = totalExpected > 0 ? min(max(Double(totalReceived) / Double(totalExpected), 0), 1) : 0
                     self.overallBackupProgress = fallbackProgress

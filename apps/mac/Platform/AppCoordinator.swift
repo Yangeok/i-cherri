@@ -9,15 +9,27 @@ actor BackupRunProgressStore {
     struct Snapshot: Sendable {
         let totalBytes: Int64
         let completedBytes: Int64
+        let totalAssetCount: Int
+        let completedAssetCount: Int
 
         var fractionCompleted: Double {
             guard totalBytes > 0 else { return 0 }
             return min(max(Double(completedBytes) / Double(totalBytes), 0), 1)
         }
+
+        var assetFractionCompleted: Double {
+            guard totalAssetCount > 0 else { return 0 }
+            return min(max(Double(completedAssetCount) / Double(totalAssetCount), 0), 1)
+        }
+
+        var percentString: String {
+            String(format: "%.0f%%", assetFractionCompleted * 100)
+        }
     }
 
     private struct DeviceRunProgress: Sendable {
         var totalBytes: Int64
+        var totalAssetCount: Int
         var uploadedAssetIDs: Set<String>
         var candidateBytesByAssetID: [String: Int64]
     }
@@ -37,6 +49,7 @@ actor BackupRunProgressStore {
 
         runsByDeviceID[request.device.deviceID] = DeviceRunProgress(
             totalBytes: totalBytes,
+            totalAssetCount: supportedCandidates.count,
             uploadedAssetIDs: [],
             candidateBytesByAssetID: candidateBytesByAssetID
         )
@@ -55,15 +68,19 @@ actor BackupRunProgressStore {
 
         var totalBytes: Int64 = 0
         var completedBytes: Int64 = 0
+        var totalAssetCount: Int = 0
+        var completedAssetCount: Int = 0
 
         for deviceID in activeDeviceIDs {
             guard let run = runsByDeviceID[deviceID] else { continue }
 
             totalBytes += run.totalBytes
+            totalAssetCount += run.totalAssetCount
             completedBytes += max(coveredBytesByDeviceID[deviceID] ?? 0, 0)
             completedBytes += run.uploadedAssetIDs.reduce(Int64(0)) { partial, assetID in
                 partial + (run.candidateBytesByAssetID[assetID] ?? 0)
             }
+            completedAssetCount += run.uploadedAssetIDs.count
         }
 
         let activeSessionBytes = activeSessions.reduce(Int64(0)) { partial, session in
@@ -72,7 +89,12 @@ actor BackupRunProgressStore {
         completedBytes += activeSessionBytes
 
         guard totalBytes > 0 else { return nil }
-        return Snapshot(totalBytes: totalBytes, completedBytes: min(completedBytes, totalBytes))
+        return Snapshot(
+            totalBytes: totalBytes,
+            completedBytes: min(completedBytes, totalBytes),
+            totalAssetCount: totalAssetCount,
+            completedAssetCount: completedAssetCount
+        )
     }
 }
 
