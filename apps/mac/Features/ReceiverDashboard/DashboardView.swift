@@ -670,26 +670,47 @@ struct DashboardView: View {
 
     private func deviceRow(_ device: PairedDeviceRecord) -> some View {
         let isOnline = Date().timeIntervalSince(device.lastSeenAt) < 30.0
+        let isUploading = viewModel.activeUploads.contains(where: { $0.deviceID == device.deviceId })
+        let summary = viewModel.latestCoverageSummary(for: device.deviceId)
+        
+        let showProgress = isUploading && (summary?.totalAssetCount ?? 0) > 0
+        let completedCount = summary?.completedAssetCount ?? 0
+        let totalCount = summary?.totalAssetCount ?? 1
+        let pct = Int(Double(completedCount) / Double(totalCount) * 100)
+        let statusText = showProgress ? "Uploading... \(completedCount)/\(totalCount) (\(pct)%)" : (isOnline ? "Online" : "Offline")
+        let statusColor: Color = showProgress ? .accentColor : .secondary
+        let circleColor: Color = isOnline ? .green : .gray
+        let iconColor: Color = isOnline ? .green : .secondary
+        let isSelected = viewModel.selectedDevice == device.deviceId
+
         return HStack {
             Image(systemName: "iphone")
-                .foregroundStyle(isOnline ? .green : .secondary)
-            VStack(alignment: .leading, spacing: 2) {
+                .foregroundStyle(iconColor)
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(device.deviceName)
                         .font(.subheadline)
                     Circle()
-                        .fill(isOnline ? Color.green : Color.gray)
+                        .fill(circleColor)
                         .frame(width: 6, height: 6)
                 }
-                Text(isOnline ? "Online" : "Offline")
+                
+                Text(statusText)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(statusColor)
+                
+                if showProgress {
+                    ProgressView(value: Double(completedCount), total: Double(totalCount))
+                        .progressViewStyle(.linear)
+                        .frame(width: 120)
+                        .tint(.accentColor)
+                }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
         .listRowBackground(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(viewModel.selectedDevice == device.deviceId ? Color.accentColor.opacity(0.14) : .clear)
+                .fill(isSelected ? Color.accentColor.opacity(0.14) : .clear)
         )
     }
 
@@ -1016,14 +1037,19 @@ final class DashboardViewModel: ObservableObject {
                     assetCreatedAt = metadata.creationDate
                 }
 
+                let summary = coverageSummaries.first { $0.deviceId == r.deviceId }
+
                 return DashboardActiveUpload(
                     uploadID: r.uploadId,
+                    deviceID: r.deviceId,
                     filename: filename,
                     deviceName: deviceNames[r.deviceId] ?? r.deviceId,
                     assetCreatedAt: assetCreatedAt,
                     expectedByteSize: r.expectedByteSize,
                     receivedBytes: r.receivedBytes,
-                    status: r.status
+                    status: r.status,
+                    totalAssetCount: summary?.totalAssetCount,
+                    completedAssetCount: summary?.completedAssetCount
                 )
             }
 
@@ -2203,12 +2229,15 @@ struct AssetHistoryWindowPlanner {
 
 struct DashboardActiveUpload: Identifiable {
     let uploadID: String
+    let deviceID: String
     let filename: String
     let deviceName: String
     let assetCreatedAt: Date?
     let expectedByteSize: Int64
     let receivedBytes: Int64
     let status: String
+    let totalAssetCount: Int?
+    let completedAssetCount: Int?
 
     var id: String { uploadID }
 
@@ -2216,7 +2245,14 @@ struct DashboardActiveUpload: Identifiable {
         let createdLabel = assetCreatedAt?.formatted(date: .abbreviated, time: .omitted) ?? "Unknown date"
         let receivedLabel = ByteCountFormatter.string(fromByteCount: receivedBytes, countStyle: .file)
         let totalLabel = ByteCountFormatter.string(fromByteCount: expectedByteSize, countStyle: .file)
-        return "\(createdLabel) · \(deviceName) · \(receivedLabel) / \(totalLabel) · sess \(shortUploadID)"
+        
+        var progressLabel = ""
+        if let completed = completedAssetCount, let total = totalAssetCount, total > 0 {
+            let pct = Int(Double(completed) / Double(total) * 100)
+            progressLabel = " · \(completed)/\(total) (\(pct)%)"
+        }
+        
+        return "\(createdLabel) · \(deviceName)\(progressLabel) · \(receivedLabel) / \(totalLabel) · sess \(shortUploadID)"
     }
 
     private var shortUploadID: String {
