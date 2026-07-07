@@ -86,10 +86,6 @@ struct MenuBarPopoverContent: View {
                 statusRow(icon: "iphone", text: deviceSummary)
             }
 
-            if let uploadSummary = state.uploadSummary {
-                statusRow(icon: "arrow.up.circle", text: uploadSummary)
-            }
-
             if let progressSummary = state.backupProgressSummary {
                 statusRow(icon: "chart.bar.xaxis", text: progressSummary)
             }
@@ -119,6 +115,9 @@ struct MenuBarPopoverContent: View {
             }
             MenuBarActionButton(title: "Reveal Backup Folder", icon: "folder") {
                 state.revealBackupFolder()
+            }
+            MenuBarActionButton(title: "Settings...", icon: "gearshape") {
+                state.openSettings()
             }
             Divider()
             MenuBarActionButton(title: "Quit iCherri", icon: "power", role: .destructive) {
@@ -257,24 +256,19 @@ final class MenuBarState: ObservableObject {
     }
 
     var deviceSummary: String? {
-        if isReceiving {
-            if activeDeviceCount > 1 {
-                return "\(activeDeviceCount) devices connected"
-            }
-            return "Connected: \(connectedDeviceName ?? "iPhone")"
-        }
-
-        guard AppCoordinator.shared.isServerRunning else { return nil }
-        return "Receiver on port \(AppCoordinator.shared.port)"
-    }
-
-    var uploadSummary: String? {
         guard isReceiving else { return nil }
-        return activeUploadCount == 1 ? "1 active upload" : "\(activeUploadCount) active uploads"
+        if activeDeviceCount > 1 {
+            return "\(activeDeviceCount) devices connected"
+        }
+        return "Connected: \(connectedDeviceName ?? "iPhone")"
     }
 
     func openDashboard() {
         NotificationCenter.default.post(name: .openDashboard, object: nil)
+    }
+
+    func openSettings() {
+        WindowManager.shared.showSettings()
     }
 
     func revealBackupFolder() {
