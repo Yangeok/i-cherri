@@ -420,7 +420,7 @@ public struct BackupDashboardView: View {
     private func phaseTitle(for phase: BackupProgressPhase) -> String {
         switch phase {
         case .scanning: return "스캔 중"
-        case .checking: return "백업 확인 중"
+        case .checking: return "해시파일 비교 중"
         case .uploading: return "전송 중"
         case .complete: return "완료"
         case .failed: return "실패"
@@ -438,12 +438,7 @@ public struct BackupDashboardView: View {
     }
     
     private func simulatedProgressText(for progressViewModel: BackupProgressViewModel) -> String {
-        switch progressViewModel.phase {
-        case .checking:
-            return "계산 중…"
-        case .scanning, .uploading, .complete, .failed:
-            return "\(progressViewModel.overallBackedUpCount) / \(progressViewModel.totalCount)"
-        }
+        return "\(progressViewModel.overallBackedUpCount) / \(progressViewModel.totalCount)"
     }
 }
 
@@ -1064,6 +1059,19 @@ final class BackupDashboardViewModel: ObservableObject {
                     bytesPerSecond: 0
                 )
 
+                // Start simulated progress sweep for hash file comparison
+                let checkingProgressTask = Task { @MainActor in
+                    var currentProgress = 0.0
+                    while !Task.isCancelled && currentProgress < 0.95 {
+                        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                        currentProgress += 0.05
+                        progressViewModel.progress = currentProgress
+                        let simulatedCompleted = Int(Double(scanPlan.runAssetCount) * currentProgress)
+                        progressViewModel.overallBackedUpCount = simulatedCompleted
+                        progressViewModel.totalCount = scanPlan.runAssetCount
+                    }
+                }
+
                 let receiverURL = try await Self.resolveReceiverURLForBackup(
                     pairedReceiver: pairedReceiverSnapshot,
                     pairedReceiverID: pairedReceiverIDSnapshot,
@@ -1080,6 +1088,13 @@ final class BackupDashboardViewModel: ObservableObject {
                     totalAssetCount: scanPlan.libraryAssetCount,
                     totalAssetBytes: scanPlan.libraryAssetBytes
                 )
+                
+                checkingProgressTask.cancel()
+                await MainActor.run {
+                    progressViewModel.progress = 1.0
+                    progressViewModel.overallBackedUpCount = scanPlan.runAssetCount
+                    progressViewModel.totalCount = scanPlan.runAssetCount
+                }
                 let assetIndex = Dictionary(uniqueKeysWithValues: runAssets.map { ($0.assetLocalID, $0) })
 
                 // ✅ Mac DB SSOT: 로컬 추정값을 버리고 Mac이 응답한 실제 완료 파일 수로 즉시 보정
@@ -2107,7 +2122,7 @@ private actor BackupUploadProgressCoordinator {
             case .scanning:
                 phaseText = "라이브러리 스캔 중..."
             case .checking:
-                phaseText = "백업 확인 중..."
+                phaseText = "해시파일 비교 중..."
             case .uploading:
                 phaseText = "백업 전송 중"
             case .complete:
@@ -2326,9 +2341,9 @@ struct ExpandedBackupCardView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .transition(.move(edge: .top).combined(with: .opacity))
-            } else if progressViewModel.phase == .uploading || progressViewModel.phase == .scanning {
-                // 업로드가 막 시작되어 activeUploads가 빌드되기 전이거나 스캔 중일 때는 파일명/진행상황 배지 노출
-                Text(progressViewModel.currentFilename ?? (progressViewModel.phase == .scanning ? "스캔 준비 중..." : "준비 중..."))
+            } else if progressViewModel.phase == .uploading {
+                // 업로드가 막 시작되어 activeUploads가 빌드되기 전에는 파일명 배지만 노출
+                Text(progressViewModel.currentFilename ?? "준비 중...")
                     .font(.system(.caption2, design: .monospaced, weight: .semibold))
                     .foregroundColor(.accentColor.opacity(0.85))
                     .padding(.horizontal, 8)
@@ -2343,7 +2358,7 @@ struct ExpandedBackupCardView: View {
             
             // 리퀴드 프로그레스 바
             LiquidProgressBar(
-                progress: progressViewModel.phase == .complete ? 1.0 : ((progressViewModel.phase == .uploading || progressViewModel.phase == .scanning) ? progressViewModel.progress : 0.0),
+                progress: progressViewModel.phase == .complete ? 1.0 : ((progressViewModel.phase == .uploading || progressViewModel.phase == .scanning || progressViewModel.phase == .checking) ? progressViewModel.progress : 0.0),
                 tint: progressViewModel.phase == .complete ? .green : .accentColor
             )
             .frame(height: 14)
@@ -2367,7 +2382,7 @@ struct ExpandedBackupCardView: View {
                 )
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(progressViewModel.phase == .scanning ? "스캔 진행률" : "백업 진행률")
+                    Text(progressViewModel.phase == .scanning ? "스캔 진행률" : (progressViewModel.phase == .checking ? "비교 진행률" : "백업 진행률"))
                         .font(.system(.caption2, design: .rounded))
                         .foregroundColor(.secondary)
                     Text(simulatedProgressText(for: progressViewModel))
@@ -2399,7 +2414,7 @@ struct ExpandedBackupCardView: View {
     private func phaseTitle(for phase: BackupProgressPhase) -> String {
         switch phase {
         case .scanning: return "스캔 중"
-        case .checking: return "백업 확인 중"
+        case .checking: return "해시파일 비교 중"
         case .uploading: return "전송 중"
         case .complete: return "완료"
         case .failed: return "실패"
@@ -2417,12 +2432,7 @@ struct ExpandedBackupCardView: View {
     }
     
     private func simulatedProgressText(for progressViewModel: BackupProgressViewModel) -> String {
-        switch progressViewModel.phase {
-        case .checking:
-            return "계산 중…"
-        case .scanning, .uploading, .complete, .failed:
-            return "\(progressViewModel.overallBackedUpCount) / \(progressViewModel.totalCount)"
-        }
+        return "\(progressViewModel.overallBackedUpCount) / \(progressViewModel.totalCount)"
     }
 }
 
