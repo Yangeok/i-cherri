@@ -151,7 +151,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
     private let dbQueue: DatabaseQueue
 
     private override init() {
-        self.activeReceiverID = UserDefaults.standard.string(forKey: "pairedReceiverID")
+        self.activeReceiverID = UserDefaults.standard.string(forKey: "iCherriReceiverID")
         
         let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory

@@ -1800,9 +1800,15 @@ private actor BackupRunReconcileState {
     func snapshotCounts() -> Counts {
         let success = uploadedAssetIDs.count
         let failed = failedAssetIDs.count
-        let receiverBackedUpCount = receiverCompletedAssetCount ?? 0
-        let alreadyBackedUpCount = max(libraryAssetCount - runAssetCount, 0)
-        let overallBackedUpCount = max(alreadyBackedUpCount + success + duplicateCount, receiverBackedUpCount)
+        
+        let overallBackedUpCount: Int
+        if let receiverBackedUpCount = receiverCompletedAssetCount {
+            overallBackedUpCount = receiverBackedUpCount + success
+        } else {
+            let alreadyBackedUpCount = max(libraryAssetCount - runAssetCount, 0)
+            overallBackedUpCount = alreadyBackedUpCount + success + duplicateCount
+        }
+        
         return Counts(
             completed: success + duplicateCount + failed,
             success: success,
