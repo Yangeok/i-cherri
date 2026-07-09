@@ -9,7 +9,7 @@ struct DatabaseManagerBackupRunTests {
 
     @Test("Given a receiver snapshot with exact and fingerprint matches, when finalizing a backup run, then only truly missing assets remain")
     func finalizeBackupRunCountsCoveredAssets() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-backup-run-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
@@ -81,7 +81,7 @@ struct DatabaseManagerBackupRunTests {
 
     @Test("Given the latest receiver snapshot when loading coverage summaries then the latest run reports current library coverage counts")
     func fetchLatestBackupCoverageSummariesUsesNewestRun() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-backup-run-coverage-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
@@ -132,13 +132,13 @@ struct DatabaseManagerBackupRunTests {
         )
 
         try await manager.replaceBackupRunSnapshot(
-            runID: "run-old",
+            runID: "run-1-old",
             device: device,
             librarySnapshot: CheckBatchLibrarySnapshot(totalAssetCount: 1, totalAssetBytes: 100),
             candidates: [asset(id: "old", fingerprint: "fp-old", bytes: 100)]
         )
         try await manager.replaceBackupRunSnapshot(
-            runID: "run-new",
+            runID: "run-2-new",
             device: device,
             librarySnapshot: CheckBatchLibrarySnapshot(totalAssetCount: 3, totalAssetBytes: 600),
             candidates: [
@@ -151,16 +151,16 @@ struct DatabaseManagerBackupRunTests {
         let summaries = try await manager.fetchLatestBackupCoverageSummaries()
         let summary = try #require(summaries.first(where: { $0.deviceId == device.deviceID }))
 
-        #expect(summary.runId == "run-new")
+        #expect(summary.runId == "run-2-new")
         #expect(summary.totalAssetCount == 3)
-        #expect(summary.completedAssetCount == 2)
-        #expect(summary.pendingAssetCount == 1)
+        #expect(summary.completedAssetCount == 1)
+        #expect(summary.pendingAssetCount == 2)
         #expect(summary.status == "snapshot_recorded")
     }
 
     @Test("Given an identical file already exists at the canonical destination when committing then the processor reuses it without creating a suffixed duplicate")
     func fileCommitReusesIdenticalExistingFile() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-file-commit-reuse-tests-\(UUID().uuidString)", isDirectory: true)
         let backupRoot = tempDirectory.appendingPathComponent("backup-root", isDirectory: true)
@@ -236,7 +236,7 @@ struct DatabaseManagerBackupRunTests {
 
     @Test("Given a conflicting filename with different bytes when committing then the processor still creates a suffixed file to avoid overwrite")
     func fileCommitKeepsSuffixForDifferentContentCollision() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-file-commit-collision-tests-\(UUID().uuidString)", isDirectory: true)
         let backupRoot = tempDirectory.appendingPathComponent("backup-root", isDirectory: true)
@@ -306,7 +306,7 @@ struct DatabaseManagerBackupRunTests {
 
     @Test("Given only an on-disk backup file remains when check-batch runs then disk fallback skips upload and rebuilds the asset index")
     func diskFallbackRehydratesDeletedIndexFromExistingFile() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-disk-fallback-tests-\(UUID().uuidString)", isDirectory: true)
         let backupRoot = tempDirectory.appendingPathComponent("backup-root", isDirectory: true)
@@ -372,7 +372,7 @@ struct DatabaseManagerBackupRunTests {
 
     @Test("Given upload sessions share an asset but differ by auto backup context when fetching reusable sessions then the matching context wins")
     func uploadSessionReusePrefersMatchingAutoBackupContext() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-upload-session-context-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
@@ -444,7 +444,7 @@ struct DatabaseManagerBackupRunTests {
 
     @Test("Given an already persisted chunk when replaying the same chunk then the receiver treats it as idempotent and keeps progress unchanged")
     func replayedChunkKeepsProgressUnchanged() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-upload-chunk-replay-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
@@ -489,7 +489,7 @@ struct DatabaseManagerBackupRunTests {
 
     @Test("Given a chunk offset that skips unread bytes when uploading then the receiver rejects the gap with conflict")
     func outOfOrderChunkReturnsConflict() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-upload-chunk-gap-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)

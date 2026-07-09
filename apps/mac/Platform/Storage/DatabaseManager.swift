@@ -268,7 +268,11 @@ actor DatabaseManager {
     private var insertWaiters: [CheckedContinuation<Void, any Error>] = []
     private var isFlushing = false
 
+    #if DEBUG
+    init() {}
+    #else
     private init() {}
+    #endif
 
     func open(at path: String) throws {
         var config = Configuration()
@@ -1025,6 +1029,9 @@ extension DatabaseManager: BackupIndexQuerying {
     }
 
     public func registerDuplicate(candidate: AssetMetadata, duplicateOfBackupID: String) async throws {
+        if let _ = try fetchAsset(deviceId: candidate.deviceID, assetLocalId: candidate.assetLocalID) {
+            return
+        }
         try insertDuplicateAsset(
             deviceId: candidate.deviceID,
             assetLocalId: candidate.assetLocalID,

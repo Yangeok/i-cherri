@@ -246,4 +246,9 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
             lhs.creationDate > rhs.creationDate
         }
     }
+
+    func reset() {
+        state = PhotoLibraryScanIndexState()
+        persist()
+    }
 }

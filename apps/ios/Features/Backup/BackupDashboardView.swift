@@ -958,7 +958,7 @@ final class BackupDashboardViewModel: ObservableObject {
             }
         }
 
-        let backupTask = Task.detached(priority: .userInitiated) { [maxConcurrentUploads = Self.maxConcurrentUploads, backgroundTaskID] in
+        let backupTask = Task.detached(priority: .userInitiated) { [maxConcurrentUploads = Self.maxConcurrentUploads, backgroundTaskID, pairedReceiverIDSnapshot] in
             var executedScanMode: PhotoLibraryScanPlan.Mode = .incremental
             defer {
                 Task { @MainActor in
@@ -974,6 +974,14 @@ final class BackupDashboardViewModel: ObservableObject {
 
             do {
                 try Task.checkCancellation()
+
+                let lastReceiverIDKey = "lastBackedUpReceiverID"
+                let lastReceiverID = UserDefaults.standard.string(forKey: lastReceiverIDKey)
+                if let pairedID = pairedReceiverIDSnapshot, pairedID != lastReceiverID {
+                    print("[Backup] Target receiver changed from \(lastReceiverID ?? "nil") to \(pairedID). Resetting local scan plan cache.")
+                    await self.scanIndexStore.reset()
+                    UserDefaults.standard.set(pairedID, forKey: lastReceiverIDKey)
+                }
 
                 let scanPlan = await self.scanIndexStore.makeScanPlan(scanner: self.scanner, deviceID: device.deviceID)
                 executedScanMode = scanPlan.mode
