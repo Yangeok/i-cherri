@@ -978,7 +978,29 @@ final class BackupDashboardViewModel: ObservableObject {
                 // Switch the scan index store to load the correct receiver-specific cache file
                 await self.scanIndexStore.switchReceiver(to: pairedReceiverIDSnapshot)
 
-                let scanPlan = await self.scanIndexStore.makeScanPlan(scanner: self.scanner, deviceID: device.deviceID)
+                let scanPlan = await self.scanIndexStore.makeScanPlan(
+                    scanner: self.scanner,
+                    deviceID: device.deviceID
+                ) { completed, total in
+                    Task { @MainActor in
+                        let pct = total > 0 ? (completed * 100 / total) : 0
+                        progressViewModel.update(
+                            filename: "라이브러리 스캔 중 (\(completed)/\(total), \(pct)%)...",
+                            completed: 0,
+                            success: 0,
+                            duplicates: 0,
+                            failed: 0,
+                            overallBackedUpCount: 0,
+                            phase: .scanning,
+                            bytesPerSecond: 0,
+                            sentBytes: 0,
+                            totalBytes: 0,
+                            activeUploads: 0,
+                            activeUploadItems: [],
+                            failedUploadItems: []
+                        )
+                    }
+                }
                 executedScanMode = scanPlan.mode
                 let runAssets = scanPlan.runAssets
 

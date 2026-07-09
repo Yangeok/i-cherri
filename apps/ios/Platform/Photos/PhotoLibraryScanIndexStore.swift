@@ -295,7 +295,11 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
         }
     }
 
-    func makeScanPlan(scanner: PhotoLibraryScanner, deviceID: String) async -> PhotoLibraryScanPlan {
+    func makeScanPlan(
+        scanner: PhotoLibraryScanner, 
+        deviceID: String,
+        progressHandler: ((Int, Int) -> Void)? = nil
+    ) async -> PhotoLibraryScanPlan {
         let totalCount = scanner.totalAssetCount()
         let receiverID = activeReceiverID ?? ""
         let scanState = getScanState(for: receiverID)
@@ -310,7 +314,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
                 return Dictionary(uniqueKeysWithValues: records.map { ($0.assetLocalID, $0.toMetadata()) })
             }
             
-            let assets = await scanner.scanAllAssets(deviceID: deviceID, cachedAssets: cachedAssets)
+            let assets = await scanner.scanAllAssets(deviceID: deviceID, cachedAssets: cachedAssets, progressHandler: progressHandler)
             
             try! await dbQueue.write { db in
                 try db.execute(sql: "DELETE FROM cached_assets WHERE receiver_id = ?", arguments: [receiverID])
@@ -367,7 +371,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
             return Dictionary(uniqueKeysWithValues: records.map { ($0.assetLocalID, $0.toMetadata()) })
         }
         
-        let assets = await scanner.scanAssets(localIdentifiers: candidateIDs, deviceID: deviceID, cachedAssets: cachedAssets)
+        let assets = await scanner.scanAssets(localIdentifiers: candidateIDs, deviceID: deviceID, cachedAssets: cachedAssets, progressHandler: progressHandler)
         let resolvedIDs = Set(assets.map(\.assetLocalID))
         
         try! await dbQueue.write { db in

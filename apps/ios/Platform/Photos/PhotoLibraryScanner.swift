@@ -29,7 +29,11 @@ public final class PhotoLibraryScanner {
     }
 
     // Scans all media assets and returns AssetMetadata array. Targets >1000 assets/sec.
-    public func scanAllAssets(deviceID: String, cachedAssets: [String: AssetMetadata] = [:]) async -> [AssetMetadata] {
+    public func scanAllAssets(
+        deviceID: String, 
+        cachedAssets: [String: AssetMetadata] = [:],
+        progressHandler: ((Int, Int) -> Void)? = nil
+    ) async -> [AssetMetadata] {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
@@ -42,6 +46,7 @@ public final class PhotoLibraryScanner {
         let lock = NSLock()
         let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions to prevent assetsd IPC bottleneck
 
+        var completed = 0
         // Run metadata extraction concurrently across available CPU cores with semaphore limiting
         DispatchQueue.concurrentPerform(iterations: count) { index in
             semaphore.wait()
@@ -53,6 +58,15 @@ public final class PhotoLibraryScanner {
                     assets[index] = metadata
                     lock.unlock()
                 }
+                
+                lock.lock()
+                completed += 1
+                let currentCompleted = completed
+                lock.unlock()
+                
+                if currentCompleted % 50 == 0 || currentCompleted == count {
+                    progressHandler?(currentCompleted, count)
+                }
             }
             semaphore.signal()
         }
@@ -60,7 +74,12 @@ public final class PhotoLibraryScanner {
         return assets.compactMap { $0 }
     }
 
-    public func scanAssets(localIdentifiers: [String], deviceID: String, cachedAssets: [String: AssetMetadata] = [:]) async -> [AssetMetadata] {
+    public func scanAssets(
+        localIdentifiers: [String], 
+        deviceID: String, 
+        cachedAssets: [String: AssetMetadata] = [:],
+        progressHandler: ((Int, Int) -> Void)? = nil
+    ) async -> [AssetMetadata] {
         guard !localIdentifiers.isEmpty else { return [] }
 
         let result = PHAsset.fetchAssets(withLocalIdentifiers: localIdentifiers, options: nil)
@@ -71,6 +90,7 @@ public final class PhotoLibraryScanner {
         let lock = NSLock()
         let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions
 
+        var completed = 0
         DispatchQueue.concurrentPerform(iterations: count) { index in
             semaphore.wait()
             autoreleasepool {
@@ -80,6 +100,15 @@ public final class PhotoLibraryScanner {
                     lock.lock()
                     assets[index] = metadata
                     lock.unlock()
+                }
+                
+                lock.lock()
+                completed += 1
+                let currentCompleted = completed
+                lock.unlock()
+                
+                if currentCompleted % 50 == 0 || currentCompleted == count {
+                    progressHandler?(currentCompleted, count)
                 }
             }
             semaphore.signal()
