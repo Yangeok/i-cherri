@@ -145,6 +145,10 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
 
     private let reconcileInterval = 10
     private var activeReceiverID: String?
+    private var sanitizedActiveReceiverID: String {
+        guard let id = activeReceiverID else { return "" }
+        return id.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+    }
     private var fetchResult: PHFetchResult<PHAsset>?
     private var isObserving = false
     
@@ -301,7 +305,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
         progressHandler: ((Int, Int) -> Void)? = nil
     ) async -> PhotoLibraryScanPlan {
         let totalCount = scanner.totalAssetCount()
-        let receiverID = activeReceiverID ?? ""
+        let receiverID = sanitizedActiveReceiverID
         let scanState = getScanState(for: receiverID)
         
         let hasCachedAssets = try! await dbQueue.read { db in
@@ -404,7 +408,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
     }
 
     func markRetryRequired(assetIDs: [String]) {
-        let receiverID = activeReceiverID ?? ""
+        let receiverID = sanitizedActiveReceiverID
         try! dbQueue.write { db in
             for assetID in assetIDs {
                 let record = PendingAssetRecord(receiverID: receiverID, assetLocalID: assetID, status: "retry")
@@ -414,7 +418,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
     }
 
     func markSucceeded(assetIDs: [String]) {
-        let receiverID = activeReceiverID ?? ""
+        let receiverID = sanitizedActiveReceiverID
         try! dbQueue.write { db in
             for assetID in assetIDs {
                 try db.execute(sql: "DELETE FROM pending_assets WHERE receiver_id = ? AND asset_local_id = ?", arguments: [receiverID, assetID])
@@ -423,7 +427,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
     }
 
     func finishBackupRun(mode: PhotoLibraryScanPlan.Mode) {
-        let receiverID = activeReceiverID ?? ""
+        let receiverID = sanitizedActiveReceiverID
         let scanState = getScanState(for: receiverID)
         let newScanState = ScanStateRecord(
             receiverID: receiverID,
@@ -437,7 +441,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let receiverID = self.activeReceiverID ?? ""
+            let receiverID = self.sanitizedActiveReceiverID
             guard let currentFetchResult = self.fetchResult else {
                 self.fetchResult = Self.makeFetchResult()
                 let scanState = self.getScanState(for: receiverID)
@@ -503,7 +507,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
     }
 
     func reset() {
-        let receiverID = activeReceiverID ?? ""
+        let receiverID = sanitizedActiveReceiverID
         try! dbQueue.write { db in
             try db.execute(sql: "DELETE FROM cached_assets WHERE receiver_id = ?", arguments: [receiverID])
             try db.execute(sql: "DELETE FROM pending_assets WHERE receiver_id = ?", arguments: [receiverID])
