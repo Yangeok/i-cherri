@@ -46,18 +46,34 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
     static let shared = PhotoLibraryScanIndexStore()
 
     private let reconcileInterval = 10
-    private let fileURL: URL
+    private var activeReceiverID: String?
     private var state = PhotoLibraryScanIndexState()
     private var fetchResult: PHFetchResult<PHAsset>?
     private var isObserving = false
 
-    private override init() {
+    private var fileURL: URL {
         let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let directory = baseDirectory.appendingPathComponent("iCherri", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        fileURL = directory.appendingPathComponent("photo-scan-index.json")
+        
+        if let receiverID = activeReceiverID, !receiverID.isEmpty {
+            let safeID = receiverID.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+            return directory.appendingPathComponent("photo-scan-index-\(safeID).json")
+        } else {
+            return directory.appendingPathComponent("photo-scan-index.json")
+        }
+    }
+
+    private override init() {
+        self.activeReceiverID = UserDefaults.standard.string(forKey: "pairedReceiverID")
         super.init()
+        loadState()
+    }
+
+    func switchReceiver(to receiverID: String?) {
+        persist()
+        self.activeReceiverID = receiverID
         loadState()
     }
 
