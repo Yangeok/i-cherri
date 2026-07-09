@@ -2,6 +2,9 @@ import Foundation
 import ICherriProtocol
 import ICherriCore
 
+@_silgen_name("clonefile")
+private func clonefile(_ src: UnsafePointer<CChar>, _ dst: UnsafePointer<CChar>, _ flags: Int32) -> Int32
+
 // Atomically moves a verified incoming temp file to its final destination and registers it in the DB.
 actor FileCommitProcessor {
     private let backupRootURL: URL
@@ -70,8 +73,17 @@ actor FileCommitProcessor {
         let displayPath = "\(relativeDir)/\(destURL.lastPathComponent)"
 
         if !reusedExistingFile {
-            // Atomic move
-            try FileManager.default.moveItem(at: tempURL, to: destURL)
+            // Try APFS clone first (Copy-on-Write) and fallback to move
+            let srcPath = tempURL.path
+            let destPath = destURL.path
+            let cloneResult = clonefile(srcPath, destPath, 0)
+            if cloneResult == 0 {
+                // Clone succeeded! Remove the temporary source file
+                try? FileManager.default.removeItem(at: tempURL)
+            } else {
+                // Clone failed (e.g. cross-volume), fallback to atomic move
+                try FileManager.default.moveItem(at: tempURL, to: destURL)
+            }
         }
 
         // Register in DB

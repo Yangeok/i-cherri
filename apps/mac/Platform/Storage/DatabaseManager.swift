@@ -461,23 +461,25 @@ actor DatabaseManager {
             pendingInserts.append(record)
             insertWaiters.append(continuation)
 
-            if !isFlushing {
+            if pendingInserts.count >= 50 {
+                flushInserts()
+            } else if !isFlushing {
                 isFlushing = true
                 Task {
-                    await flushInserts()
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+                    await self.flushInserts()
                 }
             }
         }
     }
 
     private func flushInserts() {
+        guard !pendingInserts.isEmpty else { return }
         let records = pendingInserts
         let waiters = insertWaiters
         pendingInserts.removeAll()
         insertWaiters.removeAll()
         isFlushing = false
-
-        guard !records.isEmpty else { return }
 
         do {
             let q = try queue
@@ -497,7 +499,8 @@ actor DatabaseManager {
     }
 
     func fetchAsset(deviceId: String, assetLocalId: String) throws -> BackupAssetRecord? {
-        try queue.read { db in
+        flushInserts()
+        return try queue.read { db in
             try BackupAssetRecord
                 .filter(Column("device_id") == deviceId && Column("asset_local_id") == assetLocalId)
                 .fetchOne(db)
@@ -505,7 +508,8 @@ actor DatabaseManager {
     }
 
     func fetchAsset(fingerprint: String) throws -> BackupAssetRecord? {
-        try queue.read { db in
+        flushInserts()
+        return try queue.read { db in
             try BackupAssetRecord
                 .filter(Column("quick_fingerprint") == fingerprint && Column("status") == "completed")
                 .fetchOne(db)
@@ -513,7 +517,8 @@ actor DatabaseManager {
     }
 
     func fetchAsset(sha256: String) throws -> BackupAssetRecord? {
-        try queue.read { db in
+        flushInserts()
+        return try queue.read { db in
             try BackupAssetRecord
                 .filter(Column("content_sha256") == sha256 && Column("status") == "completed")
                 .fetchOne(db)
@@ -578,7 +583,8 @@ actor DatabaseManager {
 
     /// Mac DB 기준 특정 디바이스의 완료+중복 파일 총 수 반환 — iOS SSOT 동기화에 사용
     func fetchCompletedAssetCount(deviceID: String) throws -> Int {
-        try queue.read { db in
+        flushInserts()
+        return try queue.read { db in
             let count = try Int.fetchOne(
                 db,
                 sql: """
@@ -660,7 +666,8 @@ actor DatabaseManager {
     }
 
     func finalizeBackupRun(runID: String, deviceID: String) throws -> BackupRunReconcileSnapshot {
-        try queue.write { db in
+        flushInserts()
+        return try queue.write { db in
             let missingAssetIDs = try String.fetchAll(
                 db,
                 sql: """
@@ -726,7 +733,8 @@ actor DatabaseManager {
     }
 
     func fetchLatestBackupCoverageSummaries() throws -> [BackupRunCoverageSummary] {
-        try queue.read { db in
+        flushInserts()
+        return try queue.read { db in
             let rows = try Row.fetchAll(
                 db,
                 sql: """
