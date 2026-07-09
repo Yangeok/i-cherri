@@ -1079,8 +1079,14 @@ final class DashboardViewModel: ObservableObject {
             return
         }
 
-        isLoadingAssetPage = true
-        defer { isLoadingAssetPage = false }
+        if reset {
+            isLoadingAssetPage = true
+        }
+        defer {
+            if reset {
+                isLoadingAssetPage = false
+            }
+        }
 
         if reset {
             filteredAssets = await matchingAssetsForSelectedDevice()

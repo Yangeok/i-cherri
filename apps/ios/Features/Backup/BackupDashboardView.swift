@@ -439,10 +439,7 @@ public struct BackupDashboardView: View {
     
     private func simulatedProgressText(for progressViewModel: BackupProgressViewModel) -> String {
         switch progressViewModel.phase {
-        case .scanning:
-            let pct = Int(progressViewModel.progress * 100)
-            return "\(pct)%"
-        case .checking:
+        case .scanning, .checking:
             return "계산 중…"
         case .uploading, .complete, .failed:
             return "\(progressViewModel.overallBackedUpCount) / \(progressViewModel.totalCount)"
@@ -2346,7 +2343,7 @@ struct ExpandedBackupCardView: View {
             
             // 리퀴드 프로그레스 바
             LiquidProgressBar(
-                progress: progressViewModel.phase == .complete ? 1.0 : ((progressViewModel.phase == .uploading || progressViewModel.phase == .scanning) ? progressViewModel.progress : 0.0),
+                progress: progressViewModel.phase == .complete ? 1.0 : (progressViewModel.phase == .uploading ? progressViewModel.progress : 0.0),
                 tint: progressViewModel.phase == .complete ? .green : .accentColor
             )
             .frame(height: 14)
@@ -2421,10 +2418,7 @@ struct ExpandedBackupCardView: View {
     
     private func simulatedProgressText(for progressViewModel: BackupProgressViewModel) -> String {
         switch progressViewModel.phase {
-        case .scanning:
-            let pct = Int(progressViewModel.progress * 100)
-            return "\(pct)%"
-        case .checking:
+        case .scanning, .checking:
             return "계산 중…"
         case .uploading, .complete, .failed:
             return "\(progressViewModel.overallBackedUpCount) / \(progressViewModel.totalCount)"
