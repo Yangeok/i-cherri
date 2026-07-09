@@ -439,7 +439,10 @@ public struct BackupDashboardView: View {
     
     private func simulatedProgressText(for progressViewModel: BackupProgressViewModel) -> String {
         switch progressViewModel.phase {
-        case .scanning, .checking:
+        case .scanning:
+            let pct = Int(progressViewModel.progress * 100)
+            return "\(pct)%"
+        case .checking:
             return "계산 중…"
         case .uploading, .complete, .failed:
             return "\(progressViewModel.overallBackedUpCount) / \(progressViewModel.totalCount)"
@@ -999,6 +1002,7 @@ final class BackupDashboardViewModel: ObservableObject {
                             activeUploadItems: [],
                             failedUploadItems: []
                         )
+                        progressViewModel.progress = total > 0 ? Double(completed) / Double(total) : 0.0
                     }
                 }
                 executedScanMode = scanPlan.mode
@@ -2325,9 +2329,9 @@ struct ExpandedBackupCardView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .transition(.move(edge: .top).combined(with: .opacity))
-            } else if progressViewModel.phase == .uploading {
-                // 업로드가 막 시작되어 activeUploads가 빌드되기 전에는 파일명 배지만 노출
-                Text(progressViewModel.currentFilename ?? "준비 중...")
+            } else if progressViewModel.phase == .uploading || progressViewModel.phase == .scanning {
+                // 업로드가 막 시작되어 activeUploads가 빌드되기 전이거나 스캔 중일 때는 파일명/진행상황 배지 노출
+                Text(progressViewModel.currentFilename ?? (progressViewModel.phase == .scanning ? "스캔 준비 중..." : "준비 중..."))
                     .font(.system(.caption2, design: .monospaced, weight: .semibold))
                     .foregroundColor(.accentColor.opacity(0.85))
                     .padding(.horizontal, 8)
@@ -2342,7 +2346,7 @@ struct ExpandedBackupCardView: View {
             
             // 리퀴드 프로그레스 바
             LiquidProgressBar(
-                progress: progressViewModel.phase == .complete ? 1.0 : (progressViewModel.phase == .uploading ? progressViewModel.progress : 0.0),
+                progress: progressViewModel.phase == .complete ? 1.0 : ((progressViewModel.phase == .uploading || progressViewModel.phase == .scanning) ? progressViewModel.progress : 0.0),
                 tint: progressViewModel.phase == .complete ? .green : .accentColor
             )
             .frame(height: 14)
@@ -2417,7 +2421,10 @@ struct ExpandedBackupCardView: View {
     
     private func simulatedProgressText(for progressViewModel: BackupProgressViewModel) -> String {
         switch progressViewModel.phase {
-        case .scanning, .checking:
+        case .scanning:
+            let pct = Int(progressViewModel.progress * 100)
+            return "\(pct)%"
+        case .checking:
             return "계산 중…"
         case .uploading, .complete, .failed:
             return "\(progressViewModel.overallBackedUpCount) / \(progressViewModel.totalCount)"
