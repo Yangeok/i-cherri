@@ -163,24 +163,7 @@ public struct BackupDashboardView: View {
     private var triggerAndControls: some View {
         VStack(spacing: 12) {
             if let progressViewModel = viewModel.activeBackupProgressViewModel {
-                // 백업 진행 중일 때 -> 취소/일시정지 버튼 노출 (Rosegold Glassmorphism)
-                if progressViewModel.canCancel {
-                    Button(action: {
-                        progressViewModel.cancel()
-                    }) {
-                        Label("백업 취소 / 일시정지", systemImage: "stop.fill")
-                            .font(.system(.subheadline, design: .rounded, weight: .bold))
-                            .foregroundColor(.red.opacity(0.85))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(12)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.red.opacity(0.25), lineWidth: 0.8)
-                            )
-                    }
-                }
+                BackupControlsView(viewModel: viewModel, progressViewModel: progressViewModel)
             } else {
                 // 평소 상태 -> 백업 시작 버튼
                 Button(action: {
@@ -2309,7 +2292,7 @@ struct ExpandedBackupCardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(phaseTitle(for: progressViewModel.phase))
                         .font(.system(.headline, design: .rounded, weight: .bold))
-                    Text(phaseDescription(for: progressViewModel.phase))
+                    Text(phaseDescription(for: progressViewModel))
                         .font(.system(.caption2, design: .rounded))
                         .foregroundColor(.secondary)
                 }
@@ -2421,13 +2404,25 @@ struct ExpandedBackupCardView: View {
         }
     }
     
-    private func phaseDescription(for phase: BackupProgressPhase) -> String {
-        switch phase {
+    private func phaseDescription(for progressViewModel: BackupProgressViewModel) -> String {
+        switch progressViewModel.phase {
         case .scanning: return "최근 촬영된 라이브러리 스캔 중…"
         case .checking: return "Mac 리시버의 해시 파일과 비교 중…"
         case .uploading: return "iPhone 사진 라이브러리 전송 중"
-        case .complete: return "모든 사진이 Mac에 동기화되었습니다."
-        case .failed: return "백업 도중 오류가 발생했습니다."
+        case .complete:
+            if progressViewModel.failedCount > 0 {
+                return "백업 완료 (성공 \(progressViewModel.successCount)장, 실패 \(progressViewModel.failedCount)장)"
+            } else if progressViewModel.successCount > 0 {
+                return "새로운 사진 \(progressViewModel.successCount)장이 안전하게 백업되었습니다."
+            } else {
+                return "이미 최신 상태입니다. (중복 \(progressViewModel.duplicateCount)장)"
+            }
+        case .failed:
+            if let error = progressViewModel.errorMessage {
+                return "오류: \(error)"
+            } else {
+                return "백업 도중 오류가 발생했습니다."
+            }
         }
     }
     
@@ -2485,6 +2480,51 @@ struct ActiveUploadItemView: View {
         }
         .task {
             await loader.loadIfNeeded()
+        }
+    }
+}
+
+struct BackupControlsView: View {
+    @ObservedObject var viewModel: BackupDashboardViewModel
+    @ObservedObject var progressViewModel: BackupProgressViewModel
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            if progressViewModel.isComplete {
+                // 백업 완료 혹은 실패 상태 -> 확인(닫기) 버튼 노출
+                Button(action: {
+                    viewModel.activeBackupProgressViewModel = nil
+                }) {
+                    Label("확인", systemImage: "checkmark")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundColor(.green.opacity(0.85))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.green.opacity(0.25), lineWidth: 0.8)
+                        )
+                }
+            } else if progressViewModel.canCancel {
+                // 백업 진행 중일 때 -> 취소/일시정지 버튼 노출
+                Button(action: {
+                    progressViewModel.cancel()
+                }) {
+                    Label("백업 취소 / 일시정지", systemImage: "stop.fill")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundColor(.red.opacity(0.85))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.red.opacity(0.25), lineWidth: 0.8)
+                        )
+                }
+            }
         }
     }
 }
