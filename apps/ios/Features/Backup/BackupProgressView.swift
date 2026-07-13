@@ -115,7 +115,9 @@ public struct BackupProgressView: View {
                 .frame(height: 16)
 
             HStack {
-                Text("\(viewModel.overallBackedUpCount) / \(viewModel.totalCount) backed up")
+                Text(viewModel.phase == .checking
+                     ? "Comparing \(viewModel.overallBackedUpCount) / \(viewModel.totalCount) photos..."
+                     : "\(viewModel.overallBackedUpCount) / \(viewModel.totalCount) backed up")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 
