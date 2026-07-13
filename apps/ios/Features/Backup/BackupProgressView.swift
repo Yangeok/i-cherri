@@ -411,10 +411,14 @@ public final class BackupProgressViewModel: ObservableObject {
         progress = totalCount > 0 ? Double(self.overallBackedUpCount) / Double(totalCount) : 0
         formattedSpeed = formatSpeed(bytesPerSecond)
         formattedTransfer = formatTransfer(sentBytes: self.sentBytes, totalBytes: self.totalBytes)
-        if sessionTotalCount > 0, completed >= sessionTotalCount {
+        if self.phase == .complete || self.phase == .failed {
             isComplete = true
             stopDurationTimer()
-        } else if phase != .failed && phase != .complete {
+        } else if sessionTotalCount > 0, completed >= sessionTotalCount {
+            isComplete = true
+            self.phase = .complete
+            stopDurationTimer()
+        } else {
             isComplete = false
         }
     }
