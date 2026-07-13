@@ -1668,7 +1668,8 @@ final class BackupDashboardViewModel: ObservableObject {
 
     private static func isLinkLocalReceiverURL(_ url: URL) -> Bool {
         guard let host = url.host()?.lowercased() else { return false }
-        return host.hasPrefix("fe80:")
+        let cleanHost = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        return cleanHost.hasPrefix("fe80:")
     }
     
     private static func resolveEndpoint(_ endpoint: NWEndpoint) async throws -> URL {
