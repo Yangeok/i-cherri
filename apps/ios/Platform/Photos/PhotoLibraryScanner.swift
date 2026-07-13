@@ -23,9 +23,7 @@ public final class PhotoLibraryScanner {
     }
 
     public func totalAssetCount() -> Int {
-        let options = PHFetchOptions()
-        options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
-        return PHAsset.fetchAssets(with: options).count
+        return PHAsset.fetchAssets(with: nil).count
     }
 
     // Scans all media assets and returns AssetMetadata array. Targets >1000 assets/sec.
@@ -36,7 +34,6 @@ public final class PhotoLibraryScanner {
     ) async -> [AssetMetadata] {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
 
         let result = PHAsset.fetchAssets(with: options)
         let count = result.count
