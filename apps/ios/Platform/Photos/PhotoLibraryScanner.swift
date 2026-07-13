@@ -24,6 +24,7 @@ public final class PhotoLibraryScanner {
 
     public func totalAssetCount() -> Int {
         let options = PHFetchOptions()
+        options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
         return PHAsset.fetchAssets(with: options).count
     }
 
@@ -34,6 +35,7 @@ public final class PhotoLibraryScanner {
         progressHandler: ((Int, Int) -> Void)? = nil
     ) async -> [AssetMetadata] {
         let options = PHFetchOptions()
+        options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
 
         let result = PHAsset.fetchAssets(with: options)
@@ -81,6 +83,7 @@ public final class PhotoLibraryScanner {
         guard !localIdentifiers.isEmpty else { return [] }
 
         let options = PHFetchOptions()
+        options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
         let result = PHAsset.fetchAssets(withLocalIdentifiers: localIdentifiers, options: options)
         let count = result.count
         guard count > 0 else { return [] }
