@@ -1018,7 +1018,7 @@ final class BackupDashboardViewModel: ObservableObject {
                             : "No photos or videos found to back up."
                         self.scanIndexStore.finishBackupRun(mode: scanPlan.mode)
                     }
-                    return
+                    return false
                 }
 
                 // batchResponse 도착 전까지는 0으로 초기화 — 실제값은 Mac DB SSOT로 아래서 보정
@@ -1278,6 +1278,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     self.backupStatusMessage = "Backup complete. Uploaded \(finalCounts.success), skipped \(finalCounts.duplicates), failed \(finalCounts.failed)."
                     progressViewModel.setPhase(.complete)
                 }
+                return false
             } catch is CancellationError {
                 let scanMode = executedScanMode
                 await MainActor.run {
@@ -1285,15 +1286,9 @@ final class BackupDashboardViewModel: ObservableObject {
                     self.scanIndexStore.finishBackupRun(mode: scanMode)
                     self.activeBackupProgressViewModel = nil
                 }
+                return false
             } catch BackupRunReconcileError.reconcileRequired {
-                print("[Backup] Mismatch detected between local scan index cache and receiver database. Restarting backup with a full reconciliation scan...")
-                Task { @MainActor in
-                    self.activeBackupProgressViewModel = nil
-                    // Immediately trigger a new backup run which will use .full mode since requiresReconcile is now true
-                    Task {
-                        await self.startBackup()
-                    }
-                }
+                return true
             } catch {
                 print("[Backup] Backup run failed: \(error)")
                 await MainActor.run {
@@ -1301,11 +1296,22 @@ final class BackupDashboardViewModel: ObservableObject {
                     self.backupStatusMessage = "Backup failed: \(message)"
                     progressViewModel.markRunFailed(message)
                 }
+                return false
             }
         }
 
         progressViewModel.bindCancellation(to: backupTask)
-        await backupTask.value
+        let shouldRestart = await backupTask.value
+
+        if shouldRestart {
+            print("[Backup] Mismatch detected. Restarting with full scan...")
+            await MainActor.run {
+                self.isBackingUp = false
+                self.activeBackupProgressViewModel = nil
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            await startBackup()
+        }
     }
 
     func dismissBackupProgress() {

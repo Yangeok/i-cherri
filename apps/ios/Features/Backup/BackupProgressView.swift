@@ -331,8 +331,14 @@ public final class BackupProgressViewModel: ObservableObject {
         self.totalCount = totalCount
     }
 
-    public func bindCancellation(to task: Task<Void, Never>) {
-        cancellationToken = task
+    public func bindCancellation<Success>(to task: Task<Success, Never>) {
+        cancellationToken = Task {
+            await withTaskCancellationHandler {
+                _ = await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        }
     }
 
     public func setTotalCount(_ count: Int) {
