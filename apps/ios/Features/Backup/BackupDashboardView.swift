@@ -1082,6 +1082,17 @@ final class BackupDashboardViewModel: ObservableObject {
 
                 // ✅ Mac DB SSOT: 로컬 추정값을 버리고 Mac이 응답한 실제 완료 파일 수로 즉시 보정
                 let ssotCompletedCount = batchResponse.completedAssetCount
+
+                // ✅ Mismatch detection between local scan cache and Mac database SSOT
+                if scanPlan.mode == .incremental {
+                    let expectedCompletedCount = scanPlan.libraryAssetCount - scanPlan.runAssetCount
+                    if ssotCompletedCount < expectedCompletedCount {
+                        print("[Backup] Mismatch: Mac has \(ssotCompletedCount), expected \(expectedCompletedCount). Triggering full reconcile.")
+                        await self.scanIndexStore.markRequiresReconcile()
+                        throw BackupRunReconcileError.reconcileRequired
+                    }
+                }
+
                 await progressCoordinator.setInitialOverallBackedUpCount(ssotCompletedCount)
                 await MainActor.run {
                     progressViewModel.overallBackedUpCount = ssotCompletedCount
@@ -1273,6 +1284,15 @@ final class BackupDashboardViewModel: ObservableObject {
                     self.backupStatusMessage = "Backup canceled."
                     self.scanIndexStore.finishBackupRun(mode: scanMode)
                     self.activeBackupProgressViewModel = nil
+                }
+            } catch BackupRunReconcileError.reconcileRequired {
+                print("[Backup] Mismatch detected between local scan index cache and receiver database. Restarting backup with a full reconciliation scan...")
+                Task { @MainActor in
+                    self.activeBackupProgressViewModel = nil
+                    // Immediately trigger a new backup run which will use .full mode since requiresReconcile is now true
+                    Task {
+                        await self.startBackup()
+                    }
                 }
             } catch {
                 print("[Backup] Backup run failed: \(error)")
@@ -2146,6 +2166,7 @@ private enum UploadTaskOutcome: Sendable {
 private enum BackupRunReconcileError: LocalizedError {
     case unresolvedAssets([String])
     case exceededRetryRounds([String])
+    case reconcileRequired
 
     var errorDescription: String? {
         switch self {
@@ -2153,6 +2174,8 @@ private enum BackupRunReconcileError: LocalizedError {
             return "Receiver requested assets without local metadata: \(assetIDs.joined(separator: ", "))."
         case .exceededRetryRounds(let assetIDs):
             return "Receiver still reports missing assets after reconcile retries: \(assetIDs.joined(separator: ", "))."
+        case .reconcileRequired:
+            return "Local cache mismatch detected. Full reconcile required."
         }
     }
 }

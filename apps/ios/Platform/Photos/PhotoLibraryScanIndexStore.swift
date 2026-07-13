@@ -438,6 +438,18 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
         saveScanState(newScanState)
     }
 
+    func markRequiresReconcile() {
+        let receiverID = sanitizedActiveReceiverID
+        let scanState = getScanState(for: receiverID)
+        let newScanState = ScanStateRecord(
+            receiverID: receiverID,
+            fullScanCompleted: scanState.fullScanCompleted,
+            requiresReconcile: true,
+            incrementalRunsSinceReconcile: scanState.incrementalRunsSinceReconcile
+        )
+        saveScanState(newScanState)
+    }
+
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor [weak self] in
             guard let self else { return }
