@@ -23,7 +23,8 @@ public final class PhotoLibraryScanner {
     }
 
     public func totalAssetCount() -> Int {
-        return PHAsset.fetchAssets(with: nil).count
+        let options = PHFetchOptions()
+        return PHAsset.fetchAssets(with: options).count
     }
 
     // Scans all media assets and returns AssetMetadata array. Targets >1000 assets/sec.
@@ -79,7 +80,8 @@ public final class PhotoLibraryScanner {
     ) async -> [AssetMetadata] {
         guard !localIdentifiers.isEmpty else { return [] }
 
-        let result = PHAsset.fetchAssets(withLocalIdentifiers: localIdentifiers, options: nil)
+        let options = PHFetchOptions()
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: localIdentifiers, options: options)
         let count = result.count
         guard count > 0 else { return [] }
 
