@@ -1027,6 +1027,34 @@ final class BackupDashboardViewModel: ObservableObject {
                 try Task.checkCancellation()
 
                 if runAssets.isEmpty {
+                    // Resolve receiver and verify if Mac is missing any assets (SSOT mismatch check)
+                    let receiverURL = try await Self.resolveReceiverURLForBackup(
+                        pairedReceiver: pairedReceiverSnapshot,
+                        pairedReceiverID: pairedReceiverIDSnapshot,
+                        pairedReceiverName: pairedReceiverNameSnapshot,
+                        discoveredReceivers: discoveredReceiversSnapshot,
+                        storedReceiverURLString: storedReceiverURLString
+                    )
+                    
+                    let backupClient = BackupClient(receiverBaseURL: receiverURL, device: device, trustToken: trustToken)
+                    let backupRunID = UUID().uuidString
+                    let batchResponse = try await backupClient.checkBatch(
+                        backupRunID: backupRunID,
+                        candidates: [],
+                        totalAssetCount: scanPlan.libraryAssetCount,
+                        totalAssetBytes: scanPlan.libraryAssetBytes
+                    )
+                    
+                    let ssotCompletedCount = batchResponse.completedAssetCount
+                    if scanPlan.mode == .incremental {
+                        let expectedCompletedCount = scanPlan.libraryAssetCount
+                        if ssotCompletedCount < expectedCompletedCount {
+                            print("[Backup] Mismatch (empty runAssets): Mac has \(ssotCompletedCount), expected \(expectedCompletedCount). Triggering full reconcile.")
+                            await self.scanIndexStore.markRequiresReconcile()
+                            throw BackupRunReconcileError.reconcileRequired
+                        }
+                    }
+
                     await MainActor.run {
                         progressViewModel.update(
                             filename: scanPlan.mode == .incremental ? "Nothing new to back up" : "No media found",
@@ -1034,7 +1062,7 @@ final class BackupDashboardViewModel: ObservableObject {
                             success: 0,
                             duplicates: 0,
                             failed: 0,
-                            overallBackedUpCount: 0,
+                            overallBackedUpCount: ssotCompletedCount,
                             phase: .complete,
                             bytesPerSecond: 0,
                             totalBytes: scanPlan.runAssetBytes
