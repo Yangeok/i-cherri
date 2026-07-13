@@ -1729,81 +1729,101 @@ final class BackupDashboardViewModel: ObservableObject {
         return cleanHost.hasPrefix("fe80:")
     }
     
-    private static func resolveEndpoint(_ endpoint: NWEndpoint) async throws -> URL {
-        let params = NWParameters.tcp
-        if let ipOptions = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
-            ipOptions.version = .v4
+    private final class ResolversHolder: @unchecked Sendable {
+        static let shared = ResolversHolder()
+        private let lock = NSLock()
+        private var resolvers: [NetService: AnyObject] = [:]
+        
+        func add(service: NetService, delegate: AnyObject) {
+            lock.lock()
+            resolvers[service] = delegate
+            lock.unlock()
         }
-        let connection = NWConnection(to: endpoint, using: params)
+        
+        func remove(service: NetService) {
+            lock.lock()
+            resolvers.removeValue(forKey: service)
+            lock.unlock()
+        }
+    }
+
+    @MainActor
+    private static func resolveEndpoint(_ endpoint: NWEndpoint) async throws -> URL {
+        guard case .service(let name, let type, let domain, _) = endpoint else {
+            throw URLError(.cannotFindHost)
+        }
+        
+        let service = NetService(domain: domain, type: type, name: name)
         
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let lock = NSLock()
-                final class ResumeState: @unchecked Sendable {
-                    var hasResumed = false
-                }
-                let resumeState = ResumeState()
-
-                @Sendable func finish(_ result: Result<URL, Error>) {
-                    lock.lock()
-                    let shouldResume = !resumeState.hasResumed
-                    if shouldResume {
-                        resumeState.hasResumed = true
+                final class NetServiceDelegateImpl: NSObject, NetServiceDelegate, @unchecked Sendable {
+                    private let completion: @Sendable (Result<URL, Error>) -> Void
+                    private let lock = NSLock()
+                    private var hasCompleted = false
+                    private let service: NetService
+                    
+                    init(service: NetService, completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
+                        self.service = service
+                        self.completion = completion
                     }
-                    lock.unlock()
-
-                    guard shouldResume else { return }
-
-                    connection.cancel()
-                    switch result {
-                    case .success(let url):
-                        continuation.resume(returning: url)
-                    case .failure(let error):
-                        continuation.resume(throwing: error)
+                    
+                    private func cleanup() {
+                        ResolversHolder.shared.remove(service: service)
                     }
-                }
-
-                connection.stateUpdateHandler = { state in
-                    switch state {
-                    case .ready:
-                        if let innerEndpoint = connection.currentPath?.remoteEndpoint,
-                           case .hostPort(let host, let port) = innerEndpoint {
-                            let hostStr: String
-                            switch host {
-                            case .ipv4(let addr):
-                                hostStr = "\(addr)"
-                            case .ipv6(let addr):
-                                hostStr = "[\(addr)]"
-                            default:
-                                hostStr = "\(host)"
-                            }
-                            if let url = URL(string: "http://\(hostStr):\(port)") {
-                                finish(.success(url))
-                            } else {
-                                finish(.failure(URLError(.badURL)))
-                            }
-                        } else {
-                            finish(.failure(URLError(.cannotFindHost)))
+                    
+                    func netServiceDidResolveAddress(_ sender: NetService) {
+                        lock.lock()
+                        guard !hasCompleted else {
+                            lock.unlock()
+                            return
                         }
-                    case .waiting(let error):
-                        finish(.failure(error))
-                    case .failed(let error):
-                        finish(.failure(error))
-                    case .cancelled:
-                        finish(.failure(URLError(.cancelled)))
-                    default:
-                        break
+                        hasCompleted = true
+                        lock.unlock()
+                        
+                        defer { cleanup() }
+                        
+                        guard let hostName = sender.hostName else {
+                            completion(.failure(URLError(.cannotFindHost)))
+                            return
+                        }
+                        
+                        let port = sender.port
+                        let cleanHost = hostName.hasSuffix(".") ? String(hostName.dropLast()) : hostName
+                        
+                        if let url = URL(string: "http://\(cleanHost):\(port)") {
+                            completion(.success(url))
+                        } else {
+                            completion(.failure(URLError(.badURL)))
+                        }
+                    }
+                    
+                    func netService(_ sender: NetService, didNotResolve errorDict: [String : NSNumber]) {
+                        lock.lock()
+                        guard !hasCompleted else {
+                            lock.unlock()
+                            return
+                        }
+                        hasCompleted = true
+                        lock.unlock()
+                        
+                        cleanup()
+                        completion(.failure(URLError(.cannotFindHost)))
                     }
                 }
-                connection.start(queue: .global(qos: .userInitiated))
-
-                Task.detached(priority: .userInitiated) {
-                    try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
-                    finish(.failure(URLError(.timedOut)))
+                
+                let delegate = NetServiceDelegateImpl(service: service) { result in
+                    continuation.resume(with: result)
                 }
+                
+                service.delegate = delegate
+                ResolversHolder.shared.add(service: service, delegate: delegate)
+                service.resolve(withTimeout: 4.0)
             }
         } onCancel: {
-            connection.cancel()
+            service.stop()
+            ResolversHolder.shared.remove(service: service)
         }
     }
 }
