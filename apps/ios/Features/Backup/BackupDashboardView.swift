@@ -1647,7 +1647,11 @@ final class BackupDashboardViewModel: ObservableObject {
     
     private static func resolveEndpoint(_ endpoint: NWEndpoint) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
-            let connection = NWConnection(to: endpoint, using: .tcp)
+            let params = NWParameters.tcp
+            if let ipOptions = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
+                ipOptions.version = .v4
+            }
+            let connection = NWConnection(to: endpoint, using: params)
             let lock = NSLock()
             final class ResumeState: @unchecked Sendable {
                 var hasResumed = false

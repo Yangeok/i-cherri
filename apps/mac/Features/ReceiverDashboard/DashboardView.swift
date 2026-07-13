@@ -1946,7 +1946,8 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
         let workload: AssetHistoryThumbnailWorkloadKind
     }
 
-    private var queuedRequests: [Request] = []
+    private var queuedPhotoRequests: [Request] = []
+    private var queuedVideoRequests: [Request] = []
     private var queuedRequestSet: Set<Request> = []
     private var activePhotoWorkerCount = 0
     private var activeVideoWorkerCount = 0
@@ -1991,20 +1992,35 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
         guard !requests.isEmpty else { return }
 
         for request in requests {
-            if let existingIndex = queuedRequests.firstIndex(where: { $0.relativePath == request.relativePath && $0.size == request.size }) {
-                let existingRequest = queuedRequests[existingIndex]
-                if request.workload != .backgroundBackfill && existingRequest.workload == .backgroundBackfill {
-                    queuedRequests.remove(at: existingIndex)
-                    queuedRequestSet.remove(existingRequest)
-                    queuedRequestSet.insert(request)
-                    queuedRequests.insert(request, at: 0)
+            let isVideo = request.mediaType.caseInsensitiveCompare("video") == .orderedSame
+            if queuedRequestSet.contains(request) {
+                if request.workload != .backgroundBackfill {
+                    if isVideo {
+                        if let existingIndex = queuedVideoRequests.firstIndex(of: request) {
+                            queuedVideoRequests.remove(at: existingIndex)
+                            queuedVideoRequests.insert(request, at: 0)
+                        }
+                    } else {
+                        if let existingIndex = queuedPhotoRequests.firstIndex(of: request) {
+                            queuedPhotoRequests.remove(at: existingIndex)
+                            queuedPhotoRequests.insert(request, at: 0)
+                        }
+                    }
                 }
             } else {
                 queuedRequestSet.insert(request)
-                if request.workload == .backgroundBackfill {
-                    queuedRequests.append(request)
+                if isVideo {
+                    if request.workload == .backgroundBackfill {
+                        queuedVideoRequests.append(request)
+                    } else {
+                        queuedVideoRequests.insert(request, at: 0)
+                    }
                 } else {
-                    queuedRequests.insert(request, at: 0)
+                    if request.workload == .backgroundBackfill {
+                        queuedPhotoRequests.append(request)
+                    } else {
+                        queuedPhotoRequests.insert(request, at: 0)
+                    }
                 }
             }
         }
@@ -2029,22 +2045,19 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
     }
 
     private func reserveNextRequest() -> Request? {
-        guard !queuedRequests.isEmpty else { return nil }
-
         let profile = AssetHistoryThumbnailWorkloadProfile.current()
 
-        for (index, request) in queuedRequests.enumerated() {
-            let isVideo = request.mediaType.caseInsensitiveCompare("video") == .orderedSame
-            if isVideo {
-                guard activeVideoWorkerCount < profile.maxConcurrentVideoPrefetches else { continue }
-                activeVideoWorkerCount += 1
-            } else {
-                guard activePhotoWorkerCount < profile.maxConcurrentPhotoPrefetches else { continue }
-                activePhotoWorkerCount += 1
-            }
-
-            queuedRequests.remove(at: index)
+        if activeVideoWorkerCount < profile.maxConcurrentVideoPrefetches, !queuedVideoRequests.isEmpty {
+            let request = queuedVideoRequests.removeFirst()
             queuedRequestSet.remove(request)
+            activeVideoWorkerCount += 1
+            return request
+        }
+
+        if activePhotoWorkerCount < profile.maxConcurrentPhotoPrefetches, !queuedPhotoRequests.isEmpty {
+            let request = queuedPhotoRequests.removeFirst()
+            queuedRequestSet.remove(request)
+            activePhotoWorkerCount += 1
             return request
         }
 
