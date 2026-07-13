@@ -9,6 +9,25 @@ public protocol BackupIndexQuerying: Sendable {
     func findByCandidate(_ candidate: AssetMetadata) async throws -> BackupIndexEntry?
     func findBySHA256(_ sha256: String) async throws -> BackupIndexEntry?
     func registerDuplicate(candidate: AssetMetadata, duplicateOfBackupID: String) async throws
+    
+    // Batch query methods to prevent sequential database round-trips
+    func fetchBatchEntries(candidates: [AssetMetadata]) async throws -> (exactMatches: [String: BackupIndexEntry], fingerprintMatches: [String: BackupIndexEntry])
+}
+
+public extension BackupIndexQuerying {
+    func fetchBatchEntries(candidates: [AssetMetadata]) async throws -> (exactMatches: [String: BackupIndexEntry], fingerprintMatches: [String: BackupIndexEntry]) {
+        var exactMatches: [String: BackupIndexEntry] = [:]
+        var fingerprintMatches: [String: BackupIndexEntry] = [:]
+        for candidate in candidates {
+            if let exact = try await findByDeviceAndAssetID(deviceID: candidate.deviceID, assetLocalID: candidate.assetLocalID) {
+                exactMatches["\(candidate.deviceID):\(candidate.assetLocalID)"] = exact
+            }
+            if let fp = try await findByCandidate(candidate) {
+                fingerprintMatches[candidate.quickFingerprint] = fp
+            }
+        }
+        return (exactMatches, fingerprintMatches)
+    }
 }
 
 public struct BackupIndexEntry: Sendable {
@@ -37,17 +56,28 @@ public actor CheckBatchProcessor {
         var alreadyBackedUp: [String] = []
         var duplicates: [String] = []
 
+        // Batch fetch all exact and fingerprint entries
+        let (exactMatches, fingerprintMatches) = try await index.fetchBatchEntries(candidates: request.candidates)
+
         for candidate in request.candidates {
-            let decision = try await classify(candidate)
-            switch decision {
-            case .required(let reason):
-                requiredUploads.append(UploadRequirement(assetLocalID: candidate.assetLocalID, uploadReason: reason))
+            let exactEntry = exactMatches["\(candidate.deviceID):\(candidate.assetLocalID)"]
+            let fingerprintEntry = fingerprintMatches[candidate.quickFingerprint]
+
+            let verdict = DeduplicationPolicy.evaluate(
+                exactMatch: exactEntry,
+                fingerprintMatch: fingerprintEntry
+            )
+
+            switch verdict {
             case .alreadyBackedUp:
                 alreadyBackedUp.append(candidate.assetLocalID)
-            case .duplicate(let duplicateOfBackupID):
+            case .duplicate:
+                let duplicateOfBackupID = fingerprintEntry?.backupID ?? ""
                 duplicates.append(candidate.assetLocalID)
                 // Register duplicate record in database
                 try await index.registerDuplicate(candidate: candidate, duplicateOfBackupID: duplicateOfBackupID)
+            case .upload:
+                requiredUploads.append(UploadRequirement(assetLocalID: candidate.assetLocalID, uploadReason: .notFound))
             }
         }
 
@@ -56,36 +86,5 @@ public actor CheckBatchProcessor {
             alreadyBackedUp: alreadyBackedUp,
             duplicates: duplicates
         )
-    }
-
-    // MARK: - 3-Stage Deduplication
-
-    private enum Decision {
-        case required(UploadReason)
-        case alreadyBackedUp
-        case duplicate(duplicateOfBackupID: String)
-    }
-
-    private func classify(_ candidate: AssetMetadata) async throws -> Decision {
-        let exactEntry = try await index.findByDeviceAndAssetID(
-            deviceID: candidate.deviceID,
-            assetLocalID: candidate.assetLocalID
-        )
-        let fingerprintEntry = try await index.findByCandidate(candidate)
-
-        let verdict = DeduplicationPolicy.evaluate(
-            exactMatch: exactEntry,
-            fingerprintMatch: fingerprintEntry
-        )
-
-        switch verdict {
-        case .alreadyBackedUp:
-            return .alreadyBackedUp
-        case .duplicate:
-            let duplicateOfBackupID = fingerprintEntry?.backupID ?? ""
-            return .duplicate(duplicateOfBackupID: duplicateOfBackupID)
-        case .upload:
-            return .required(.notFound)
-        }
     }
 }

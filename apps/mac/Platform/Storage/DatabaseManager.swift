@@ -1036,6 +1036,45 @@ extension DatabaseManager: BackupIndexQuerying {
         return nil
     }
 
+    public func fetchBatchEntries(candidates: [AssetMetadata]) async throws -> (exactMatches: [String: BackupIndexEntry], fingerprintMatches: [String: BackupIndexEntry]) {
+        guard !candidates.isEmpty else { return ([:], [:]) }
+        
+        return try await queue.read { db in
+            var exactMatches: [String: BackupIndexEntry] = [:]
+            var fingerprintMatches: [String: BackupIndexEntry] = [:]
+            
+            // Chunk to avoid SQLite parameters limit
+            let chunkSize = 500
+            for i in stride(from: 0, to: candidates.count, by: chunkSize) {
+                let end = min(i + chunkSize, candidates.count)
+                let chunk = Array(candidates[i..<end])
+                
+                let deviceIDs = chunk.map { $0.deviceID }
+                let assetLocalIDs = chunk.map { $0.assetLocalID }
+                
+                let exactRecords = try BackupAssetRecord
+                    .filter(deviceIDs.contains(Column("device_id")) && assetLocalIDs.contains(Column("asset_local_id")))
+                    .fetchAll(db)
+                
+                for r in exactRecords {
+                    exactMatches["\(r.deviceId):\(r.assetLocalId)"] = BackupIndexEntry(backupID: r.backupId, status: r.status, contentSHA256: r.contentSha256)
+                }
+                
+                let fingerprints = chunk.map { $0.quickFingerprint }
+                let fingerprintRecords = try BackupAssetRecord
+                    .filter(fingerprints.contains(Column("quick_fingerprint")))
+                    .fetchAll(db)
+                
+                for r in fingerprintRecords {
+                    let fp = r.quickFingerprint
+                    fingerprintMatches[fp] = BackupIndexEntry(backupID: r.backupId, status: r.status, contentSHA256: r.contentSha256)
+                }
+            }
+            
+            return (exactMatches, fingerprintMatches)
+        }
+    }
+
     public func registerDuplicate(candidate: AssetMetadata, duplicateOfBackupID: String) async throws {
         if let _ = try fetchAsset(deviceId: candidate.deviceID, assetLocalId: candidate.assetLocalID) {
             return

@@ -1305,7 +1305,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     progressViewModel.setPhase(.complete)
                 }
                 return false
-            } catch is CancellationError {
+            } catch where error is CancellationError || (error as? URLError)?.code == .cancelled {
                 let scanMode = executedScanMode
                 await MainActor.run {
                     self.backupStatusMessage = "Backup canceled."
@@ -1702,75 +1702,80 @@ final class BackupDashboardViewModel: ObservableObject {
     }
     
     private static func resolveEndpoint(_ endpoint: NWEndpoint) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            let params = NWParameters.tcp
-            if let ipOptions = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
-                ipOptions.version = .v4
-            }
-            let connection = NWConnection(to: endpoint, using: params)
-            let lock = NSLock()
-            final class ResumeState: @unchecked Sendable {
-                var hasResumed = false
-            }
-            let resumeState = ResumeState()
-
-            @Sendable func finish(_ result: Result<URL, Error>) {
-                lock.lock()
-                let shouldResume = !resumeState.hasResumed
-                if shouldResume {
-                    resumeState.hasResumed = true
+        let params = NWParameters.tcp
+        if let ipOptions = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
+            ipOptions.version = .v4
+        }
+        let connection = NWConnection(to: endpoint, using: params)
+        
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let lock = NSLock()
+                final class ResumeState: @unchecked Sendable {
+                    var hasResumed = false
                 }
-                lock.unlock()
+                let resumeState = ResumeState()
 
-                guard shouldResume else { return }
-
-                connection.cancel()
-                switch result {
-                case .success(let url):
-                    continuation.resume(returning: url)
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                }
-            }
-
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    if let innerEndpoint = connection.currentPath?.remoteEndpoint,
-                       case .hostPort(let host, let port) = innerEndpoint {
-                        let hostStr: String
-                        switch host {
-                        case .ipv4(let addr):
-                            hostStr = "\(addr)"
-                        case .ipv6(let addr):
-                            hostStr = "[\(addr)]"
-                        default:
-                            hostStr = "\(host)"
-                        }
-                        if let url = URL(string: "http://\(hostStr):\(port)") {
-                            finish(.success(url))
-                        } else {
-                            finish(.failure(URLError(.badURL)))
-                        }
-                    } else {
-                        finish(.failure(URLError(.cannotFindHost)))
+                @Sendable func finish(_ result: Result<URL, Error>) {
+                    lock.lock()
+                    let shouldResume = !resumeState.hasResumed
+                    if shouldResume {
+                        resumeState.hasResumed = true
                     }
-                case .waiting(let error):
-                    finish(.failure(error))
-                case .failed(let error):
-                    finish(.failure(error))
-                case .cancelled:
-                    finish(.failure(URLError(.cancelled)))
-                default:
-                    break
+                    lock.unlock()
+
+                    guard shouldResume else { return }
+
+                    connection.cancel()
+                    switch result {
+                    case .success(let url):
+                        continuation.resume(returning: url)
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
+                    }
+                }
+
+                connection.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready:
+                        if let innerEndpoint = connection.currentPath?.remoteEndpoint,
+                           case .hostPort(let host, let port) = innerEndpoint {
+                            let hostStr: String
+                            switch host {
+                            case .ipv4(let addr):
+                                hostStr = "\(addr)"
+                            case .ipv6(let addr):
+                                hostStr = "[\(addr)]"
+                            default:
+                                hostStr = "\(host)"
+                            }
+                            if let url = URL(string: "http://\(hostStr):\(port)") {
+                                finish(.success(url))
+                            } else {
+                                finish(.failure(URLError(.badURL)))
+                            }
+                        } else {
+                            finish(.failure(URLError(.cannotFindHost)))
+                        }
+                    case .waiting(let error):
+                        finish(.failure(error))
+                    case .failed(let error):
+                        finish(.failure(error))
+                    case .cancelled:
+                        finish(.failure(URLError(.cancelled)))
+                    default:
+                        break
+                    }
+                }
+                connection.start(queue: .global(qos: .userInitiated))
+
+                Task.detached(priority: .userInitiated) {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+                    finish(.failure(URLError(.timedOut)))
                 }
             }
-            connection.start(queue: .global(qos: .userInitiated))
-
-            Task.detached(priority: .userInitiated) {
-                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
-                finish(.failure(URLError(.timedOut)))
-            }
+        } onCancel: {
+            connection.cancel()
         }
     }
 }
