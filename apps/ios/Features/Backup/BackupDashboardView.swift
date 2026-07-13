@@ -25,6 +25,30 @@ public struct BackupDashboardView: View {
                 backgroundGradient
                 ScrollView {
                     VStack(spacing: 24) {
+                        // 사진 권한이 제한(Selected Photos)인 경우 노란색 경고 배너 표시
+                        if viewModel.photoPermissionStatus == .limited {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.orange)
+                                    Text("사진 접근 권한이 제한됨 (Selected Photos)")
+                                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                                        .foregroundColor(.orange)
+                                }
+                                Text("아이폰 설정에서 '선택된 사진만 허용'으로 설정되어 있어 전체 사진 중 일부(\(viewModel.totalLibraryAssetCount)장)만 접근 가능합니다. 남은 모든 사진을 백업하려면 아래와 같이 변경해 주세요:\n\n1. 아이폰의 **[설정]** 앱 실행\n2. 스크롤을 내려 **[iCherri]** 선택\n3. **[사진]** 메뉴 선택\n4. **[모든 사진]** 접근 권한으로 변경")
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(14)
+                            .background(Color.orange.opacity(0.12))
+                            .cornerRadius(16)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                            )
+                            .padding(.horizontal)
+                        }
+
                         // 1. 단일 대화형 대시보드 시뮬레이터 디자인 본판 이식
                         simulatorSection
                         
@@ -232,7 +256,7 @@ public struct BackupDashboardView: View {
                 
                 // 사진 권한 카드 (탭 시 실제 사진 라이브러리 접근 요청 연동)
                 Button(action: {
-                    if viewModel.photoPermissionStatus != .granted {
+                    if viewModel.photoPermissionStatus != .granted && viewModel.photoPermissionStatus != .limited {
                         Task {
                             await viewModel.requestPhotoPermission()
                         }
@@ -244,15 +268,15 @@ public struct BackupDashboardView: View {
                             .foregroundColor(.secondary)
                         
                         HStack {
-                            Text(viewModel.photoPermissionStatus == .granted ? "허용됨" : (viewModel.photoPermissionStatus == .denied ? "차단됨" : "확인 중"))
+                            Text(viewModel.photoPermissionStatus == .granted ? "허용됨" : (viewModel.photoPermissionStatus == .limited ? "부분 허용됨" : (viewModel.photoPermissionStatus == .denied ? "차단됨" : "확인 중")))
                                 .font(.system(.footnote, design: .rounded, weight: .semibold))
-                                .foregroundColor(viewModel.photoPermissionStatus == .granted ? .green : (viewModel.photoPermissionStatus == .denied ? .red : .orange))
+                                .foregroundColor(viewModel.photoPermissionStatus == .granted ? .green : (viewModel.photoPermissionStatus == .limited ? .orange : (viewModel.photoPermissionStatus == .denied ? .red : .orange)))
                             Spacer()
                             Image(systemName: viewModel.photoPermissionStatus == .granted ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                                .foregroundColor(viewModel.photoPermissionStatus == .granted ? .green : (viewModel.photoPermissionStatus == .denied ? .red : .orange))
+                                .foregroundColor(viewModel.photoPermissionStatus == .granted ? .green : (viewModel.photoPermissionStatus == .limited ? .orange : (viewModel.photoPermissionStatus == .denied ? .red : .orange)))
                         }
                         
-                        Text(viewModel.photoPermissionStatus == .granted ? "라이브러리 접근 허가" : "탭하여 권한 요청")
+                        Text(viewModel.photoPermissionStatus == .granted ? "라이브러리 접근 허가" : (viewModel.photoPermissionStatus == .limited ? "선택된 사진만 허용됨 (탭하여 권한 설명)" : "탭하여 권한 요청"))
                             .font(.system(.caption2, design: .rounded))
                             .foregroundColor(.secondary)
                     }
@@ -427,7 +451,7 @@ public struct BackupDashboardView: View {
 
 // MARK: - ViewModel
 
-enum PermissionStatus { case granted, denied, unknown }
+enum PermissionStatus { case granted, limited, denied, unknown }
 
 enum UploadConcurrencyPolicy {
     static let hardCap = 4
@@ -468,6 +492,7 @@ final class BackupDashboardViewModel: ObservableObject {
     private static let maxConcurrentUploads = UploadConcurrencyPolicy.hardCap
 
     @Published var photoPermissionStatus: PermissionStatus = .unknown
+    @Published var totalLibraryAssetCount = 0
     @Published var localNetworkStatus: PermissionStatus = .unknown
     @Published var discoveredReceivers: [DiscoveredReceiver] = []
     @Published var pairedReceiver: DiscoveredReceiver?
@@ -820,7 +845,7 @@ final class BackupDashboardViewModel: ObservableObject {
     }
 
     func reevaluateAutomaticBackup() async {
-        guard photoPermissionStatus == .granted else {
+        guard photoPermissionStatus == .granted || photoPermissionStatus == .limited else {
             autoBackupEligibilityMessage = "Automatic backup needs Photos access."
             await refreshAutoBackupStatusPresentation(fallbackMessage: autoBackupEligibilityMessage)
             return
@@ -877,7 +902,7 @@ final class BackupDashboardViewModel: ObservableObject {
     }
 
     func startBackup() async {
-        guard photoPermissionStatus == .granted else {
+        guard photoPermissionStatus == .granted || photoPermissionStatus == .limited else {
             backupStatusMessage = "Allow Photos access before starting backup."
             return
         }
@@ -892,6 +917,7 @@ final class BackupDashboardViewModel: ObservableObject {
         isBackingUp = true
         backupStatusMessage = "Scanning photo library..."
         let device = currentDeviceInfo()
+        self.totalLibraryAssetCount = scanner.totalAssetCount()
         let progressViewModel = BackupProgressViewModel(totalCount: 0)
         progressViewModel.setPhase(.scanning)
         progressViewModel.onRetryFailedUploads = { [weak self] assetIDs in
@@ -1345,6 +1371,7 @@ final class BackupDashboardViewModel: ObservableObject {
     private func updatePhotoPermission() {
         let status = scanner.currentAuthorizationStatus()
         photoPermissionStatus = permissionStatus(for: status)
+        totalLibraryAssetCount = scanner.totalAssetCount()
     }
 
     private func loadAutoBackupPolicy() async {
@@ -1429,8 +1456,10 @@ final class BackupDashboardViewModel: ObservableObject {
 
     private func permissionStatus(for status: PhotoLibraryAuthStatus) -> PermissionStatus {
         switch status {
-        case .authorized, .limited:
+        case .authorized:
             return .granted
+        case .limited:
+            return .limited
         case .denied:
             return .denied
         case .notDetermined:
