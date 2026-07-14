@@ -491,6 +491,12 @@ enum UploadConcurrencyPolicy {
 final class BackupDashboardViewModel: ObservableObject {
     private static let maxConcurrentUploads = UploadConcurrencyPolicy.hardCap
 
+    private let resolver: any ReceiverResolver
+
+    init(resolver: any ReceiverResolver = Container.shared.receiverResolver()) {
+        self.resolver = resolver
+    }
+
     @Published var photoPermissionStatus: PermissionStatus = .unknown
     @Published var totalLibraryAssetCount = 0
     @Published var localNetworkStatus: PermissionStatus = .unknown
@@ -633,7 +639,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     self.pairedReceiver = matchingReceiver
                     Task {
                         do {
-                            let newBaseURL = try await Self.resolveEndpoint(matchingReceiver.endpoint)
+                            let newBaseURL = try await self.resolver.resolve(matchingReceiver.endpoint)
                             let currentStoredURL = UserDefaults.standard.string(forKey: self.receiverURLKey)
                             if newBaseURL.absoluteString != currentStoredURL {
                                 UserDefaults.standard.set(newBaseURL.absoluteString, forKey: self.receiverURLKey)
@@ -650,7 +656,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     if let endpoint = self.pairedReceiver?.endpoint {
                         Task {
                             do {
-                                let newBaseURL = try await Self.resolveEndpoint(endpoint)
+                                let newBaseURL = try await self.resolver.resolve(endpoint)
                                 UserDefaults.standard.set(newBaseURL.absoluteString, forKey: self.receiverURLKey)
                                 self.startPingTimer()
                             } catch {
@@ -663,7 +669,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     if let endpoint = self.pairedReceiver?.endpoint {
                         Task {
                             do {
-                                let newBaseURL = try await Self.resolveEndpoint(endpoint)
+                                let newBaseURL = try await self.resolver.resolve(endpoint)
                                 UserDefaults.standard.set(newBaseURL.absoluteString, forKey: self.receiverURLKey)
                                 self.startPingTimer()
                             } catch {
@@ -757,7 +763,7 @@ final class BackupDashboardViewModel: ObservableObject {
 
         // Resolve endpoint and send pair request to Mac server
         do {
-            let baseURL = try await Self.resolveEndpoint(receiver.endpoint)
+            let baseURL = try await self.resolver.resolve(receiver.endpoint)
             let device = currentDeviceInfo()
             let pairRequest = PairingStartRequest(device: device)
             
@@ -1028,7 +1034,7 @@ final class BackupDashboardViewModel: ObservableObject {
 
                 if runAssets.isEmpty {
                     // Resolve receiver and verify if Mac is missing any assets (SSOT mismatch check)
-                    let receiverURL = try await Self.resolveReceiverURLForBackup(
+                    let receiverURL = try await self.resolveReceiverURLForBackup(
                         pairedReceiver: pairedReceiverSnapshot,
                         pairedReceiverID: pairedReceiverIDSnapshot,
                         pairedReceiverName: pairedReceiverNameSnapshot,
@@ -1109,7 +1115,7 @@ final class BackupDashboardViewModel: ObservableObject {
                     }
                 }
 
-                let receiverURL = try await Self.resolveReceiverURLForBackup(
+                let receiverURL = try await self.resolveReceiverURLForBackup(
                     pairedReceiver: pairedReceiverSnapshot,
                     pairedReceiverID: pairedReceiverIDSnapshot,
                     pairedReceiverName: pairedReceiverNameSnapshot,
@@ -1679,7 +1685,7 @@ final class BackupDashboardViewModel: ObservableObject {
         return generated
     }
 
-    private static func resolveReceiverURLForBackup(
+    func resolveReceiverURLForBackup(
         pairedReceiver: DiscoveredReceiver?,
         pairedReceiverID: String?,
         pairedReceiverName: String?,
@@ -1689,7 +1695,7 @@ final class BackupDashboardViewModel: ObservableObject {
         // 1. First priority: Use the stored receiver URL (which is kept updated by Auto-Healing)
         if let storedReceiverURLString,
            let receiverURL = URL(string: storedReceiverURLString),
-           !isLinkLocalReceiverURL(receiverURL) {
+           !Self.isLinkLocalReceiverURL(receiverURL) {
             return receiverURL
         }
 
@@ -1697,7 +1703,7 @@ final class BackupDashboardViewModel: ObservableObject {
         if let pairedReceiverName {
             do {
                 let serviceEndpoint = NWEndpoint.service(name: pairedReceiverName, type: "_icherri._tcp", domain: "local.", interface: nil)
-                return try await resolveEndpoint(serviceEndpoint)
+                return try await resolver.resolve(serviceEndpoint)
             } catch {
                 print("[resolveReceiverURL] Failed to resolve pairedReceiverName directly: \(error)")
             }
@@ -1706,7 +1712,7 @@ final class BackupDashboardViewModel: ObservableObject {
         // 3. Third priority: Dynamically resolve Bonjour endpoints from active browse results
         if let pairedReceiver {
             do {
-                return try await resolveEndpoint(pairedReceiver.endpoint)
+                return try await resolver.resolve(pairedReceiver.endpoint)
             } catch {
                 print("[resolveReceiverURL] Failed to resolve pairedReceiver endpoint: \(error)")
             }
@@ -1715,7 +1721,7 @@ final class BackupDashboardViewModel: ObservableObject {
         if let pairedReceiverID,
            let discoveredReceiver = discoveredReceivers.first(where: { $0.id == pairedReceiverID }) {
             do {
-                return try await resolveEndpoint(discoveredReceiver.endpoint)
+                return try await resolver.resolve(discoveredReceiver.endpoint)
             } catch {
                 print("[resolveReceiverURL] Failed to resolve pairedReceiverID endpoint: \(error)")
             }
@@ -1729,104 +1735,7 @@ final class BackupDashboardViewModel: ObservableObject {
         let cleanHost = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         return cleanHost.hasPrefix("fe80:")
     }
-    
-    private final class ResolversHolder: @unchecked Sendable {
-        static let shared = ResolversHolder()
-        private let lock = NSLock()
-        private var resolvers: [NetService: AnyObject] = [:]
-        
-        func add(service: NetService, delegate: AnyObject) {
-            lock.lock()
-            resolvers[service] = delegate
-            lock.unlock()
-        }
-        
-        func remove(service: NetService) {
-            lock.lock()
-            resolvers.removeValue(forKey: service)
-            lock.unlock()
-        }
-    }
 
-    @MainActor
-    private static func resolveEndpoint(_ endpoint: NWEndpoint) async throws -> URL {
-        guard case .service(let name, let type, let domain, _) = endpoint else {
-            throw URLError(.cannotFindHost)
-        }
-        
-        let service = NetService(domain: domain, type: type, name: name)
-        
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                let lock = NSLock()
-                final class NetServiceDelegateImpl: NSObject, NetServiceDelegate, @unchecked Sendable {
-                    private let completion: @Sendable (Result<URL, Error>) -> Void
-                    private let lock = NSLock()
-                    private var hasCompleted = false
-                    private let service: NetService
-                    
-                    init(service: NetService, completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
-                        self.service = service
-                        self.completion = completion
-                    }
-                    
-                    private func cleanup() {
-                        ResolversHolder.shared.remove(service: service)
-                    }
-                    
-                    func netServiceDidResolveAddress(_ sender: NetService) {
-                        lock.lock()
-                        guard !hasCompleted else {
-                            lock.unlock()
-                            return
-                        }
-                        hasCompleted = true
-                        lock.unlock()
-                        
-                        defer { cleanup() }
-                        
-                        guard let hostName = sender.hostName else {
-                            completion(.failure(URLError(.cannotFindHost)))
-                            return
-                        }
-                        
-                        let port = sender.port
-                        let cleanHost = hostName.hasSuffix(".") ? String(hostName.dropLast()) : hostName
-                        
-                        if let url = URL(string: "http://\(cleanHost):\(port)") {
-                            completion(.success(url))
-                        } else {
-                            completion(.failure(URLError(.badURL)))
-                        }
-                    }
-                    
-                    func netService(_ sender: NetService, didNotResolve errorDict: [String : NSNumber]) {
-                        lock.lock()
-                        guard !hasCompleted else {
-                            lock.unlock()
-                            return
-                        }
-                        hasCompleted = true
-                        lock.unlock()
-                        
-                        cleanup()
-                        completion(.failure(URLError(.cannotFindHost)))
-                    }
-                }
-                
-                let delegate = NetServiceDelegateImpl(service: service) { result in
-                    continuation.resume(with: result)
-                }
-                
-                service.delegate = delegate
-                ResolversHolder.shared.add(service: service, delegate: delegate)
-                service.resolve(withTimeout: 4.0)
-            }
-        } onCancel: {
-            service.stop()
-            ResolversHolder.shared.remove(service: service)
-        }
-    }
 }
 
 private func backupFailureReason(_ error: Error) -> String {
