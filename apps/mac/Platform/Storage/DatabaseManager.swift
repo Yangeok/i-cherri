@@ -950,34 +950,47 @@ actor DatabaseManager {
         let duplicateCount: Int
         let failedCount: Int
         let lastBackupDate: Date?
+        let photoCount: Int
+        let videoCount: Int
+        /// Total bytes physically stored on disk (completed assets only; duplicates share the original file).
+        let totalByteSize: Int64
     }
 
     func fetchBackupStatsByDevice() throws -> [String: DeviceBackupStats] {
         try queue.read { db in
             var result: [String: DeviceBackupStats] = [:]
             let rows = try Row.fetchAll(db, sql: """
-                SELECT 
+                SELECT
                     device_id,
                     SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
                     SUM(CASE WHEN status = 'duplicate' THEN 1 ELSE 0 END) as duplicate_count,
                     SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count,
-                    MAX(completed_at) as last_backup
+                    MAX(completed_at) as last_backup,
+                    SUM(CASE WHEN status IN ('completed', 'duplicate') AND media_type = 'video' THEN 1 ELSE 0 END) as video_count,
+                    SUM(CASE WHEN status IN ('completed', 'duplicate') AND media_type != 'video' THEN 1 ELSE 0 END) as photo_count,
+                    SUM(CASE WHEN status = 'completed' THEN byte_size ELSE 0 END) as total_byte_size
                 FROM backup_assets
                 GROUP BY device_id
             """)
-            
+
             for row in rows {
                 let deviceID: String = row["device_id"]
                 let completed: Int = row["completed_count"] ?? 0
                 let duplicate: Int = row["duplicate_count"] ?? 0
                 let failed: Int = row["failed_count"] ?? 0
                 let lastBackup: Date? = row["last_backup"]
-                
+                let videoCount: Int = row["video_count"] ?? 0
+                let photoCount: Int = row["photo_count"] ?? 0
+                let totalByteSize: Int64 = row["total_byte_size"] ?? 0
+
                 result[deviceID] = DeviceBackupStats(
                     completedCount: completed,
                     duplicateCount: duplicate,
                     failedCount: failed,
-                    lastBackupDate: lastBackup
+                    lastBackupDate: lastBackup,
+                    photoCount: photoCount,
+                    videoCount: videoCount,
+                    totalByteSize: totalByteSize
                 )
             }
             return result

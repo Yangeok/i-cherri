@@ -154,8 +154,15 @@ struct DashboardView: View {
                             detailGPSLocation = nil
                             detailCoordinate = nil
                         }
+                    },
+                    onPrevious: viewModel.neighborAsset(of: asset, offset: -1).map { previousAsset in
+                        { showDetailAsset(previousAsset) }
+                    },
+                    onNext: viewModel.neighborAsset(of: asset, offset: 1).map { nextAsset in
+                        { showDetailAsset(nextAsset) }
                     }
                 )
+                .id(asset.backupId)
                 .transition(.opacity)
             }
         }
@@ -221,7 +228,19 @@ struct DashboardView: View {
             Text(historySummary(for: device))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Text(mediaCountSummary(for: device))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+    }
+
+    private func mediaCountSummary(for device: PairedDeviceRecord) -> String {
+        let photoCount = viewModel.photoCount(for: device.deviceId)
+        let videoCount = viewModel.videoCount(for: device.deviceId)
+        let totalByteSize = viewModel.totalByteSize(for: device.deviceId)
+        let formattedSize = ByteCountFormatter.string(fromByteCount: totalByteSize, countStyle: .file)
+        return "사진 \(photoCount.formatted())장 • 영상 \(videoCount.formatted())개 • 총 용량 \(formattedSize)"
     }
 
     private var historySearchBar: some View {
@@ -907,6 +926,12 @@ struct DashboardView: View {
             assetActionError = missingFileMessage(for: asset)
             return
         }
+        showDetailAsset(asset)
+    }
+
+    private func showDetailAsset(_ asset: BackupAssetRecord) {
+        detailGPSLocation = nil
+        detailCoordinate = nil
         selectedDetailAsset = asset
     }
 
@@ -1144,6 +1169,13 @@ final class DashboardViewModel: ObservableObject {
         []
     }
 
+    func neighborAsset(of asset: BackupAssetRecord, offset: Int) -> BackupAssetRecord? {
+        guard let currentIndex = filteredAssets.firstIndex(where: { $0.backupId == asset.backupId }) else { return nil }
+        let targetIndex = currentIndex + offset
+        guard filteredAssets.indices.contains(targetIndex) else { return nil }
+        return filteredAssets[targetIndex]
+    }
+
     func assetCount(for deviceId: String) -> Int {
         deviceStats[deviceId]?.completedCount ?? 0
     }
@@ -1158,6 +1190,18 @@ final class DashboardViewModel: ObservableObject {
 
     func lastBackupDate(for deviceId: String) -> Date? {
         deviceStats[deviceId]?.lastBackupDate
+    }
+
+    func photoCount(for deviceId: String) -> Int {
+        deviceStats[deviceId]?.photoCount ?? 0
+    }
+
+    func videoCount(for deviceId: String) -> Int {
+        deviceStats[deviceId]?.videoCount ?? 0
+    }
+
+    func totalByteSize(for deviceId: String) -> Int64 {
+        deviceStats[deviceId]?.totalByteSize ?? 0
     }
 
     func latestCoverageSummary(for deviceId: String) -> BackupRunCoverageSummary? {
@@ -1810,8 +1854,7 @@ private enum HardwareCapabilities {
     }()
 }
 
-@MainActor
-final class AssetHistoryThumbnailCache {
+actor AssetHistoryThumbnailCache {
     static let shared = AssetHistoryThumbnailCache()
 
     private static let cacheVersion = "v2"
@@ -2785,6 +2828,8 @@ fileprivate struct AssetHistoryDetailViewer: View {
     @Binding var gpsLocation: String?
     @Binding var gpsCoordinate: CLLocationCoordinate2D?
     let onClose: () -> Void
+    let onPrevious: (() -> Void)?
+    let onNext: (() -> Void)?
 
     @State private var scale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
@@ -2792,6 +2837,7 @@ fileprivate struct AssetHistoryDetailViewer: View {
     @State private var showInfo = false
     @State private var isLivePhotoVideoHovering = false
     @GestureState private var pinchScale: CGFloat = 1.0
+    @FocusState private var isFocused: Bool
 
     private var fileURL: URL? {
         guard !asset.finalPath.isEmpty else { return nil }
@@ -2913,6 +2959,15 @@ fileprivate struct AssetHistoryDetailViewer: View {
                     }
                 }
 
+                // Previous / Next navigation chevrons
+                HStack {
+                    navigationChevron(systemName: "chevron.left", action: onPrevious)
+                        .padding(.leading, 20)
+                    Spacer()
+                    navigationChevron(systemName: "chevron.right", action: onNext)
+                        .padding(.trailing, 20)
+                }
+
                 // Info Panel Overlay (trailing slide-in)
                 if showInfo {
                     HStack {
@@ -3004,7 +3059,34 @@ fileprivate struct AssetHistoryDetailViewer: View {
                     self.gpsLocation = await extractLocation(from: fileURL, isVideo: isVideo)
                 }
             }
+            isFocused = true
         }
+        .focusable()
+        .focused($isFocused)
+        .onKeyPress(.leftArrow) {
+            guard let onPrevious else { return .ignored }
+            onPrevious()
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            guard let onNext else { return .ignored }
+            onNext()
+            return .handled
+        }
+    }
+
+    @ViewBuilder
+    private func navigationChevron(systemName: String, action: (() -> Void)?) -> some View {
+        Button(action: { action?() }) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.35), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .opacity(action == nil ? 0 : 1)
+        .disabled(action == nil)
     }
 
     private func extractLocation(from url: URL, isVideo: Bool) async -> String? {
