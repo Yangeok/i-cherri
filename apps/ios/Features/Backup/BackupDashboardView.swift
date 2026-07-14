@@ -20,46 +20,45 @@ public struct BackupDashboardView: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                backgroundGradient
-                ScrollView {
-                    VStack(spacing: 24) {
-                        // 사진 권한이 제한(Selected Photos)인 경우 노란색 경고 배너 표시
-                        if viewModel.photoPermissionStatus == .limited {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundColor(.orange)
-                                    Text("사진 접근 권한이 제한됨 (Selected Photos)")
-                                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                                        .foregroundColor(.orange)
-                                }
-                                Text("아이폰 설정에서 '선택된 사진만 허용'으로 설정되어 있어 전체 사진 중 일부(\(viewModel.totalLibraryAssetCount)장)만 접근 가능합니다. 남은 모든 사진을 백업하려면 아래와 같이 변경해 주세요:\n\n1. 아이폰의 **[설정]** 앱 실행\n2. 스크롤을 내려 **[iCherri]** 선택\n3. **[사진]** 메뉴 선택\n4. **[모든 사진]** 접근 권한으로 변경")
-                                    .font(.system(.caption, design: .rounded))
-                                    .foregroundColor(.secondary)
+            ScrollView {
+                VStack(spacing: 24) {
+                    // 사진 권한이 제한(Selected Photos)인 경우 노란색 경고 배너 표시
+                    if viewModel.photoPermissionStatus == .limited {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.orange)
+                                Text("사진 접근 권한이 제한됨 (Selected Photos)")
+                                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                                    .foregroundColor(.orange)
                             }
-                            .padding(14)
-                            .background(Color.orange.opacity(0.12))
-                            .cornerRadius(16)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.orange.opacity(0.3), lineWidth: 1)
-                            )
-                            .padding(.horizontal)
+                            Text("아이폰 설정에서 '선택된 사진만 허용'으로 설정되어 있어 전체 사진 중 일부(\(viewModel.totalLibraryAssetCount)장)만 접근 가능합니다. 남은 모든 사진을 백업하려면 아래와 같이 변경해 주세요:\n\n1. 아이폰의 **[설정]** 앱 실행\n2. 스크롤을 내려 **[iCherri]** 선택\n3. **[사진]** 메뉴 선택\n4. **[모든 사진]** 접근 권한으로 변경")
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundColor(.secondary)
                         }
-
-                        // 1. 단일 대화형 대시보드 시뮬레이터 디자인 본판 이식
-                        simulatorSection
-                        
-                        // 백업 중이 아닐 때만 하단 2열 설정/기기 그리드를 보여줌
-                        if viewModel.activeBackupProgressViewModel == nil {
-                            settingsGridSection
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                        }
+                        .padding(14)
+                        .background(Color.orange.opacity(0.12))
+                        .cornerRadius(16)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                        )
+                        .padding(.horizontal)
                     }
-                    .padding(.vertical)
+
+                    // 1. 단일 대화형 대시보드 시뮬레이터 디자인 본판 이식
+                    simulatorSection
+                    
+                    // 백업 중이 아닐 때만 하단 2열 설정/기기 그리드를 보여줌
+                    if viewModel.activeBackupProgressViewModel == nil {
+                        settingsGridSection
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
+                .padding(.vertical)
             }
+            .background(backgroundGradient)
+            .modifier(ScrollBounceBehaviorModifier())
             .navigationTitle("iCherri")
         }
         .task { await viewModel.onAppear() }
@@ -2559,6 +2558,16 @@ struct BackupControlsView: View {
                         )
                 }
             }
+        }
+    }
+}
+
+struct ScrollBounceBehaviorModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 16.4, *) {
+            content.scrollBounceBehavior(.basedOnSize)
+        } else {
+            content
         }
     }
 }
