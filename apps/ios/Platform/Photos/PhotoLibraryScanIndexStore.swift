@@ -302,7 +302,7 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
     func makeScanPlan(
         scanner: PhotoLibraryScanner, 
         deviceID: String,
-        progressHandler: ((Int, Int) -> Void)? = nil
+        progressHandler: ((Int, Int) -> Bool)? = nil
     ) async -> PhotoLibraryScanPlan {
         let totalCount = scanner.totalAssetCount()
         let receiverID = sanitizedActiveReceiverID

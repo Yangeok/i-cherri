@@ -997,6 +997,7 @@ final class BackupDashboardViewModel: ObservableObject {
                         progressViewModel.totalCount = total
                         progressViewModel.progress = total > 0 ? Double(completed) / Double(total) : 0.0
                     }
+                    return !progressViewModel.isCancelledFromAnyThread
                 }
                 executedScanMode = scanPlan.mode
                 let runAssets = scanPlan.runAssets
@@ -2543,11 +2544,11 @@ struct BackupControlsView: View {
                         )
                 }
             } else if progressViewModel.canCancel {
-                // 백업 진행 중일 때 -> 취소/일시정지 버튼 노출
+                // 백업 진행 중일 때 -> 취소 버튼 노출
                 Button(action: {
                     progressViewModel.cancel()
                 }) {
-                    Label("백업 취소 / 일시정지", systemImage: "stop.fill")
+                    Label("백업 취소", systemImage: "stop.fill")
                         .font(.system(.subheadline, design: .rounded, weight: .bold))
                         .foregroundColor(.red.opacity(0.85))
                         .frame(maxWidth: .infinity)

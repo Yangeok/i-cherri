@@ -32,7 +32,7 @@ public final class PhotoLibraryScanner {
     public func scanAllAssets(
         deviceID: String, 
         cachedAssets: [String: AssetMetadata] = [:],
-        progressHandler: ((Int, Int) -> Void)? = nil
+        progressHandler: ((Int, Int) -> Bool)? = nil
     ) async -> [AssetMetadata] {
         let options = PHFetchOptions()
         options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
@@ -47,9 +47,28 @@ public final class PhotoLibraryScanner {
         let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions to prevent assetsd IPC bottleneck
 
         var completed = 0
+        let cancellationLock = NSLock()
+        var isCancelled = false
+
         // Run metadata extraction concurrently across available CPU cores with semaphore limiting
         DispatchQueue.concurrentPerform(iterations: count) { index in
+            cancellationLock.lock()
+            if isCancelled {
+                cancellationLock.unlock()
+                return
+            }
+            cancellationLock.unlock()
+
             semaphore.wait()
+            defer { semaphore.signal() }
+
+            cancellationLock.lock()
+            if isCancelled {
+                cancellationLock.unlock()
+                return
+            }
+            cancellationLock.unlock()
+
             autoreleasepool {
                 let asset = result.object(at: index)
                 let cached = cachedAssets[asset.localIdentifier]
@@ -65,10 +84,13 @@ public final class PhotoLibraryScanner {
                 lock.unlock()
                 
                 if currentCompleted % 50 == 0 || currentCompleted == count {
-                    progressHandler?(currentCompleted, count)
+                    if let shouldContinue = progressHandler?(currentCompleted, count), !shouldContinue {
+                        cancellationLock.lock()
+                        isCancelled = true
+                        cancellationLock.unlock()
+                    }
                 }
             }
-            semaphore.signal()
         }
 
         return assets.compactMap { $0 }
@@ -78,7 +100,7 @@ public final class PhotoLibraryScanner {
         localIdentifiers: [String], 
         deviceID: String, 
         cachedAssets: [String: AssetMetadata] = [:],
-        progressHandler: ((Int, Int) -> Void)? = nil
+        progressHandler: ((Int, Int) -> Bool)? = nil
     ) async -> [AssetMetadata] {
         guard !localIdentifiers.isEmpty else { return [] }
 
@@ -93,8 +115,27 @@ public final class PhotoLibraryScanner {
         let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions
 
         var completed = 0
+        let cancellationLock = NSLock()
+        var isCancelled = false
+
         DispatchQueue.concurrentPerform(iterations: count) { index in
+            cancellationLock.lock()
+            if isCancelled {
+                cancellationLock.unlock()
+                return
+            }
+            cancellationLock.unlock()
+
             semaphore.wait()
+            defer { semaphore.signal() }
+
+            cancellationLock.lock()
+            if isCancelled {
+                cancellationLock.unlock()
+                return
+            }
+            cancellationLock.unlock()
+
             autoreleasepool {
                 let asset = result.object(at: index)
                 let cached = cachedAssets[asset.localIdentifier]
@@ -110,10 +151,13 @@ public final class PhotoLibraryScanner {
                 lock.unlock()
                 
                 if currentCompleted % 50 == 0 || currentCompleted == count {
-                    progressHandler?(currentCompleted, count)
+                    if let shouldContinue = progressHandler?(currentCompleted, count), !shouldContinue {
+                        cancellationLock.lock()
+                        isCancelled = true
+                        cancellationLock.unlock()
+                    }
                 }
             }
-            semaphore.signal()
         }
 
         return assets.compactMap { $0 }.sorted { lhs, rhs in

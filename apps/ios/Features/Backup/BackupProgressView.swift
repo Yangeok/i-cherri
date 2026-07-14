@@ -327,6 +327,21 @@ public final class BackupProgressViewModel: ObservableObject {
     private var sentBytes: Int64 = 0
     private var totalBytes: Int64 = 0
 
+    private let cancellationLock = NSLock()
+    nonisolated(unsafe) private var _isCancelled = false
+    public var isCancelled: Bool {
+        get {
+            cancellationLock.withLock { _isCancelled }
+        }
+        set {
+            cancellationLock.withLock { _isCancelled = newValue }
+        }
+    }
+    // Thread-safe read from nonisolated contexts (e.g., DispatchQueue.concurrentPerform)
+    nonisolated public var isCancelledFromAnyThread: Bool {
+        cancellationLock.withLock { _isCancelled }
+    }
+
     private var cancellationToken: Task<Void, Never>?
 
     public init(totalCount: Int) {
@@ -524,6 +539,7 @@ public final class BackupProgressViewModel: ObservableObject {
     }
 
     public func cancel() {
+        isCancelled = true
         cancellationToken?.cancel()
     }
 
