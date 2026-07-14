@@ -1685,6 +1685,21 @@ final class BackupDashboardViewModel: ObservableObject {
         return generated
     }
 
+    private func resolveWithTimeout(_ endpoint: NWEndpoint) async throws -> URL {
+        try await withThrowingTaskGroup(of: URL.self) { group in
+            group.addTask {
+                try await self.resolver.resolve(endpoint)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: 4_000_000_000) // 4 seconds timeout
+                throw URLError(.timedOut)
+            }
+            let first = try await group.next()!
+            group.cancelAll()
+            return first
+        }
+    }
+
     func resolveReceiverURLForBackup(
         pairedReceiver: DiscoveredReceiver?,
         pairedReceiverID: String?,
@@ -1703,7 +1718,7 @@ final class BackupDashboardViewModel: ObservableObject {
         if let pairedReceiverName {
             do {
                 let serviceEndpoint = NWEndpoint.service(name: pairedReceiverName, type: "_icherri._tcp", domain: "local.", interface: nil)
-                return try await resolver.resolve(serviceEndpoint)
+                return try await resolveWithTimeout(serviceEndpoint)
             } catch {
                 print("[resolveReceiverURL] Failed to resolve pairedReceiverName directly: \(error)")
             }
@@ -1712,7 +1727,7 @@ final class BackupDashboardViewModel: ObservableObject {
         // 3. Third priority: Dynamically resolve Bonjour endpoints from active browse results
         if let pairedReceiver {
             do {
-                return try await resolver.resolve(pairedReceiver.endpoint)
+                return try await resolveWithTimeout(pairedReceiver.endpoint)
             } catch {
                 print("[resolveReceiverURL] Failed to resolve pairedReceiver endpoint: \(error)")
             }
@@ -1721,7 +1736,7 @@ final class BackupDashboardViewModel: ObservableObject {
         if let pairedReceiverID,
            let discoveredReceiver = discoveredReceivers.first(where: { $0.id == pairedReceiverID }) {
             do {
-                return try await resolver.resolve(discoveredReceiver.endpoint)
+                return try await resolveWithTimeout(discoveredReceiver.endpoint)
             } catch {
                 print("[resolveReceiverURL] Failed to resolve pairedReceiverID endpoint: \(error)")
             }

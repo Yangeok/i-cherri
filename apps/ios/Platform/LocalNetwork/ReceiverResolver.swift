@@ -33,17 +33,56 @@ public final class BonjourReceiverResolver: ReceiverResolver, Sendable {
         
         let service = NetService(domain: domain, type: type, name: name)
         
+        final class SafeContinuation<T, E: Error>: @unchecked Sendable {
+            private let lock = NSLock()
+            private var continuation: CheckedContinuation<T, E>?
+            
+            init() {}
+            
+            func setContinuation(_ continuation: CheckedContinuation<T, E>) {
+                lock.lock()
+                self.continuation = continuation
+                lock.unlock()
+            }
+            
+            func resume(returning value: T) {
+                lock.lock()
+                if let continuation = self.continuation {
+                    self.continuation = nil
+                    lock.unlock()
+                    continuation.resume(returning: value)
+                } else {
+                    lock.unlock()
+                }
+            }
+            
+            func resume(throwing error: E) {
+                lock.lock()
+                if let continuation = self.continuation {
+                    self.continuation = nil
+                    lock.unlock()
+                    continuation.resume(throwing: error)
+                } else {
+                    lock.unlock()
+                }
+            }
+        }
+
+        let safeContinuation = SafeContinuation<URL, Error>()
+
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
+                safeContinuation.setContinuation(continuation)
+                
                 final class NetServiceDelegateImpl: NSObject, NetServiceDelegate, @unchecked Sendable {
-                    private let completion: @Sendable (Result<URL, Error>) -> Void
+                    private let safeContinuation: SafeContinuation<URL, Error>
                     private let lock = NSLock()
                     private var hasCompleted = false
                     private let service: NetService
                     
-                    init(service: NetService, completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
+                    init(service: NetService, safeContinuation: SafeContinuation<URL, Error>) {
                         self.service = service
-                        self.completion = completion
+                        self.safeContinuation = safeContinuation
                     }
                     
                     private func cleanup() {
@@ -62,7 +101,7 @@ public final class BonjourReceiverResolver: ReceiverResolver, Sendable {
                         defer { cleanup() }
                         
                         guard let hostName = sender.hostName else {
-                            completion(.failure(URLError(.cannotFindHost)))
+                            safeContinuation.resume(throwing: URLError(.cannotFindHost))
                             return
                         }
                         
@@ -70,9 +109,9 @@ public final class BonjourReceiverResolver: ReceiverResolver, Sendable {
                         let cleanHost = hostName.hasSuffix(".") ? String(hostName.dropLast()) : hostName
                         
                         if let url = URL(string: "http://\(cleanHost):\(port)") {
-                            completion(.success(url))
+                            safeContinuation.resume(returning: url)
                         } else {
-                            completion(.failure(URLError(.badURL)))
+                            safeContinuation.resume(throwing: URLError(.badURL))
                         }
                     }
                     
@@ -86,21 +125,28 @@ public final class BonjourReceiverResolver: ReceiverResolver, Sendable {
                         lock.unlock()
                         
                         cleanup()
-                        completion(.failure(URLError(.cannotFindHost)))
+                        safeContinuation.resume(throwing: URLError(.cannotFindHost))
                     }
                 }
                 
-                let delegate = NetServiceDelegateImpl(service: service) { result in
-                    continuation.resume(with: result)
-                }
+                let delegate = NetServiceDelegateImpl(service: service, safeContinuation: safeContinuation)
                 
                 service.delegate = delegate
                 ResolversHolder.shared.add(service: service, delegate: delegate)
+                
+                if Task.isCancelled {
+                    service.stop()
+                    ResolversHolder.shared.remove(service: service)
+                    safeContinuation.resume(throwing: URLError(.cancelled))
+                    return
+                }
+                
                 service.resolve(withTimeout: 4.0)
             }
         } onCancel: {
             service.stop()
             ResolversHolder.shared.remove(service: service)
+            safeContinuation.resume(throwing: URLError(.cancelled))
         }
     }
 }
