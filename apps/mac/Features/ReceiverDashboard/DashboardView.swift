@@ -1392,8 +1392,19 @@ final class DashboardViewModel: ObservableObject {
             }
             
             Task { [weak self] in
+                // .receiverDataDidChange fires on every upload chunk, not just on commit —
+                // during an active backup this can arrive dozens of times per second. Reloading
+                // the full asset grid on every single one caused visible flicker, so coalesce
+                // bursts into at most one reload per ~400ms.
+                var reloadScheduled = false
                 for await _ in dataChangeStream {
-                    await self?.load()
+                    guard !reloadScheduled else { continue }
+                    reloadScheduled = true
+                    Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        await self?.load()
+                        reloadScheduled = false
+                    }
                 }
             }
         }
