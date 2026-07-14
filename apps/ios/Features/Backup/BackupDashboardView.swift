@@ -94,10 +94,13 @@ public struct BackupDashboardView: View {
             VStack {
                 if let progressViewModel = viewModel.activeBackupProgressViewModel {
                     ExpandedBackupCardView(progressViewModel: progressViewModel)
+                        .transition(.opacity)
                 } else {
                     defaultDiscView
+                        .transition(.opacity)
                 }
             }
+            .animation(.easeInOut(duration: 0.25), value: viewModel.activeBackupProgressViewModel != nil)
             .frame(height: viewModel.activeBackupProgressViewModel != nil ? 270 : 190)
             .animation(.spring(response: 0.5, dampingFraction: 0.78), value: viewModel.activeBackupProgressViewModel != nil)
             .background(morphingBackgroundGlow)
@@ -2418,7 +2421,7 @@ struct ExpandedBackupCardView: View {
             }
         }
         .padding(20)
-        .transition(.scale.combined(with: .opacity))
+        .transition(.opacity)
         .background(
             RoundedRectangle(cornerRadius: 24)
                 .fill(.ultraThinMaterial)
