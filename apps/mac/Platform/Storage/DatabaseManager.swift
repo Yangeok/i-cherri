@@ -953,8 +953,6 @@ actor DatabaseManager {
         let duplicateCount: Int
         let failedCount: Int
         let lastBackupDate: Date?
-        let photoCount: Int
-        let videoCount: Int
         /// Total bytes physically stored on disk (completed assets only; duplicates share the original file).
         let totalByteSize: Int64
     }
@@ -969,8 +967,6 @@ actor DatabaseManager {
                     SUM(CASE WHEN status = 'duplicate' THEN 1 ELSE 0 END) as duplicate_count,
                     SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count,
                     MAX(completed_at) as last_backup,
-                    SUM(CASE WHEN status IN ('completed', 'duplicate') AND media_type = 'video' THEN 1 ELSE 0 END) as video_count,
-                    SUM(CASE WHEN status IN ('completed', 'duplicate') AND media_type != 'video' THEN 1 ELSE 0 END) as photo_count,
                     SUM(CASE WHEN status = 'completed' THEN byte_size ELSE 0 END) as total_byte_size
                 FROM backup_assets
                 GROUP BY device_id
@@ -982,8 +978,6 @@ actor DatabaseManager {
                 let duplicate: Int = row["duplicate_count"] ?? 0
                 let failed: Int = row["failed_count"] ?? 0
                 let lastBackup: Date? = row["last_backup"]
-                let videoCount: Int = row["video_count"] ?? 0
-                let photoCount: Int = row["photo_count"] ?? 0
                 let totalByteSize: Int64 = row["total_byte_size"] ?? 0
 
                 result[deviceID] = DeviceBackupStats(
@@ -991,8 +985,6 @@ actor DatabaseManager {
                     duplicateCount: duplicate,
                     failedCount: failed,
                     lastBackupDate: lastBackup,
-                    photoCount: photoCount,
-                    videoCount: videoCount,
                     totalByteSize: totalByteSize
                 )
             }

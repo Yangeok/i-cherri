@@ -162,7 +162,6 @@ struct DashboardView: View {
                         { showDetailAsset(nextAsset) }
                     }
                 )
-                .id(asset.backupId)
                 .transition(.opacity)
             }
         }
@@ -236,13 +235,11 @@ struct DashboardView: View {
     }
 
     private func mediaCountSummary(for device: PairedDeviceRecord) -> String {
-        let photoCount = viewModel.photoCount(for: device.deviceId)
-        let videoCount = viewModel.videoCount(for: device.deviceId)
         let usedBytes = viewModel.totalByteSize(for: device.deviceId)
         let libraryBytes = viewModel.latestCoverageSummary(for: device.deviceId)?.totalAssetBytes ?? 0
         let usedFormatted = ByteCountFormatter.string(fromByteCount: usedBytes, countStyle: .file)
-        let libraryFormatted = ByteCountFormatter.string(fromByteCount: max(libraryBytes, usedBytes), countStyle: .file)
-        return "사진 \(photoCount.formatted())장 • 영상 \(videoCount.formatted())개 • \(usedFormatted) / \(libraryFormatted) in library"
+        let libraryFormatted = ByteCountFormatter.string(fromByteCount: libraryBytes, countStyle: .file)
+        return "\(usedFormatted) / \(libraryFormatted) in library"
     }
 
     private var historySearchBar: some View {
@@ -1192,14 +1189,6 @@ final class DashboardViewModel: ObservableObject {
 
     func lastBackupDate(for deviceId: String) -> Date? {
         deviceStats[deviceId]?.lastBackupDate
-    }
-
-    func photoCount(for deviceId: String) -> Int {
-        deviceStats[deviceId]?.photoCount ?? 0
-    }
-
-    func videoCount(for deviceId: String) -> Int {
-        deviceStats[deviceId]?.videoCount ?? 0
     }
 
     func totalByteSize(for deviceId: String) -> Int64 {
@@ -2838,6 +2827,8 @@ fileprivate struct AssetHistoryDetailViewer: View {
     @State private var lastOffset: CGSize = .zero
     @State private var showInfo = false
     @State private var isLivePhotoVideoHovering = false
+    @State private var loadedImage: NSImage?
+    @State private var imageLoadFailed = false
     @GestureState private var pinchScale: CGFloat = 1.0
     @FocusState private var isFocused: Bool
 
@@ -2887,7 +2878,7 @@ fileprivate struct AssetHistoryDetailViewer: View {
                             NativeVideoPlayerView(url: liveVideoURL, autoPlay: true, showControls: false)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
-                            if let nsImage = NSImage(contentsOf: fileURL) {
+                            if let nsImage = loadedImage {
                                 Image(nsImage: nsImage)
                                     .resizable()
                                     .scaledToFit()
@@ -2930,7 +2921,7 @@ fileprivate struct AssetHistoryDetailViewer: View {
                                                 lastOffset = offset
                                             }
                                     )
-                            } else {
+                            } else if imageLoadFailed {
                                 VStack(spacing: 12) {
                                     Image(systemName: "exclamationmark.triangle")
                                         .font(.largeTitle)
@@ -2939,6 +2930,9 @@ fileprivate struct AssetHistoryDetailViewer: View {
                                         .font(.headline)
                                         .foregroundStyle(.white)
                                 }
+                            } else {
+                                ProgressView()
+                                    .controlSize(.large)
                             }
                         }
                     }
@@ -3055,12 +3049,36 @@ fileprivate struct AssetHistoryDetailViewer: View {
                 }
             }
         }
-        .onAppear {
-            if let fileURL = fileURL {
-                Task {
-                    self.gpsLocation = await extractLocation(from: fileURL, isVideo: isVideo)
+        .task(id: asset.backupId) {
+            // Reset per-asset transient state without tearing down the view (would drop keyboard focus)
+            scale = 1.0
+            offset = .zero
+            lastOffset = .zero
+            isLivePhotoVideoHovering = false
+            loadedImage = nil
+            imageLoadFailed = false
+            gpsLocation = nil
+            gpsCoordinate = nil
+
+            guard let fileURL else { return }
+
+            if !isVideo {
+                let image = await Task.detached(priority: .userInitiated) {
+                    NSImage(contentsOf: fileURL)
+                }.value
+                if Task.isCancelled { return }
+                if let image {
+                    loadedImage = image
+                } else {
+                    imageLoadFailed = true
                 }
             }
+
+            let location = await extractLocation(from: fileURL, isVideo: isVideo)
+            if Task.isCancelled { return }
+            self.gpsLocation = location
+        }
+        .onAppear {
             isFocused = true
         }
         .focusable()
@@ -3129,12 +3147,42 @@ fileprivate struct AssetHistoryDetailViewer: View {
         // coordinate를 부모에게 올려줌 (맵 표시용)
         await MainActor.run { gpsCoordinate = coord }
 
-        // Step 2: Reverse geocode to human-readable address
-        let location = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-        return await withCheckedContinuation { continuation in
-            CLGeocoder().reverseGeocodeLocation(location, preferredLocale: Locale(identifier: "ko_KR")) { placemarks, _ in
+        // Step 2: Reverse geocode to human-readable address (shared, cached, and serialized —
+        // avoids firing one concurrent CLGeocoder request per photo while arrow-key browsing,
+        // which was hitting Apple's rate limit and silently falling back to raw coordinates)
+        return await ReverseGeocodeCache.shared.resolve(coord)
+    }
+}
+
+/// Serializes and caches reverse-geocode lookups by rounded coordinate. CLGeocoder only
+/// supports one in-flight request per instance and is rate-limited; rapid asset navigation
+/// used to fire a fresh CLGeocoder() per photo, which frequently failed and fell back to
+/// showing raw coordinates. Routing every lookup through this actor keeps requests to one
+/// at a time and reuses results for nearby photos taken at the same place.
+actor ReverseGeocodeCache {
+    static let shared = ReverseGeocodeCache()
+
+    private let geocoder = CLGeocoder()
+    private var cache: [String: String?] = [:]
+
+    private func cacheKey(for coordinate: CLLocationCoordinate2D) -> String {
+        String(format: "%.3f,%.3f", coordinate.latitude, coordinate.longitude)
+    }
+
+    func resolve(_ coordinate: CLLocationCoordinate2D) async -> String? {
+        let key = cacheKey(for: coordinate)
+        if let cached = cache[key] {
+            return cached
+        }
+
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let resolved: String? = await withCheckedContinuation { continuation in
+            geocoder.reverseGeocodeLocation(location, preferredLocale: Locale(identifier: "ko_KR")) { placemarks, error in
+                if let error {
+                    NSLog("iCherri-Geocode: reverseGeocode failed for \(key): \(error.localizedDescription)")
+                }
                 guard let p = placemarks?.first else {
-                    continuation.resume(returning: String(format: "%.4f°, %.4f°", coord.latitude, coord.longitude))
+                    continuation.resume(returning: nil)
                     return
                 }
                 // 가장 구체적인 필드 하나 + "근처"
@@ -3150,6 +3198,9 @@ fileprivate struct AssetHistoryDetailViewer: View {
                 }
             }
         }
+
+        cache[key] = resolved
+        return resolved
     }
 }
 
