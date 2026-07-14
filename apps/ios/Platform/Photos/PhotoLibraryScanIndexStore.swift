@@ -300,8 +300,9 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
     }
 
     func makeScanPlan(
-        scanner: PhotoLibraryScanner, 
+        scanner: PhotoLibraryScanner,
         deviceID: String,
+        willPersist: (() -> Void)? = nil,
         progressHandler: ((Int, Int) -> Bool)? = nil
     ) async -> PhotoLibraryScanPlan {
         let totalCount = scanner.totalAssetCount()
@@ -319,7 +320,8 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
             }
             
             let assets = await scanner.scanAllAssets(deviceID: deviceID, cachedAssets: cachedAssets, progressHandler: progressHandler)
-            
+
+            willPersist?()
             try! await dbQueue.write { db in
                 try db.execute(sql: "DELETE FROM cached_assets WHERE receiver_id = ?", arguments: [receiverID])
                 try db.execute(sql: "DELETE FROM pending_assets WHERE receiver_id = ?", arguments: [receiverID])
@@ -377,7 +379,8 @@ final class PhotoLibraryScanIndexStore: NSObject, PHPhotoLibraryChangeObserver {
         
         let assets = await scanner.scanAssets(localIdentifiers: candidateIDs, deviceID: deviceID, cachedAssets: cachedAssets, progressHandler: progressHandler)
         let resolvedIDs = Set(assets.map(\.assetLocalID))
-        
+
+        willPersist?()
         try! await dbQueue.write { db in
             for asset in assets {
                 let record = CachedAssetRecord(receiverID: receiverID, metadata: asset)

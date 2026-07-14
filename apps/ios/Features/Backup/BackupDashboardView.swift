@@ -915,6 +915,14 @@ final class BackupDashboardViewModel: ObservableObject {
         self.totalLibraryAssetCount = scanner.totalAssetCount()
         let progressViewModel = BackupProgressViewModel(totalCount: 0)
         progressViewModel.setPhase(.scanning)
+        if #available(iOS 16.2, *) {
+            BackupLiveActivityManager.shared.start(
+                deviceName: device.deviceName,
+                completedCount: 0,
+                totalCount: self.totalLibraryAssetCount,
+                phaseText: "라이브러리 스캔 중..."
+            )
+        }
         progressViewModel.onRetryFailedUploads = { [weak self] assetIDs in
             guard let self else { return }
             Task { @MainActor in
@@ -979,7 +987,36 @@ final class BackupDashboardViewModel: ObservableObject {
 
                 let scanPlan = await self.scanIndexStore.makeScanPlan(
                     scanner: self.scanner,
-                    deviceID: device.deviceID
+                    deviceID: device.deviceID,
+                    willPersist: {
+                        Task { @MainActor in
+                            progressViewModel.update(
+                                filename: "스캔 결과 저장 중...",
+                                completed: progressViewModel.totalCount,
+                                success: 0,
+                                duplicates: 0,
+                                failed: 0,
+                                overallBackedUpCount: progressViewModel.overallBackedUpCount,
+                                phase: .scanning,
+                                bytesPerSecond: 0,
+                                sentBytes: 0,
+                                totalBytes: 0,
+                                activeUploads: 0,
+                                activeUploadItems: [],
+                                failedUploadItems: []
+                            )
+                            if #available(iOS 16.2, *) {
+                                BackupLiveActivityManager.shared.update(
+                                    progress: 1.0,
+                                    completedCount: progressViewModel.overallBackedUpCount,
+                                    totalCount: max(progressViewModel.totalCount, 1),
+                                    formattedSpeed: "—",
+                                    filename: nil,
+                                    phaseText: "스캔 결과 저장 중..."
+                                )
+                            }
+                        }
+                    }
                 ) { completed, total in
                     Task { @MainActor in
                         progressViewModel.update(
@@ -999,6 +1036,16 @@ final class BackupDashboardViewModel: ObservableObject {
                         )
                         progressViewModel.totalCount = total
                         progressViewModel.progress = total > 0 ? Double(completed) / Double(total) : 0.0
+                        if #available(iOS 16.2, *) {
+                            BackupLiveActivityManager.shared.update(
+                                progress: progressViewModel.progress,
+                                completedCount: completed,
+                                totalCount: total,
+                                formattedSpeed: "—",
+                                filename: nil,
+                                phaseText: "라이브러리 스캔 중..."
+                            )
+                        }
                     }
                     return !progressViewModel.isCancelledFromAnyThread
                 }
@@ -1006,14 +1053,6 @@ final class BackupDashboardViewModel: ObservableObject {
                 let runAssets = scanPlan.runAssets
 
                 await MainActor.run {
-                    if #available(iOS 16.2, *) {
-                        let initialCompleted = max(scanPlan.libraryAssetCount - scanPlan.runAssetCount, 0)
-                        BackupLiveActivityManager.shared.start(
-                            deviceName: device.deviceName,
-                            completedCount: initialCompleted,
-                            totalCount: scanPlan.libraryAssetCount
-                        )
-                    }
                     progressViewModel.setTotalCount(scanPlan.runAssetCount)
                     progressViewModel.setTotalBytes(scanPlan.runAssetBytes)
                     progressViewModel.totalCount = scanPlan.libraryAssetCount
