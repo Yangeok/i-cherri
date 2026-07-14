@@ -3238,32 +3238,56 @@ fileprivate struct NativeVideoPlayerView: NSViewRepresentable {
     let autoPlay: Bool
     let showControls: Bool
 
+    final class Coordinator {
+        var loadedURL: URL?
+        var endTimeObserver: NSObjectProtocol?
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeNSView(context: Context) -> AVPlayerView {
         let playerView = AVPlayerView()
-        playerView.player = AVPlayer(url: url)
         playerView.controlsStyle = showControls ? .floating : .none
         playerView.videoGravity = .resizeAspect
-        
-        // Loop video for live photos (when controls are hidden)
-        if !showControls {
-            NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime,
-                object: playerView.player?.currentItem,
-                queue: .main
-            ) { [weak player = playerView.player] _ in
-                player?.seek(to: .zero)
-                player?.play()
-            }
-        }
-        
-        if autoPlay {
-            playerView.player?.play()
-        }
+        loadPlayer(into: playerView, context: context)
         return playerView
     }
 
     func updateNSView(_ nsView: AVPlayerView, context: Context) {
-        // No updates needed
+        // AVPlayerView isn't recreated when navigating between assets (the SwiftUI view identity
+        // stays the same so keyboard focus survives) — only the `url` input changes, so swap the
+        // player here or prev/next navigation would keep playing the previous video.
+        guard context.coordinator.loadedURL != url else { return }
+        loadPlayer(into: nsView, context: context)
+    }
+
+    private func loadPlayer(into playerView: AVPlayerView, context: Context) {
+        if let observer = context.coordinator.endTimeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            context.coordinator.endTimeObserver = nil
+        }
+
+        let player = AVPlayer(url: url)
+        playerView.player = player
+        context.coordinator.loadedURL = url
+
+        // Loop video for live photos (when controls are hidden)
+        if !showControls {
+            context.coordinator.endTimeObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: player.currentItem,
+                queue: .main
+            ) { [weak player] _ in
+                player?.seek(to: .zero)
+                player?.play()
+            }
+        }
+
+        if autoPlay {
+            player.play()
+        }
     }
 }
 
