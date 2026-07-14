@@ -2,6 +2,7 @@ import Foundation
 import Network
 
 protocol ReceiverResolver: Sendable {
+    @MainActor
     func resolve(_ endpoint: NWEndpoint) async throws -> URL
 }
 
@@ -26,6 +27,7 @@ public final class BonjourReceiverResolver: ReceiverResolver, Sendable {
     
     public init() {}
     
+    @MainActor
     public func resolve(_ endpoint: NWEndpoint) async throws -> URL {
         guard case .service(let name, let type, let domain, _) = endpoint else {
             throw URLError(.cannotFindHost)

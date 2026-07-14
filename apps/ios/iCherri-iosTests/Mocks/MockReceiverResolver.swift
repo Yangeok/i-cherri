@@ -12,6 +12,7 @@ public final class MockReceiverResolver: ReceiverResolver, Sendable {
         self.resolvedURL = resolvedURL
     }
 
+    @MainActor
     public func resolve(_ endpoint: NWEndpoint) async throws -> URL {
         if delaySeconds > 0 {
             try await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
