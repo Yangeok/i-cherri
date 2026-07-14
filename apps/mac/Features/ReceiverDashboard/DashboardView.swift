@@ -238,9 +238,11 @@ struct DashboardView: View {
     private func mediaCountSummary(for device: PairedDeviceRecord) -> String {
         let photoCount = viewModel.photoCount(for: device.deviceId)
         let videoCount = viewModel.videoCount(for: device.deviceId)
-        let totalByteSize = viewModel.totalByteSize(for: device.deviceId)
-        let formattedSize = ByteCountFormatter.string(fromByteCount: totalByteSize, countStyle: .file)
-        return "사진 \(photoCount.formatted())장 • 영상 \(videoCount.formatted())개 • 총 용량 \(formattedSize)"
+        let usedBytes = viewModel.totalByteSize(for: device.deviceId)
+        let libraryBytes = viewModel.latestCoverageSummary(for: device.deviceId)?.totalAssetBytes ?? 0
+        let usedFormatted = ByteCountFormatter.string(fromByteCount: usedBytes, countStyle: .file)
+        let libraryFormatted = ByteCountFormatter.string(fromByteCount: max(libraryBytes, usedBytes), countStyle: .file)
+        return "사진 \(photoCount.formatted())장 • 영상 \(videoCount.formatted())개 • \(usedFormatted) / \(libraryFormatted) in library"
     }
 
     private var historySearchBar: some View {

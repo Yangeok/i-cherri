@@ -248,6 +248,7 @@ struct BackupRunCoverageSummary: Sendable {
     let deviceId: String
     let totalAssetCount: Int
     let completedAssetCount: Int
+    let totalAssetBytes: Int64
     let status: String
     let createdAt: Date
     let updatedAt: Date
@@ -742,6 +743,7 @@ actor DatabaseManager {
                     r.run_id,
                     r.device_id,
                     r.total_asset_count,
+                    r.total_asset_bytes,
                     r.status,
                     r.created_at,
                     r.updated_at,
@@ -769,6 +771,7 @@ actor DatabaseManager {
                     deviceId: row["device_id"],
                     totalAssetCount: row["total_asset_count"],
                     completedAssetCount: row["completed_asset_count"] ?? 0,
+                    totalAssetBytes: row["total_asset_bytes"] ?? 0,
                     status: row["status"],
                     createdAt: row["created_at"],
                     updatedAt: row["updated_at"],
