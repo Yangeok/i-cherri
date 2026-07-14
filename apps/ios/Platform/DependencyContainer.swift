@@ -33,4 +33,8 @@ extension Container {
     var autoBackupPolicyEvaluator: Factory<AutoBackupPolicyEvaluator> {
         self { AutoBackupPolicyEvaluator() }
     }
+    
+    var receiverResolver: Factory<any ReceiverResolver> {
+        self { BonjourReceiverResolver() }
+    }
 }
