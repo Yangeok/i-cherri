@@ -15,7 +15,6 @@ public struct BackupDashboardView: View {
     @StateObject private var viewModel = BackupDashboardViewModel()
     @State private var isTargetPickerPresented = false
     @State private var backupSheetDetent: PresentationDetent = .large
-    @State private var isGalleryPresented = false
 
     public init() {}
 
@@ -62,15 +61,6 @@ public struct BackupDashboardView: View {
                 }
             }
             .navigationTitle("iCherri")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        isGalleryPresented = true
-                    } label: {
-                        Image(systemName: "sparkles.rectangle.stack")
-                    }
-                }
-            }
         }
         .task { await viewModel.onAppear() }
         .onChange(of: scenePhase) { newPhase in
@@ -79,9 +69,6 @@ public struct BackupDashboardView: View {
                 await viewModel.refreshReceivers()
                 await viewModel.reevaluateAutomaticBackup()
             }
-        }
-        .sheet(isPresented: $isGalleryPresented) {
-            ComponentGalleryView()
         }
         .confirmationDialog(
             "Choose Backup Target",
