@@ -1693,7 +1693,17 @@ final class BackupDashboardViewModel: ObservableObject {
             return receiverURL
         }
 
-        // 2. Second priority fallback: Dynamically resolve Bonjour endpoints if stored URL is unavailable or invalid
+        // 2. Second priority: Resolve using the known paired receiver name directly via NetService
+        if let pairedReceiverName {
+            do {
+                let serviceEndpoint = NWEndpoint.service(name: pairedReceiverName, type: "_icherri._tcp", domain: "local.", interface: nil)
+                return try await resolveEndpoint(serviceEndpoint)
+            } catch {
+                print("[resolveReceiverURL] Failed to resolve pairedReceiverName directly: \(error)")
+            }
+        }
+
+        // 3. Third priority: Dynamically resolve Bonjour endpoints from active browse results
         if let pairedReceiver {
             do {
                 return try await resolveEndpoint(pairedReceiver.endpoint)
@@ -1708,15 +1718,6 @@ final class BackupDashboardViewModel: ObservableObject {
                 return try await resolveEndpoint(discoveredReceiver.endpoint)
             } catch {
                 print("[resolveReceiverURL] Failed to resolve pairedReceiverID endpoint: \(error)")
-            }
-        }
-
-        if let pairedReceiverName,
-           let discoveredReceiver = discoveredReceivers.first(where: { $0.name == pairedReceiverName }) {
-            do {
-                return try await resolveEndpoint(discoveredReceiver.endpoint)
-            } catch {
-                print("[resolveReceiverURL] Failed to resolve pairedReceiverName endpoint: \(error)")
             }
         }
 
