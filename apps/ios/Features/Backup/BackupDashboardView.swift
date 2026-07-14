@@ -2381,21 +2381,23 @@ struct ExpandedBackupCardView: View {
             
             // 진행 상세 보조 지표 배지 그리드
             HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("전송 속도")
-                        .font(.system(.caption2, design: .rounded))
-                        .foregroundColor(.secondary)
-                    Text(progressViewModel.phase == .uploading ? progressViewModel.formattedSpeed : "—")
-                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                if progressViewModel.phase == .uploading {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("전송 속도")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundColor(.secondary)
+                        Text(progressViewModel.formattedSpeed)
+                            .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                    )
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(.white.opacity(0.1), lineWidth: 0.5)
-                )
                 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(progressViewModel.phase == .scanning ? "스캔 진행률" : (progressViewModel.phase == .checking ? "비교 진행률" : "백업 진행률"))
