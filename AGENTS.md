@@ -10,3 +10,8 @@
 
 ## Release Rules
 - **버전**: 특별 지시가 없는 한 패치 버전(`v0.1.0` -> `v0.1.1`)만 올리고 버전 태그로만 릴리즈.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan: [plan.md](file:///Users/yangeok/Dev/Test/i-cherri/specs/003-refactor-receiver-resolver/plan.md)
+<!-- SPECKIT END -->
