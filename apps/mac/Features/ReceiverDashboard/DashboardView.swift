@@ -149,11 +149,7 @@ struct DashboardView: View {
                     gpsLocation: $detailGPSLocation,
                     gpsCoordinate: $detailCoordinate,
                     onClose: {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            selectedDetailAsset = nil
-                            detailGPSLocation = nil
-                            detailCoordinate = nil
-                        }
+                        closeDetailViewer(from: asset)
                     },
                     onPrevious: viewModel.neighborAsset(of: asset, offset: -1).map { previousAsset in
                         { showDetailAsset(previousAsset) }
@@ -355,6 +351,14 @@ struct DashboardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .onChange(of: viewModel.scrollToAssetID) { _, targetID in
+                // Grid mode scrolls itself inside AssetHistoryCollectionView's updateNSView.
+                guard let targetID, viewModel.assetHistoryViewMode != .grid else { return }
+                withAnimation(.easeOut(duration: 0.12)) {
+                    scrollProxy.scrollTo(targetID, anchor: .center)
+                }
+                viewModel.scrollToAssetID = nil
+            }
         }
     }
 
@@ -640,9 +644,7 @@ struct DashboardView: View {
             if let asset = selectedDetailAsset {
                 ToolbarItem(placement: .navigation) {
                     Button(action: {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            selectedDetailAsset = nil
-                        }
+                        closeDetailViewer(from: asset)
                     }) {
                         Label("Back", systemImage: "chevron.left")
                     }
@@ -934,6 +936,20 @@ struct DashboardView: View {
         selectedDetailAsset = asset
     }
 
+    private func closeDetailViewer(from asset: BackupAssetRecord) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            selectedDetailAsset = nil
+            detailGPSLocation = nil
+            detailCoordinate = nil
+        }
+        // Scroll the browser to wherever prev/next navigation left off, rather than
+        // leaving it at the scroll position from before the detail viewer was opened.
+        Task {
+            await viewModel.ensureAssetVisible(asset.backupId)
+            viewModel.scrollToAssetID = asset.backupId
+        }
+    }
+
     private func revealAsset(_ asset: BackupAssetRecord) {
         guard let url = assetFileURL(asset) else {
             assetActionError = missingFileMessage(for: asset)
@@ -1017,6 +1033,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var assetHistoryMediaFilter: AssetHistoryMediaFilter = .all
     @Published var gridColumnCount: Int = 4
     @Published var scrollToSectionID: String? = nil
+    @Published var scrollToAssetID: String? = nil
 
     private var filteredAssets: [BackupAssetRecord] = []
     private var visibleAssetWindowRange: Range<Int> = 0..<0
@@ -1264,6 +1281,14 @@ final class DashboardViewModel: ObservableObject {
             return
         }
 
+        updateVisibleAssetWindow(anchorIndex: targetIndex)
+    }
+
+    /// Prev/next navigation in the detail viewer walks the full `filteredAssets` list, which can
+    /// land on an asset outside the currently paginated `visibleAssets` window. Bring that window
+    /// back into range before scrolling to it.
+    func ensureAssetVisible(_ assetID: String) async {
+        guard let targetIndex = filteredAssets.firstIndex(where: { $0.backupId == assetID }) else { return }
         updateVisibleAssetWindow(anchorIndex: targetIndex)
     }
 
@@ -2387,6 +2412,13 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
                 viewModel.scrollToSectionID = nil
             }
         }
+
+        if let targetAssetID = viewModel.scrollToAssetID {
+            context.coordinator.scrollToAsset(id: targetAssetID)
+            DispatchQueue.main.async {
+                viewModel.scrollToAssetID = nil
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -2485,6 +2517,22 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
                 context.duration = 0.2
                 context.allowsImplicitAnimation = true
                 collectionView.animator().scrollToItems(at: [indexPath], scrollPosition: .top)
+            }
+        }
+
+        fileprivate func scrollToAsset(id: String) {
+            guard let collectionView = collectionView else { return }
+            for (sectionIndex, section) in sections.enumerated() {
+                guard let itemIndex = section.entries.firstIndex(where: { $0.id == id }) else { continue }
+                let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+
+                collectionView.layoutSubtreeIfNeeded()
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.2
+                    context.allowsImplicitAnimation = true
+                    collectionView.animator().scrollToItems(at: [indexPath], scrollPosition: .centeredVertically)
+                }
+                return
             }
         }
 
