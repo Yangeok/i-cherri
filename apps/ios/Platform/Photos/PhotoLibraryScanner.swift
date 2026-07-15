@@ -30,7 +30,7 @@ public final class PhotoLibraryScanner {
 
     // Scans all media assets and returns AssetMetadata array. Targets >1000 assets/sec.
     public func scanAllAssets(
-        deviceID: String, 
+        deviceID: String,
         cachedAssets: [String: AssetMetadata] = [:],
         progressHandler: ((Int, Int) -> Bool)? = nil
     ) async -> [AssetMetadata] {
@@ -42,58 +42,68 @@ public final class PhotoLibraryScanner {
         let count = result.count
         guard count > 0 else { return [] }
 
-        var assets = [AssetMetadata?](repeating: nil, count: count)
-        let lock = NSLock()
-        let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions to prevent assetsd IPC bottleneck
+        // DispatchQueue.concurrentPerform blocks its calling thread until every iteration
+        // finishes. Calling it directly from this async function would block a thread out of
+        // Swift Concurrency's small cooperative pool for the entire scan, starving the
+        // Task { @MainActor in ... } progress-callback hops fired from inside the loop below —
+        // that's what made the progress bar appear to stall. Run it on a plain background
+        // queue instead so it never competes with the cooperative pool.
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var assets = [AssetMetadata?](repeating: nil, count: count)
+                let lock = NSLock()
+                let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions to prevent assetsd IPC bottleneck
 
-        var completed = 0
-        let cancellationLock = NSLock()
-        var isCancelled = false
+                var completed = 0
+                let cancellationLock = NSLock()
+                var isCancelled = false
 
-        // Run metadata extraction concurrently across available CPU cores with semaphore limiting
-        DispatchQueue.concurrentPerform(iterations: count) { index in
-            cancellationLock.lock()
-            if isCancelled {
-                cancellationLock.unlock()
-                return
-            }
-            cancellationLock.unlock()
-
-            semaphore.wait()
-            defer { semaphore.signal() }
-
-            cancellationLock.lock()
-            if isCancelled {
-                cancellationLock.unlock()
-                return
-            }
-            cancellationLock.unlock()
-
-            autoreleasepool {
-                let asset = result.object(at: index)
-                let cached = cachedAssets[asset.localIdentifier]
-                if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID, cachedAsset: cached) {
-                    lock.lock()
-                    assets[index] = metadata
-                    lock.unlock()
-                }
-                
-                lock.lock()
-                completed += 1
-                let currentCompleted = completed
-                lock.unlock()
-                
-                if currentCompleted % 50 == 0 || currentCompleted == count {
-                    if let shouldContinue = progressHandler?(currentCompleted, count), !shouldContinue {
-                        cancellationLock.lock()
-                        isCancelled = true
+                // Run metadata extraction concurrently across available CPU cores with semaphore limiting
+                DispatchQueue.concurrentPerform(iterations: count) { index in
+                    cancellationLock.lock()
+                    if isCancelled {
                         cancellationLock.unlock()
+                        return
+                    }
+                    cancellationLock.unlock()
+
+                    semaphore.wait()
+                    defer { semaphore.signal() }
+
+                    cancellationLock.lock()
+                    if isCancelled {
+                        cancellationLock.unlock()
+                        return
+                    }
+                    cancellationLock.unlock()
+
+                    autoreleasepool {
+                        let asset = result.object(at: index)
+                        let cached = cachedAssets[asset.localIdentifier]
+                        if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID, cachedAsset: cached) {
+                            lock.lock()
+                            assets[index] = metadata
+                            lock.unlock()
+                        }
+
+                        lock.lock()
+                        completed += 1
+                        let currentCompleted = completed
+                        lock.unlock()
+
+                        if currentCompleted % 50 == 0 || currentCompleted == count {
+                            if let shouldContinue = progressHandler?(currentCompleted, count), !shouldContinue {
+                                cancellationLock.lock()
+                                isCancelled = true
+                                cancellationLock.unlock()
+                            }
+                        }
                     }
                 }
+
+                continuation.resume(returning: assets.compactMap { $0 })
             }
         }
-
-        return assets.compactMap { $0 }
     }
 
     public func scanAssets(
@@ -110,58 +120,65 @@ public final class PhotoLibraryScanner {
         let count = result.count
         guard count > 0 else { return [] }
 
-        var assets = [AssetMetadata?](repeating: nil, count: count)
-        let lock = NSLock()
-        let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions
+        // See scanAllAssets — concurrentPerform blocks its calling thread, so it must run off
+        // Swift Concurrency's cooperative pool or it starves the progress-callback Task hops.
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var assets = [AssetMetadata?](repeating: nil, count: count)
+                let lock = NSLock()
+                let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions
 
-        var completed = 0
-        let cancellationLock = NSLock()
-        var isCancelled = false
+                var completed = 0
+                let cancellationLock = NSLock()
+                var isCancelled = false
 
-        DispatchQueue.concurrentPerform(iterations: count) { index in
-            cancellationLock.lock()
-            if isCancelled {
-                cancellationLock.unlock()
-                return
-            }
-            cancellationLock.unlock()
-
-            semaphore.wait()
-            defer { semaphore.signal() }
-
-            cancellationLock.lock()
-            if isCancelled {
-                cancellationLock.unlock()
-                return
-            }
-            cancellationLock.unlock()
-
-            autoreleasepool {
-                let asset = result.object(at: index)
-                let cached = cachedAssets[asset.localIdentifier]
-                if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID, cachedAsset: cached) {
-                    lock.lock()
-                    assets[index] = metadata
-                    lock.unlock()
-                }
-                
-                lock.lock()
-                completed += 1
-                let currentCompleted = completed
-                lock.unlock()
-                
-                if currentCompleted % 50 == 0 || currentCompleted == count {
-                    if let shouldContinue = progressHandler?(currentCompleted, count), !shouldContinue {
-                        cancellationLock.lock()
-                        isCancelled = true
+                DispatchQueue.concurrentPerform(iterations: count) { index in
+                    cancellationLock.lock()
+                    if isCancelled {
                         cancellationLock.unlock()
+                        return
+                    }
+                    cancellationLock.unlock()
+
+                    semaphore.wait()
+                    defer { semaphore.signal() }
+
+                    cancellationLock.lock()
+                    if isCancelled {
+                        cancellationLock.unlock()
+                        return
+                    }
+                    cancellationLock.unlock()
+
+                    autoreleasepool {
+                        let asset = result.object(at: index)
+                        let cached = cachedAssets[asset.localIdentifier]
+                        if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID, cachedAsset: cached) {
+                            lock.lock()
+                            assets[index] = metadata
+                            lock.unlock()
+                        }
+
+                        lock.lock()
+                        completed += 1
+                        let currentCompleted = completed
+                        lock.unlock()
+
+                        if currentCompleted % 50 == 0 || currentCompleted == count {
+                            if let shouldContinue = progressHandler?(currentCompleted, count), !shouldContinue {
+                                cancellationLock.lock()
+                                isCancelled = true
+                                cancellationLock.unlock()
+                            }
+                        }
                     }
                 }
-            }
-        }
 
-        return assets.compactMap { $0 }.sorted { lhs, rhs in
-            lhs.creationDate > rhs.creationDate
+                let sorted = assets.compactMap { $0 }.sorted { lhs, rhs in
+                    lhs.creationDate > rhs.creationDate
+                }
+                continuation.resume(returning: sorted)
+            }
         }
     }
 
