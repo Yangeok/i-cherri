@@ -3351,6 +3351,10 @@ fileprivate struct NativeVideoPlayerView: NSViewRepresentable {
         let playerView = AVPlayerView()
         playerView.controlsStyle = showControls ? .floating : .none
         playerView.videoGravity = .resizeAspect
+        // AVPlayerView otherwise letterboxes with an opaque black matte, which fully hides the
+        // shared dimmed background (Color.black.opacity(0.85)) that photos let show through.
+        playerView.wantsLayer = true
+        playerView.layer?.backgroundColor = .clear
         loadPlayer(into: playerView, context: context)
         return playerView
     }
