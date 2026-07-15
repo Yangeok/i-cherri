@@ -655,23 +655,21 @@ struct DashboardView: View {
                 }
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 2) {
-                        Text(asset.originalFilename)
-                            .font(.headline)
-                            .lineLimit(1)
                         HStack(spacing: 6) {
                             Text(asset.creationDate.formatted(date: .abbreviated, time: .shortened))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(.headline)
                             if let gps = detailGPSLocation {
-                                Text("•").font(.caption).foregroundStyle(.secondary)
+                                Text("•").font(.headline)
                                 Image(systemName: "mappin.and.ellipse")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(.subheadline)
                                 Text(gps)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(.headline)
                             }
                         }
+                        Text(asset.originalFilename)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
             } else {
@@ -2946,6 +2944,15 @@ fileprivate struct AssetHistoryDetailViewer: View {
         asset.mediaType.lowercased() == "video"
     }
 
+    // AVPlayerView paints its own opaque black matte over any letterbox area, which hides the
+    // shared dimmed background no matter what we set the view's own layer color to. Sizing the
+    // player to the asset's real aspect ratio (same as the photo path's .scaledToFit()) removes
+    // the letterbox area entirely instead of fighting AVKit's internal chrome for it.
+    private var videoAspectRatio: CGFloat? {
+        guard asset.pixelWidth > 0, asset.pixelHeight > 0 else { return nil }
+        return CGFloat(asset.pixelWidth) / CGFloat(asset.pixelHeight)
+    }
+
     private var livePhotoVideoURL: URL? {
         guard !isVideo, let fileURL = fileURL else { return nil }
         let videoURL = fileURL.deletingPathExtension().appendingPathExtension("mov")
@@ -2974,11 +2981,11 @@ fileprivate struct AssetHistoryDetailViewer: View {
                     ZStack {
                         if isVideo {
                             NativeVideoPlayerView(url: fileURL, autoPlay: true, showControls: true)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .aspectRatio(videoAspectRatio, contentMode: .fit)
                                 .transition(.identity)
                         } else if let liveVideoURL = livePhotoVideoURL, isLivePhotoVideoHovering {
                             NativeVideoPlayerView(url: liveVideoURL, autoPlay: true, showControls: false)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .aspectRatio(videoAspectRatio, contentMode: .fit)
                                 .transition(.identity)
                         } else {
                             // .identity avoids a cross-fade with the video branch above — without it,
