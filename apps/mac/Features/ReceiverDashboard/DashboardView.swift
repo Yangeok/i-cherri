@@ -2518,6 +2518,11 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
                 }
                 
                 if isPinching {
+                    // During a live pinch this runs on every gesture delta (many times per second).
+                    // Only mark the layout dirty here — AppKit coalesces the actual relayout with its
+                    // normal display cycle. Forcing layoutSubtreeIfNeeded()+scrollToItems synchronously
+                    // on every tick (as the settle path below does) was the main source of stutter,
+                    // since each one forces a full, immediate flow-layout pass off the display cycle.
                     collectionView?.collectionViewLayout?.invalidateLayout()
                 } else {
                     NSAnimationContext.runAnimationGroup { context in
@@ -2525,14 +2530,14 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
                         context.allowsImplicitAnimation = true
                         collectionView?.collectionViewLayout?.invalidateLayout()
                     }
+
+                    if let anchorPath = lockedAnchorIndexPath {
+                        // Force immediate layout reflow so scrollToItems uses correct updated positions
+                        collectionView?.layoutSubtreeIfNeeded()
+                        collectionView?.scrollToItems(at: [anchorPath], scrollPosition: .top)
+                    }
                 }
-                
-                if let anchorPath = lockedAnchorIndexPath {
-                    // Force immediate layout reflow so scrollToItems uses correct updated positions
-                    collectionView?.layoutSubtreeIfNeeded()
-                    collectionView?.scrollToItems(at: [anchorPath], scrollPosition: .top)
-                }
-                
+
                 // Debounce resetting the locked anchor (e.g. 0.3 seconds after resizing/pinching stops)
                 anchorResetWorkItem?.cancel()
                 let workItem = DispatchWorkItem { [weak self] in
@@ -3007,19 +3012,10 @@ fileprivate struct AssetHistoryDetailViewer: View {
                                                 state = value
                                             }
                                             .onEnded { value in
-                                                let newScale = min(max(scale * value, 0.3), 4.0)
-                                                if newScale < 1.0 {
-                                                    // 100% 아래로 당기면 뒤로가기
-                                                    withAnimation(.easeIn(duration: 0.15)) {
-                                                        scale = 0.5
-                                                    }
-                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                        onClose()
-                                                    }
-                                                } else {
-                                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                                                        scale = newScale
-                                                    }
+                                                let newScale = min(max(scale * value, 1.0), 4.0)
+                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                                    scale = newScale
+                                                    if scale == 1.0 { offset = .zero; lastOffset = .zero }
                                                 }
                                             }
                                     )
