@@ -336,6 +336,7 @@ struct DashboardView: View {
                             .padding(.bottom, 96)
                     }
                     .scrollContentBackground(.hidden)
+                    .scrollPosition(id: $viewModel.listTopVisibleAssetID, anchor: .top)
                 }
 
                 historyFloatingControls
@@ -436,20 +437,22 @@ struct DashboardView: View {
                 historyControlButton(
                     id: "view-list",
                     isSelected: viewModel.assetHistoryViewMode == .list,
-                    action: { viewModel.assetHistoryViewMode = .list }
+                    action: { switchViewMode(to: .list) }
                 ) {
                     Image(systemName: "list.bullet")
                         .frame(width: 30, height: 30)
                 }
+                .keyboardShortcut("1", modifiers: .command)
 
                 historyControlButton(
                     id: "view-grid",
                     isSelected: viewModel.assetHistoryViewMode == .grid,
-                    action: { viewModel.assetHistoryViewMode = .grid }
+                    action: { switchViewMode(to: .grid) }
                 ) {
                     Image(systemName: "square.grid.2x2")
                         .frame(width: 30, height: 30)
                 }
+                .keyboardShortcut("2", modifiers: .command)
             }
 
             Rectangle()
@@ -950,6 +953,23 @@ struct DashboardView: View {
         }
     }
 
+    private func switchViewMode(to mode: AssetHistoryViewMode) {
+        guard viewModel.assetHistoryViewMode != mode else { return }
+        let topID = viewModel.topmostVisibleAssetID()
+        viewModel.assetHistoryViewMode = mode
+        guard let topID else { return }
+
+        Task {
+            // .scrollPosition(id:) in list mode can report a pinned section header's id
+            // instead of an individual asset's — fall back to a section-level jump if so.
+            if await viewModel.ensureAssetVisible(topID) {
+                viewModel.scrollToAssetID = topID
+            } else {
+                viewModel.scrollToSectionID = topID
+            }
+        }
+    }
+
     private func revealAsset(_ asset: BackupAssetRecord) {
         guard let url = assetFileURL(asset) else {
             assetActionError = missingFileMessage(for: asset)
@@ -1024,6 +1044,8 @@ final class DashboardViewModel: ObservableObject {
     @Published var backupFolderPath: String?
     @Published var assetSearchQuery = ""
     @Published var assetHistoryViewMode: AssetHistoryViewMode = .list
+    @Published fileprivate var listTopVisibleAssetID: String? = nil
+    fileprivate weak var activeGridCollectionView: NSCollectionView?
     @Published var assetHistoryTimeGroupingMode: AssetHistoryTimeGroupingMode = .month {
         didSet {
             rebuildVisibleAssetSections()
@@ -1192,6 +1214,23 @@ final class DashboardViewModel: ObservableObject {
         return filteredAssets[targetIndex]
     }
 
+    /// The asset currently at/near the top of whichever browser (grid or list) is active,
+    /// used to carry scroll position across a list<->grid view mode switch.
+    fileprivate func topmostVisibleAssetID() -> String? {
+        switch assetHistoryViewMode {
+        case .grid:
+            guard let collectionView = activeGridCollectionView,
+                  let indexPath = collectionView.indexPathsForVisibleItems().sorted().first,
+                  indexPath.section < visibleAssetSections.count,
+                  indexPath.item < visibleAssetSections[indexPath.section].entries.count else {
+                return nil
+            }
+            return visibleAssetSections[indexPath.section].entries[indexPath.item].id
+        case .list:
+            return listTopVisibleAssetID
+        }
+    }
+
     func assetCount(for deviceId: String) -> Int {
         deviceStats[deviceId]?.completedCount ?? 0
     }
@@ -1287,9 +1326,11 @@ final class DashboardViewModel: ObservableObject {
     /// Prev/next navigation in the detail viewer walks the full `filteredAssets` list, which can
     /// land on an asset outside the currently paginated `visibleAssets` window. Bring that window
     /// back into range before scrolling to it.
-    func ensureAssetVisible(_ assetID: String) async {
-        guard let targetIndex = filteredAssets.firstIndex(where: { $0.backupId == assetID }) else { return }
+    @discardableResult
+    func ensureAssetVisible(_ assetID: String) async -> Bool {
+        guard let targetIndex = filteredAssets.firstIndex(where: { $0.backupId == assetID }) else { return false }
         updateVisibleAssetWindow(anchorIndex: targetIndex)
+        return true
     }
 
     private func updateVisibleAssetWindow(anchorIndex: Int) {
@@ -2390,6 +2431,7 @@ fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
 
         scrollView.documentView = collectionView
         context.coordinator.collectionView = collectionView
+        viewModel.activeGridCollectionView = collectionView
 
         return scrollView
     }
