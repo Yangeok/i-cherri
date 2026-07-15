@@ -64,6 +64,7 @@ public struct BackupDashboardView: View {
         .task { await viewModel.onAppear() }
         .onChange(of: scenePhase) { newPhase in
             guard newPhase == .active else { return }
+            viewModel.recoverStuckBackupIfNeeded()
             Task {
                 await viewModel.refreshReceivers()
                 await viewModel.reevaluateAutomaticBackup()
@@ -509,6 +510,7 @@ final class BackupDashboardViewModel: ObservableObject {
     @Published var backupCoverageProgress: Double?
     @Published var isBrowsing = false
     private var pingTimer: Task<Void, Never>?
+    private var activeBackupTask: Task<Bool, Never>?
 
     var pairedReceiverIsOnline: Bool {
         guard let name = pairedReceiverName else { return false }
@@ -958,7 +960,16 @@ final class BackupDashboardViewModel: ObservableObject {
         let storedReceiverURLString = UserDefaults.standard.string(forKey: receiverURLKey)
 
         var backgroundTaskID = UIBackgroundTaskIdentifier.invalid
-        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "ManualBackup") {
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "ManualBackup") { [weak self] in
+            // iOS ran out of background time. Cancel the in-flight backup so its `defer` cleanup
+            // below actually runs (resets isBackingUp, stops the Live Activity, ends the
+            // background task) instead of leaving the task frozen mid-await when the process is
+            // suspended — this previously only ended the background task assertion without ever
+            // cancelling the work driving it, so returning to the foreground left the UI stuck
+            // showing "backing up" with nothing left running to finish it.
+            Task { @MainActor in
+                self?.activeBackupTask?.cancel()
+            }
             if backgroundTaskID != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTaskID)
                 backgroundTaskID = .invalid
@@ -970,6 +981,7 @@ final class BackupDashboardViewModel: ObservableObject {
             defer {
                 Task { @MainActor in
                     self.isBackingUp = false
+                    self.activeBackupTask = nil
                     if #available(iOS 16.2, *) {
                         BackupLiveActivityManager.shared.stop()
                     }
@@ -1389,6 +1401,7 @@ final class BackupDashboardViewModel: ObservableObject {
             }
         }
 
+        activeBackupTask = backupTask
         progressViewModel.bindCancellation(to: backupTask)
         let shouldRestart = await backupTask.value
 
@@ -1405,6 +1418,20 @@ final class BackupDashboardViewModel: ObservableObject {
 
     func dismissBackupProgress() {
         activeBackupProgressViewModel = nil
+    }
+
+    /// Safety net for returning to the foreground: if `isBackingUp` is stuck true with no task
+    /// actually driving it (e.g. the process was suspended before the background-expiration
+    /// handler's cancellation could run its cleanup), clear the stale "backing up" state instead
+    /// of leaving the UI frozen indefinitely with nothing left to finish it.
+    func recoverStuckBackupIfNeeded() {
+        guard isBackingUp, activeBackupTask == nil else { return }
+        isBackingUp = false
+        activeBackupProgressViewModel = nil
+        backupStatusMessage = "Backup was interrupted while the app was in the background."
+        if #available(iOS 16.2, *) {
+            BackupLiveActivityManager.shared.stop()
+        }
     }
 
     func retryFailedUploads(assetIDs: [String]) async {
