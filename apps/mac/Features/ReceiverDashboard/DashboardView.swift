@@ -27,6 +27,7 @@ struct DashboardView: View {
     @State private var hoveredMediaFilter: AssetHistoryMediaFilter?
     @State private var scrubberActiveSectionID: String?
     @State private var scrubberActiveSectionTitle: String?
+    @State private var scrubberHoverSectionTitle: String?
     @State private var scrubberCommitTask: Task<Void, Never>?
     @State private var selectedDetailAsset: BackupAssetRecord? = nil
     @State private var magnificationScale: CGFloat = 1.0
@@ -275,14 +276,18 @@ struct DashboardView: View {
         }
     }
 
+    private static let minimumGridItemSize: CGFloat = 60
+    private static let gridItemSpacing: CGFloat = 8
+
     private func historyBrowserContent(height: CGFloat, width: CGFloat) -> some View {
         let contentWidth = max(width, 1)
-        let columnCount = viewModel.gridColumnCount
-        let gridColumns = Array(
-            repeating: GridItem(.flexible(), spacing: 8, alignment: .top),
-            count: columnCount
-        )
-        let baseGridItemSize = (contentWidth - CGFloat(max(columnCount - 1, 0)) * 8) / CGFloat(columnCount)
+        // Don't let a column count picked at full window width (e.g. via pinch-zoom, up to 15)
+        // keep shrinking thumbnails as the window narrows — reduce the effective column count
+        // instead so tiles stay at a usable minimum size. viewModel.gridColumnCount itself is
+        // left untouched, so widening the window again restores the original column count.
+        let maxColumnsForWidth = max(1, Int((contentWidth + Self.gridItemSpacing) / (Self.minimumGridItemSize + Self.gridItemSpacing)))
+        let columnCount = min(viewModel.gridColumnCount, maxColumnsForWidth)
+        let baseGridItemSize = (contentWidth - CGFloat(max(columnCount - 1, 0)) * Self.gridItemSpacing) / CGFloat(columnCount)
         let gridItemSize = baseGridItemSize * magnificationScale
 
         return ScrollViewReader { scrollProxy in
@@ -526,8 +531,8 @@ struct DashboardView: View {
         return Group {
             if sections.count > 1 {
                 HStack(spacing: 10) {
-                    if let scrubberActiveSectionTitle {
-                        Text(scrubberActiveSectionTitle)
+                    if let displayedTitle = scrubberActiveSectionTitle ?? scrubberHoverSectionTitle {
+                        Text(displayedTitle)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.primary)
                             .padding(.horizontal, 10)
@@ -576,12 +581,37 @@ struct DashboardView: View {
                                     }
                                 }
                         )
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let location):
+                                scrubberHoverSectionTitle = scrubberSection(
+                                    forY: location.y,
+                                    trackHeight: scrubberSize.height,
+                                    sections: sections
+                                )?.title
+                            case .ended:
+                                scrubberHoverSectionTitle = nil
+                            }
+                        }
                     }
                     .frame(width: 18, height: scrubberHeight)
                 }
                 .animation(.easeOut(duration: 0.16), value: scrubberActiveSectionTitle)
+                .animation(.easeOut(duration: 0.12), value: scrubberHoverSectionTitle)
             }
         }
+    }
+
+    private func scrubberSection(
+        forY locationY: CGFloat,
+        trackHeight: CGFloat,
+        sections: [AssetHistorySection]
+    ) -> AssetHistorySection? {
+        guard !sections.isEmpty else { return nil }
+        let clampedY = min(max(locationY, 0), max(trackHeight, 1))
+        let progress = clampedY / max(trackHeight, 1)
+        let rawIndex = Int((progress * CGFloat(max(sections.count - 1, 0))).rounded())
+        return sections[min(max(rawIndex, 0), sections.count - 1)]
     }
 
     private func updateScrubberSelection(
@@ -589,12 +619,7 @@ struct DashboardView: View {
         trackHeight: CGFloat,
         sections: [AssetHistorySection]
     ) {
-        guard !sections.isEmpty else { return }
-        let clampedY = min(max(locationY, 0), max(trackHeight, 1))
-        let progress = clampedY / max(trackHeight, 1)
-        let rawIndex = Int((progress * CGFloat(max(sections.count - 1, 0))).rounded())
-        let section = sections[min(max(rawIndex, 0), sections.count - 1)]
-
+        guard let section = scrubberSection(forY: locationY, trackHeight: trackHeight, sections: sections) else { return }
         guard scrubberActiveSectionID != section.id else { return }
 
         scrubberActiveSectionID = section.id
@@ -3005,7 +3030,10 @@ fileprivate struct AssetHistoryDetailViewer: View {
                                     .scaledToFit()
                                     .scaleEffect(scale * pinchScale)
                                     .offset(offset)
-                                    .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.7), value: pinchScale)
+                                    // pinchScale is a live @GestureState value that already tracks the
+                                    // trackpad 1:1 every frame — layering a spring .animation(value:) on
+                                    // top of it made the scale continuously chase a moving target instead
+                                    // of tracking it directly, which read as laggy/delayed zooming.
                                     .gesture(
                                         MagnificationGesture()
                                             .updating($pinchScale) { value, state, _ in
