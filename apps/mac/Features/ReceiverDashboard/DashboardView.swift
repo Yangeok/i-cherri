@@ -2933,10 +2933,18 @@ fileprivate struct AssetHistoryDetailViewer: View {
                         if isVideo {
                             NativeVideoPlayerView(url: fileURL, autoPlay: true, showControls: true)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .transition(.identity)
                         } else if let liveVideoURL = livePhotoVideoURL, isLivePhotoVideoHovering {
                             NativeVideoPlayerView(url: liveVideoURL, autoPlay: true, showControls: false)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .transition(.identity)
                         } else {
+                            // .identity avoids a cross-fade with the video branch above — without it,
+                            // switching between a video and a photo could momentarily render both the
+                            // outgoing AVPlayerView (with its own translucent controls scrim) and the
+                            // incoming content on top of the shared 0.85-opacity dimmed background,
+                            // making the dimming look like it's stacking/darkening on every switch.
+                            Group {
                             if let nsImage = loadedImage {
                                 Image(nsImage: nsImage)
                                     .resizable()
@@ -2993,6 +3001,8 @@ fileprivate struct AssetHistoryDetailViewer: View {
                                 ProgressView()
                                     .controlSize(.large)
                             }
+                            }
+                            .transition(.identity)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
