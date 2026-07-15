@@ -1069,6 +1069,14 @@ final class BackupDashboardViewModel: ObservableObject {
                     progressViewModel.setTotalBytes(scanPlan.runAssetBytes)
                     progressViewModel.totalCount = scanPlan.libraryAssetCount
                     progressViewModel.overallBackedUpCount = max(scanPlan.libraryAssetCount - scanPlan.runAssetCount, 0)
+                    // setTotalCount() above already recomputed `progress`, but from the
+                    // pre-reassignment overallBackedUpCount/totalCount (the scan tally). Recompute
+                    // once more from the values actually being displayed (the "already backed up"
+                    // baseline) so the LiquidProgressBar can't show 0% while the count badge next
+                    // to it already reads N/N — the two were being left out of sync here.
+                    progressViewModel.progress = progressViewModel.totalCount > 0
+                        ? Double(progressViewModel.overallBackedUpCount) / Double(progressViewModel.totalCount)
+                        : 0
                 }
 
                 try Task.checkCancellation()
