@@ -1070,7 +1070,7 @@ extension DatabaseManager: BackupIndexQuerying {
                 
                 let fingerprints = chunk.map { $0.quickFingerprint }
                 let fingerprintRecords = try BackupAssetRecord
-                    .filter(fingerprints.contains(Column("quick_fingerprint")))
+                    .filter(fingerprints.contains(Column("quick_fingerprint")) && Column("status") == "completed")
                     .fetchAll(db)
                 
                 for r in fingerprintRecords {

@@ -47,6 +47,53 @@ actor DiskBackedBackupIndex: BackupIndexQuerying {
         try await databaseManager.findBySHA256(sha256)
     }
 
+    // The default BackupIndexQuerying.fetchBatchEntries loops findByDeviceAndAssetID +
+    // findByCandidate per candidate — for N candidates that's N sequential actor round-trips
+    // (2+ each), which dominates checkBatch latency for large libraries. Batch the common case
+    // (candidate already known by exact match or fingerprint) into two IN(...) queries, and only
+    // fall back to the slower per-candidate rehydration/disk-scan paths for the subset that
+    // actually needs them (cross-device dedup rehydration, or DB rows missing entirely).
+    func fetchBatchEntries(
+        candidates: [AssetMetadata]
+    ) async throws -> (exactMatches: [String: BackupIndexEntry], fingerprintMatches: [String: BackupIndexEntry]) {
+        guard !candidates.isEmpty else { return ([:], [:]) }
+
+        let (exactMatches, batchFingerprintMatches) = try await databaseManager.fetchBatchEntries(candidates: candidates)
+        var fingerprintMatches = batchFingerprintMatches
+
+        for candidate in candidates {
+            let exactKey = "\(candidate.deviceID):\(candidate.assetLocalID)"
+
+            if fingerprintMatches[candidate.quickFingerprint] != nil {
+                // Known by fingerprint. If this exact device/asset combo isn't registered yet
+                // (first time this device has seen a fingerprint another device already backed
+                // up), rehydrate a duplicate pointer for it.
+                if exactMatches[exactKey] == nil {
+                    try await rehydrateIndexIfNeeded(for: candidate)
+                }
+                continue
+            }
+
+            // No DB record at all for this fingerprint — rare (DB row deleted/lost but the
+            // physical file survives on disk). findOnDisk is a cheap no-op (file existence
+            // check) for genuinely new assets that were never backed up.
+            guard let diskMatch = try findOnDisk(candidate) else { continue }
+            let rehydrated = try await rehydrateIndex(
+                for: candidate,
+                resolvedFileURL: diskMatch.fileURL,
+                contentSHA256: diskMatch.contentSHA256,
+                duplicateOfBackupID: nil
+            )
+            fingerprintMatches[candidate.quickFingerprint] = BackupIndexEntry(
+                backupID: rehydrated.backupId,
+                status: rehydrated.status,
+                contentSHA256: rehydrated.contentSha256
+            )
+        }
+
+        return (exactMatches, fingerprintMatches)
+    }
+
     func registerDuplicate(candidate: AssetMetadata, duplicateOfBackupID: String) async throws {
         try await databaseManager.registerDuplicate(candidate: candidate, duplicateOfBackupID: duplicateOfBackupID)
     }
