@@ -16,6 +16,10 @@ public actor ChunkUploadSender {
         self.trustToken = trustToken
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 120
+        // See BackupClient's config for why this is needed: waitsForConnectivity otherwise lets a
+        // chunk PUT wait indefinitely (7-day default) when the receiver becomes unreachable,
+        // without ever throwing an error for ResumableUploadManager's retry logic to catch.
+        config.timeoutIntervalForResource = 150
         config.shouldUseExtendedBackgroundIdleMode = true
         config.waitsForConnectivity = true
         self.session = URLSession(configuration: config)

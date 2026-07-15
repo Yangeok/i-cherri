@@ -24,6 +24,12 @@ public actor BackupClient {
         self.trustToken = trustToken
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
+        // waitsForConnectivity suspends the request instead of failing it while the network is
+        // unreachable, and timeoutIntervalForRequest doesn't count that waiting time — without an
+        // explicit resource-level ceiling it defaults to 7 days, so a dropped connection to the
+        // receiver silently hangs forever instead of throwing and letting the retry/recovery
+        // logic upstream (ResumableUploadManager) ever run.
+        config.timeoutIntervalForResource = 90
         config.shouldUseExtendedBackgroundIdleMode = true
         config.waitsForConnectivity = true
         self.session = URLSession(configuration: config)
