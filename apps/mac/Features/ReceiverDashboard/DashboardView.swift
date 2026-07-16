@@ -912,7 +912,19 @@ struct DashboardView: View {
 
     private func historySummary(for device: PairedDeviceRecord) -> String {
         if let coverageSummary = viewModel.latestCoverageSummary(for: device.deviceId) {
-            return "\(coverageSummary.completedAssetCount.formatted()) / \(coverageSummary.totalAssetCount.formatted()) in library • \(coverageSummary.pendingAssetCount.formatted()) pending"
+            // completedAssetCount is an all-time cumulative count for this device (it never
+            // shrinks, even if the source photo is later deleted from the phone), while
+            // totalAssetCount is just a snapshot of the library size as of the last backup run —
+            // these are answering different questions and can legitimately diverge either way,
+            // so show them as separate facts instead of an "X / Y" ratio that implies a cap.
+            var parts = [
+                "\(coverageSummary.completedAssetCount.formatted())개 백업됨",
+                "라이브러리 현재 \(coverageSummary.totalAssetCount.formatted())개"
+            ]
+            if coverageSummary.pendingAssetCount > 0 {
+                parts.append("\(coverageSummary.pendingAssetCount.formatted())개 대기 중")
+            }
+            return parts.joined(separator: " • ")
         }
         let backedUp = viewModel.assetCount(for: device.deviceId)
         let duplicates = viewModel.duplicateCount(for: device.deviceId)
