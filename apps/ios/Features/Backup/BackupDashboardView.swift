@@ -417,14 +417,14 @@ public struct BackupDashboardView: View {
 // MARK: - Liquid Glass ViewModifiers
 
 /// 그리드 카드(설정/권한/기기 연결)에 적용하는 Modifier.
-/// iOS 26+ : .glassEffect(.regular, in: .rect(cornerRadius:))
+/// iOS 26+ : .glassEffect(.clear.interactive(), in: .rect(cornerRadius:))
 /// iOS 25- / macOS : .ultraThinMaterial + cornerRadius + 테두리 fallback
 private struct GlassCardModifier: ViewModifier {
     func body(content: Content) -> some View {
 #if os(iOS)
         if #available(iOS 26, *) {
             content
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
+                .glassEffect(.clear.interactive(), in: .rect(cornerRadius: 16))
         } else {
             content
                 .background(.ultraThinMaterial)
@@ -452,7 +452,7 @@ private struct GlassContainerModifier: ViewModifier {
 #if os(iOS)
         if #available(iOS 26, *) {
             content
-                .glassEffect(.regular, in: .rect(cornerRadius: 20))
+                .glassEffect(.clear.interactive(), in: .rect(cornerRadius: 20))
         } else {
             content
                 .background(Color.secondary.opacity(0.12))
@@ -472,7 +472,7 @@ private struct GlassCircleModifier: ViewModifier {
 #if os(iOS)
         if #available(iOS 26, *) {
             content
-                .glassEffect(.regular.interactive(), in: .circle)
+                .glassEffect(.clear.interactive(), in: .circle)
         } else {
             content
                 .background(

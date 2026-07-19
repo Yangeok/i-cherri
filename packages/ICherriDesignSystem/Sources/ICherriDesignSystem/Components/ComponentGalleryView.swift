@@ -504,7 +504,7 @@ private struct GalleryGlassCardModifier: ViewModifier {
 #if os(iOS)
         if #available(iOS 26, *) {
             content
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
+                .glassEffect(.clear.interactive(), in: .rect(cornerRadius: 16))
         } else {
             content
                 .background(.ultraThinMaterial)
@@ -531,7 +531,7 @@ private struct GalleryGlassContainerModifier: ViewModifier {
 #if os(iOS)
         if #available(iOS 26, *) {
             content
-                .glassEffect(.regular, in: .rect(cornerRadius: 20))
+                .glassEffect(.clear.interactive(), in: .rect(cornerRadius: 20))
         } else {
             content
                 .background(Color.secondary.opacity(0.12))
@@ -550,7 +550,7 @@ private struct GalleryGlassCircleModifier: ViewModifier {
 #if os(iOS)
         if #available(iOS 26, *) {
             content
-                .glassEffect(.regular.interactive(), in: .circle)
+                .glassEffect(.clear.interactive(), in: .circle)
         } else {
             content
                 .background(
