@@ -74,8 +74,7 @@ public struct ComponentGalleryView: View {
             triggerAndControls
         }
         .padding()
-        .background(Color.secondary.opacity(0.12))
-        .cornerRadius(20)
+        .modifier(GalleryGlassContainerModifier())
     }
     
     private var defaultDiscView: some View {
@@ -107,15 +106,7 @@ public struct ComponentGalleryView: View {
         }
         .transition(.scale.combined(with: .opacity))
         .frame(width: 160, height: 160)
-        .background(
-            Circle()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Circle()
-                        .stroke(LinearGradient(colors: [.white.opacity(0.35), .clear], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
-                )
-                .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
-        )
+        .modifier(GalleryGlassCircleModifier())
     }
     
     private var expandedCardView: some View {
@@ -355,12 +346,7 @@ public struct ComponentGalleryView: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                )
+                .modifier(GalleryGlassCardModifier())
                 
                 // 사진 권한 카드
                 VStack(alignment: .leading, spacing: 8) {
@@ -383,12 +369,7 @@ public struct ComponentGalleryView: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                )
+                .modifier(GalleryGlassCardModifier())
                 
                 // 로컬 네트워크 카드
                 VStack(alignment: .leading, spacing: 8) {
@@ -411,12 +392,7 @@ public struct ComponentGalleryView: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                )
+                .modifier(GalleryGlassCardModifier())
                 
                 // ⭐️ [요구사항 완벽 반영] 백업 대상 카드에 스캔(Refresh) 및 잊기(Forget) 기능을 유기적으로 통합한 다기능 Menu!
                 Menu {
@@ -475,12 +451,7 @@ public struct ComponentGalleryView: View {
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                    )
+                    .modifier(GalleryGlassCardModifier())
                 }
                 .buttonStyle(.plain)
             }
@@ -523,6 +494,101 @@ public struct ComponentGalleryView: View {
     
     private func idxStr(_ val: Int) -> String {
         return "\(val)"
+    }
+}
+
+// MARK: - Liquid Glass ViewModifiers (Gallery-local)
+
+private struct GalleryGlassCardModifier: ViewModifier {
+    func body(content: Content) -> some View {
+#if os(iOS)
+        if #available(iOS 26, *) {
+            content
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
+        } else {
+            content
+                .background(.ultraThinMaterial)
+                .cornerRadius(16)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(.white.opacity(0.18), lineWidth: 0.5)
+                )
+        }
+#else
+        content
+            .background(.ultraThinMaterial)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(.white.opacity(0.18), lineWidth: 0.5)
+            )
+#endif
+    }
+}
+
+private struct GalleryGlassContainerModifier: ViewModifier {
+    func body(content: Content) -> some View {
+#if os(iOS)
+        if #available(iOS 26, *) {
+            content
+                .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        } else {
+            content
+                .background(Color.secondary.opacity(0.12))
+                .cornerRadius(20)
+        }
+#else
+        content
+            .background(Color.secondary.opacity(0.12))
+            .cornerRadius(20)
+#endif
+    }
+}
+
+private struct GalleryGlassCircleModifier: ViewModifier {
+    func body(content: Content) -> some View {
+#if os(iOS)
+        if #available(iOS 26, *) {
+            content
+                .glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            content
+                .background(
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            Circle()
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [.white.opacity(0.35), .clear],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 0.8
+                                )
+                        )
+                        .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
+                )
+        }
+#else
+        content
+            .background(
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.35), .clear],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.8
+                            )
+                    )
+                    .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
+            )
+#endif
     }
 }
 

@@ -109,8 +109,7 @@ public struct BackupDashboardView: View {
             triggerAndControls
         }
         .padding()
-        .background(Color.secondary.opacity(0.12))
-        .cornerRadius(20)
+        .modifier(GlassContainerModifier())
     }
     
     private var defaultDiscView: some View {
@@ -148,15 +147,7 @@ public struct BackupDashboardView: View {
         }
         .transition(.scale.combined(with: .opacity))
         .frame(width: 160, height: 160)
-        .background(
-            Circle()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Circle()
-                        .stroke(LinearGradient(colors: [.white.opacity(0.35), .clear], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
-                )
-                .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
-        )
+        .modifier(GlassCircleModifier())
     }
     
     private var morphingBackgroundGlow: some View {
@@ -237,12 +228,7 @@ public struct BackupDashboardView: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                )
+                .modifier(GlassCardModifier())
                 
                 // 사진 권한 카드 (탭 시 실제 사진 라이브러리 접근 요청 연동)
                 Button(action: {
@@ -272,12 +258,7 @@ public struct BackupDashboardView: View {
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                    )
+                    .modifier(GlassCardModifier())
                 }
                 .buttonStyle(.plain)
                 
@@ -307,12 +288,7 @@ public struct BackupDashboardView: View {
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                    )
+                    .modifier(GlassCardModifier())
                 }
                 .buttonStyle(.plain)
                 
@@ -390,12 +366,7 @@ public struct BackupDashboardView: View {
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                    )
+                    .modifier(GlassCardModifier())
                 }
                 .buttonStyle(.plain)
             }
@@ -407,9 +378,13 @@ public struct BackupDashboardView: View {
     
     private var backgroundGradient: some View {
         LinearGradient(
-            colors: [Color(.systemBackground), Color.accentColor.opacity(0.05)],
-            startPoint: .top,
-            endPoint: .bottom
+            colors: [
+                Color(.systemBackground),
+                Color.accentColor.opacity(0.12),
+                Color.purple.opacity(0.08)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
         )
         .ignoresSafeArea()
     }
@@ -436,6 +411,106 @@ public struct BackupDashboardView: View {
     
     private func simulatedProgressText(for progressViewModel: BackupProgressViewModel) -> String {
         return "\(progressViewModel.overallBackedUpCount) / \(progressViewModel.totalCount)"
+    }
+}
+
+// MARK: - Liquid Glass ViewModifiers
+
+/// 그리드 카드(설정/권한/기기 연결)에 적용하는 Modifier.
+/// iOS 26+ : .glassEffect(.regular, in: .rect(cornerRadius:))
+/// iOS 25- / macOS : .ultraThinMaterial + cornerRadius + 테두리 fallback
+private struct GlassCardModifier: ViewModifier {
+    func body(content: Content) -> some View {
+#if os(iOS)
+        if #available(iOS 26, *) {
+            content
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
+        } else {
+            content
+                .background(.ultraThinMaterial)
+                .cornerRadius(16)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(.white.opacity(0.18), lineWidth: 0.5)
+                )
+        }
+#else
+        content
+            .background(.ultraThinMaterial)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(.white.opacity(0.18), lineWidth: 0.5)
+            )
+#endif
+    }
+}
+
+/// 메인 시뮬레이터 섹션 컨테이너에 적용하는 Modifier.
+private struct GlassContainerModifier: ViewModifier {
+    func body(content: Content) -> some View {
+#if os(iOS)
+        if #available(iOS 26, *) {
+            content
+                .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        } else {
+            content
+                .background(Color.secondary.opacity(0.12))
+                .cornerRadius(20)
+        }
+#else
+        content
+            .background(Color.secondary.opacity(0.12))
+            .cornerRadius(20)
+#endif
+    }
+}
+
+/// 원형 disc 뷰에 적용하는 Modifier.
+private struct GlassCircleModifier: ViewModifier {
+    func body(content: Content) -> some View {
+#if os(iOS)
+        if #available(iOS 26, *) {
+            content
+                .glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            content
+                .background(
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            Circle()
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [.white.opacity(0.35), .clear],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 0.8
+                                )
+                        )
+                        .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
+                )
+        }
+#else
+        content
+            .background(
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.35), .clear],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.8
+                            )
+                    )
+                    .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
+            )
+#endif
     }
 }
 
