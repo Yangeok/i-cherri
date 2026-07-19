@@ -48,6 +48,7 @@ public struct BackupDashboardView: View {
 
                     // 1. 단일 대화형 대시보드 시뮬레이터 디자인 본판 이식
                     simulatorSection
+                        .padding(.horizontal)
                     
                     // 백업 중이 아닐 때만 하단 2열 설정/기기 그리드를 보여줌
                     if viewModel.activeBackupProgressViewModel == nil {
@@ -204,7 +205,7 @@ public struct BackupDashboardView: View {
             .padding(.horizontal)
             
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                // 자동 백업 카드 (실제 자동 백업 스토어 및 스케줄러 연동 완료!)
+                // 자동 백업 카드
                 VStack(alignment: .leading, spacing: 8) {
                     Label("자동 백업", systemImage: "bolt.badge.aod")
                         .font(.system(.caption, design: .rounded, weight: .bold))
@@ -220,17 +221,20 @@ public struct BackupDashboardView: View {
                     ))
                     .labelsHidden()
                     .tint(.accentColor)
+                    .disabled(true)
                     
                     Text(viewModel.autoBackupEligibilityMessage ?? "배터리 20% + Wi-Fi 조건")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundColor(.secondary)
                         .lineLimit(2)
+                    
+                    Spacer(minLength: 0)
                 }
                 .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 100, maxHeight: 100, alignment: .topLeading)
                 .modifier(GlassCardModifier())
                 
-                // 사진 권한 카드 (탭 시 실제 사진 라이브러리 접근 요청 연동)
+                // 사진 권한 카드
                 Button(action: {
                     if viewModel.photoPermissionStatus != .granted && viewModel.photoPermissionStatus != .limited {
                         Task {
@@ -252,17 +256,20 @@ public struct BackupDashboardView: View {
                                 .foregroundColor(viewModel.photoPermissionStatus == .granted ? .green : (viewModel.photoPermissionStatus == .limited ? .orange : (viewModel.photoPermissionStatus == .denied ? .red : .orange)))
                         }
                         
-                        Text(viewModel.photoPermissionStatus == .granted ? "라이브러리 접근 허가" : (viewModel.photoPermissionStatus == .limited ? "선택된 사진만 허용됨 (탭하여 권한 설명)" : "탭하여 권한 요청"))
+                        Text(viewModel.photoPermissionStatus == .granted ? "라이브러리 접근 허가" : (viewModel.photoPermissionStatus == .limited ? "선택된 사진만 허용됨" : "탭하여 권한 요청"))
                             .font(.system(.caption2, design: .rounded))
                             .foregroundColor(.secondary)
+                            .lineLimit(2)
+                        
+                        Spacer(minLength: 0)
                     }
                     .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 100, maxHeight: 100, alignment: .topLeading)
                     .modifier(GlassCardModifier())
                 }
                 .buttonStyle(.plain)
                 
-                // 로컬 네트워크 카드 (탭 시 수동 Bonjour 새로고침 유동적 호출)
+                // 로컬 네트워크 카드
                 Button(action: {
                     Task {
                         await viewModel.refreshReceivers()
@@ -285,14 +292,17 @@ public struct BackupDashboardView: View {
                         Text("주변 Mac 탐색 허가")
                             .font(.system(.caption2, design: .rounded))
                             .foregroundColor(.secondary)
+                            .lineLimit(2)
+                        
+                        Spacer(minLength: 0)
                     }
                     .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 100, maxHeight: 100, alignment: .topLeading)
                     .modifier(GlassCardModifier())
                 }
                 .buttonStyle(.plain)
                 
-                // ⭐️ [요구사항 완벽 반영] 백업 대상 선택 및 Forget/Refresh 가 탑재된 기기 연결 카드
+                // 백업 대상 카드
                 Menu {
                     Section("감지된 기기 (자동 스캔 중)") {
                         if viewModel.discoveredReceivers.isEmpty {
@@ -319,7 +329,6 @@ public struct BackupDashboardView: View {
                     }
                     
                     Section("제어 및 해제") {
-                        // 수동 새로고침
                         Button(action: {
                             Task {
                                 await viewModel.refreshReceivers()
@@ -328,7 +337,6 @@ public struct BackupDashboardView: View {
                             Label("주변 기기 새로고침 (Refresh)", systemImage: "arrow.clockwise")
                         }
                         
-                        // 기기 잊기
                         if viewModel.isPaired {
                             Button(role: .destructive, action: {
                                 viewModel.clearPairedReceiver()
@@ -363,9 +371,11 @@ public struct BackupDashboardView: View {
                                 .font(.system(.caption2, design: .rounded))
                                 .foregroundColor(viewModel.pairedReceiverIsOnline ? .green : .orange)
                         }
+                        
+                        Spacer(minLength: 0)
                     }
                     .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 100, maxHeight: 100, alignment: .topLeading)
                     .modifier(GlassCardModifier())
                 }
                 .buttonStyle(.plain)
@@ -442,101 +452,105 @@ public struct BackupDashboardView: View {
 
 // MARK: - Liquid Glass ViewModifiers
 
-/// 그리드 카드(설정/권한/기기 연결)에 적용하는 Modifier.
-/// iOS 26+ : .glassEffect(.clear.interactive(), in: .rect(cornerRadius:))
-/// iOS 25- / macOS : .ultraThinMaterial + cornerRadius + 테두리 fallback
+/// 그리드 카드(설정/권한/기기 연결)에 적용하는 리퀴드 글라스 Modifier.
 private struct GlassCardModifier: ViewModifier {
     func body(content: Content) -> some View {
-#if os(iOS)
-        if #available(iOS 26, *) {
-            content
-                .glassEffect(.clear.interactive(), in: .rect(cornerRadius: 16))
-        } else {
-            content
-                .background(.ultraThinMaterial)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                )
-        }
-#else
         content
-            .background(.ultraThinMaterial)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.25), .white.opacity(0.05)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+            )
             .cornerRadius(16)
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(.white.opacity(0.18), lineWidth: 0.5)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.6), .white.opacity(0.15)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
             )
-#endif
+            .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 5)
     }
 }
 
-/// 메인 시뮬레이터 섹션 컨테이너에 적용하는 Modifier.
+/// 메인 시뮬레이터 섹션 컨테이너에 적용하는 리퀴드 글라스 Modifier.
 private struct GlassContainerModifier: ViewModifier {
     func body(content: Content) -> some View {
-#if os(iOS)
-        if #available(iOS 26, *) {
-            content
-                .glassEffect(.clear.interactive(), in: .rect(cornerRadius: 20))
-        } else {
-            content
-                .background(Color.secondary.opacity(0.12))
-                .cornerRadius(20)
-        }
-#else
         content
-            .background(Color.secondary.opacity(0.12))
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.2), .white.opacity(0.03)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+            )
             .cornerRadius(20)
-#endif
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.5), .white.opacity(0.1)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.2
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.1), radius: 15, x: 0, y: 8)
     }
 }
 
-/// 원형 disc 뷰에 적용하는 Modifier.
+/// 원형 disc 뷰에 적용하는 리퀴드 글라스 Modifier.
 private struct GlassCircleModifier: ViewModifier {
     func body(content: Content) -> some View {
-#if os(iOS)
-        if #available(iOS 26, *) {
-            content
-                .glassEffect(.clear.interactive(), in: .circle)
-        } else {
-            content
-                .background(
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            Circle()
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [.white.opacity(0.35), .clear],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 0.8
-                                )
-                        )
-                        .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
-                )
-        }
-#else
         content
             .background(
                 Circle()
                     .fill(.ultraThinMaterial)
                     .overlay(
                         Circle()
-                            .stroke(
+                            .fill(
                                 LinearGradient(
-                                    colors: [.white.opacity(0.35), .clear],
+                                    colors: [.white.opacity(0.35), .white.opacity(0.05)],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 0.8
+                                )
                             )
                     )
-                    .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
             )
-#endif
+            .clipShape(Circle())
+            .overlay(
+                Circle()
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.7), .white.opacity(0.15)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.5
+                    )
+            )
+            .shadow(color: Color.blue.opacity(0.2), radius: 12, x: 0, y: 6)
     }
 }
 
