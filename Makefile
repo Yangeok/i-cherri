@@ -210,7 +210,7 @@ ios-app:
 
 ios-run:
 	@echo "📱 Building, installing, and launching iOS app..."
-	@DEVICE_ID="$${IOS_DEVICE_ID:-$$(xcodebuild -project "$(IOS_PROJECT)" -scheme "$(IOS_SCHEME)" -showdestinations 2>/dev/null | sed -n "s/.*platform:iOS, arch:arm64, id:\\([^,}]*\\).*/\\1/p" | head -1)}"; \
+	@DEVICE_ID="$${IOS_DEVICE_ID:-$$(xcrun devicectl list devices 2>/dev/null | awk 'NR>2 && /iPhone|iPad/ {print $$3; exit}')}"; \
 	if [ -z "$$DEVICE_ID" ]; then \
 		echo "❌ No connected iOS device found. Connect and unlock a device, or run: IOS_DEVICE_ID=<udid> make ios-run"; \
 		exit 1; \
@@ -222,7 +222,7 @@ ios-run:
 
 ios-console:
 	@echo "📟 Launching iOS app with console attached..."
-	@DEVICE_ID="$${IOS_DEVICE_ID:-$$(xcodebuild -project "$(IOS_PROJECT)" -scheme "$(IOS_SCHEME)" -showdestinations 2>/dev/null | sed -n "s/.*platform:iOS, arch:arm64, id:\\([^,}]*\\).*/\\1/p" | head -1)}"; \
+	@DEVICE_ID="${IOS_DEVICE_ID:-$(xcrun devicectl list devices 2>/dev/null | awk 'NR>2 && /iPhone|iPad/ {print $3; exit}')}"; \
 	if [ -z "$$DEVICE_ID" ]; then \
 		echo "❌ No connected iOS device found. Connect and unlock a device, or run: IOS_DEVICE_ID=<udid> make ios-console"; \
 		exit 1; \
