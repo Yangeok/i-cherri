@@ -377,15 +377,41 @@ public struct BackupDashboardView: View {
     // MARK: - Helpers
     
     private var backgroundGradient: some View {
-        LinearGradient(
-            colors: [
-                Color(.systemBackground),
-                Color.accentColor.opacity(0.12),
-                Color.purple.opacity(0.08)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+        ZStack {
+            // 기본 베이스 배경 (라이트/다크 대응)
+            LinearGradient(
+                colors: [
+                    Color.indigo.opacity(0.18),
+                    Color.purple.opacity(0.12),
+                    Color.blue.opacity(0.15)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            
+            // 배경 오로라 빛 굴절 레이어 (Liquid Glass 투과용)
+            GeometryReader { proxy in
+                ZStack {
+                    Circle()
+                        .fill(Color.blue.opacity(0.35))
+                        .frame(width: proxy.size.width * 0.8)
+                        .blur(radius: 60)
+                        .offset(x: -proxy.size.width * 0.2, y: -proxy.size.height * 0.1)
+                    
+                    Circle()
+                        .fill(Color.purple.opacity(0.3))
+                        .frame(width: proxy.size.width * 0.7)
+                        .blur(radius: 70)
+                        .offset(x: proxy.size.width * 0.3, y: proxy.size.height * 0.2)
+                    
+                    Circle()
+                        .fill(Color.pink.opacity(0.25))
+                        .frame(width: proxy.size.width * 0.6)
+                        .blur(radius: 50)
+                        .offset(x: -proxy.size.width * 0.1, y: proxy.size.height * 0.5)
+                }
+            }
+        }
         .ignoresSafeArea()
     }
     
