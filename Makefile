@@ -206,23 +206,29 @@ mac-notarize-file:
 
 ios-app:
 	@echo "📱 Building iOS App..."
-	xcodebuild build -project $(IOS_PROJECT) -scheme $(IOS_SCHEME) -destination 'generic/platform=iOS'
+	xcodebuild build -workspace iCherri.xcworkspace -scheme $(IOS_SCHEME) -destination 'generic/platform=iOS' -derivedDataPath $(IOS_DERIVED_DATA)
 
 ios-run:
 	@echo "📱 Building, installing, and launching iOS app..."
-	@DEVICE_ID="$${IOS_DEVICE_ID:-$$(xcrun devicectl list devices 2>/dev/null | awk 'NR>2 && /iPhone|iPad/ {print $$3; exit}')}"; \
+	@DEVICE_ID="$${IOS_DEVICE_ID:-$$(xcodebuild -workspace iCherri.xcworkspace -scheme "$(IOS_SCHEME)" -showdestinations 2>/dev/null | grep "platform:iOS, arch:arm64" | sed -n "s/.*id:\([^,}]*\).*/\1/p" | head -1)}"; \
+	if [ -z "$$DEVICE_ID" ]; then \
+		DEVICE_ID="$$(xcrun devicectl list devices 2>/dev/null | grep -E "iPhone|iPad" | awk '{for(i=1;i<=NF;i++) if($$i ~ /^[0-9A-FA-F-]{36}$$/) {print $$i; exit}}')"; \
+	fi; \
 	if [ -z "$$DEVICE_ID" ]; then \
 		echo "❌ No connected iOS device found. Connect and unlock a device, or run: IOS_DEVICE_ID=<udid> make ios-run"; \
 		exit 1; \
 	fi; \
 	echo "📲 Using device $$DEVICE_ID"; \
-	xcodebuild build -project "$(IOS_PROJECT)" -scheme "$(IOS_SCHEME)" -destination "id=$$DEVICE_ID" -derivedDataPath "$(IOS_DERIVED_DATA)"; \
+	xcodebuild build -workspace iCherri.xcworkspace -scheme "$(IOS_SCHEME)" -destination "id=$$DEVICE_ID" -derivedDataPath "$(IOS_DERIVED_DATA)" || exit 1; \
 	xcrun devicectl device install app --device "$$DEVICE_ID" "$(IOS_APP_PATH)"; \
 	xcrun devicectl device process launch --device "$$DEVICE_ID" --terminate-existing "$(IOS_BUNDLE_ID)"
 
 ios-console:
 	@echo "📟 Launching iOS app with console attached..."
-	@DEVICE_ID="${IOS_DEVICE_ID:-$(xcrun devicectl list devices 2>/dev/null | awk 'NR>2 && /iPhone|iPad/ {print $3; exit}')}"; \
+	@DEVICE_ID="$${IOS_DEVICE_ID:-$$(xcodebuild -workspace iCherri.xcworkspace -scheme "$(IOS_SCHEME)" -showdestinations 2>/dev/null | grep "platform:iOS, arch:arm64" | sed -n "s/.*id:\([^,}]*\).*/\1/p" | head -1)}"; \
+	if [ -z "$$DEVICE_ID" ]; then \
+		DEVICE_ID="$$(xcrun devicectl list devices 2>/dev/null | grep -E "iPhone|iPad" | awk '{for(i=1;i<=NF;i++) if($$i ~ /^[0-9A-FA-F-]{36}$$/) {print $$i; exit}}')"; \
+	fi; \
 	if [ -z "$$DEVICE_ID" ]; then \
 		echo "❌ No connected iOS device found. Connect and unlock a device, or run: IOS_DEVICE_ID=<udid> make ios-console"; \
 		exit 1; \
@@ -230,8 +236,10 @@ ios-console:
 	echo "📲 Using device $$DEVICE_ID"; \
 	xcrun devicectl device process launch --device "$$DEVICE_ID" --terminate-existing --console "$(IOS_BUNDLE_ID)"
 
-ios-dev: ios-run
-	@$(MAKE) ios-console
+ios-dev:
+	@DEVICE_ID="$${IOS_DEVICE_ID:-$$(xcodebuild -workspace iCherri.xcworkspace -scheme "$(IOS_SCHEME)" -showdestinations 2>/dev/null | grep "platform:iOS, arch:arm64" | sed -n "s/.*id:\([^,}]*\).*/\1/p" | head -1)}"; \
+	IOS_DEVICE_ID="$$DEVICE_ID" $(MAKE) ios-run; \
+	IOS_DEVICE_ID="$$DEVICE_ID" $(MAKE) ios-console
 
 mac-dev: mac-run
 	@$(MAKE) mac-logs
