@@ -64,11 +64,10 @@ public struct BackupDashboardView: View {
         }
         .task { await viewModel.onAppear() }
         .onChange(of: scenePhase) { newPhase in
-            guard newPhase == .active else { return }
-            viewModel.recoverStuckBackupIfNeeded()
-            Task {
-                await viewModel.refreshReceivers()
-                await viewModel.reevaluateAutomaticBackup()
+            if newPhase == .active {
+                viewModel.onForeground()
+            } else if newPhase == .background || newPhase == .inactive {
+                viewModel.onBackground()
             }
         }
         .confirmationDialog(
@@ -637,7 +636,30 @@ final class BackupDashboardViewModel: ObservableObject {
         return availableSwitchTargets.first
     }
 
+    func onBackground() {
+        stopPingTimer()
+        bonjourBrowser.stopBrowsing()
+        UIDevice.current.isBatteryMonitoringEnabled = false
+    }
+
+    func onForeground() {
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        bonjourBrowser.startBrowsing()
+        recoverStuckBackupIfNeeded()
+        Task {
+            await refreshReceivers()
+            await reevaluateAutomaticBackup()
+            if isPaired && pairedReceiverIsOnline {
+                startPingTimer()
+            }
+        }
+    }
+
     func startPingTimer() {
+        guard UIApplication.shared.applicationState == .active else {
+            stopPingTimer()
+            return
+        }
         pingTimer?.cancel()
         pingTimer = Task {
             // Send an initial ping immediately on timer start
@@ -660,6 +682,10 @@ final class BackupDashboardViewModel: ObservableObject {
     }
 
     private func sendPingToReceiver() async {
+        guard UIApplication.shared.applicationState == .active else {
+            stopPingTimer()
+            return
+        }
         guard isPaired, pairedReceiverIsOnline,
               let receiverURLString = UserDefaults.standard.string(forKey: receiverURLKey),
               let receiverURL = URL(string: receiverURLString)
@@ -2441,6 +2467,7 @@ public final class BackupLiveActivityManager {
     private init() {}
     
     private var currentActivity: Activity<BackupActivityAttributes>?
+    private var lastUpdateTime: Date = .distantPast
     
     public func start(deviceName: String, completedCount: Int, totalCount: Int, phaseText: String = "라이브러리 스캔 중...") {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
@@ -2449,6 +2476,7 @@ public final class BackupLiveActivityManager {
         }
         
         stop()
+        lastUpdateTime = .distantPast
         
         let attributes = BackupActivityAttributes(deviceName: deviceName)
         let initialState = BackupActivityAttributes.ContentState(
@@ -2474,6 +2502,10 @@ public final class BackupLiveActivityManager {
     
     public func update(progress: Double, completedCount: Int, totalCount: Int, formattedSpeed: String, filename: String?, phaseText: String) {
         guard let activity = currentActivity else { return }
+        
+        let now = Date()
+        guard completedCount == totalCount || now.timeIntervalSince(lastUpdateTime) >= 1.0 else { return }
+        lastUpdateTime = now
         
         let updatedState = BackupActivityAttributes.ContentState(
             progress: progress,
