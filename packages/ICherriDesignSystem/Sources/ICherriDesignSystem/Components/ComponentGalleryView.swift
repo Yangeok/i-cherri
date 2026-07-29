@@ -501,94 +501,100 @@ public struct ComponentGalleryView: View {
 
 private struct GalleryGlassCardModifier: ViewModifier {
     func body(content: Content) -> some View {
-#if os(iOS)
-        if #available(iOS 26, *) {
-            content
-                .glassEffect(.clear.interactive(), in: .rect(cornerRadius: 16))
-        } else {
-            content
-                .background(.ultraThinMaterial)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                )
-        }
-#else
         content
-            .background(.ultraThinMaterial)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.25), .white.opacity(0.05)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+            )
             .cornerRadius(16)
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(.white.opacity(0.18), lineWidth: 0.5)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.6), .white.opacity(0.15)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
             )
-#endif
+            .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 5)
     }
 }
 
 private struct GalleryGlassContainerModifier: ViewModifier {
     func body(content: Content) -> some View {
-#if os(iOS)
-        if #available(iOS 26, *) {
-            content
-                .glassEffect(.clear.interactive(), in: .rect(cornerRadius: 20))
-        } else {
-            content
-                .background(Color.secondary.opacity(0.12))
-                .cornerRadius(20)
-        }
-#else
         content
-            .background(Color.secondary.opacity(0.12))
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.2), .white.opacity(0.03)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+            )
             .cornerRadius(20)
-#endif
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.5), .white.opacity(0.1)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.2
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.1), radius: 15, x: 0, y: 8)
     }
 }
 
 private struct GalleryGlassCircleModifier: ViewModifier {
     func body(content: Content) -> some View {
-#if os(iOS)
-        if #available(iOS 26, *) {
-            content
-                .glassEffect(.clear.interactive(), in: .circle)
-        } else {
-            content
-                .background(
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            Circle()
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [.white.opacity(0.35), .clear],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 0.8
-                                )
-                        )
-                        .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
-                )
-        }
-#else
         content
             .background(
                 Circle()
                     .fill(.ultraThinMaterial)
                     .overlay(
                         Circle()
-                            .stroke(
+                            .fill(
                                 LinearGradient(
-                                    colors: [.white.opacity(0.35), .clear],
+                                    colors: [.white.opacity(0.35), .white.opacity(0.05)],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 0.8
+                                )
                             )
                     )
-                    .shadow(color: .blue.opacity(0.12), radius: 12, y: 6)
             )
-#endif
+            .clipShape(Circle())
+            .overlay(
+                Circle()
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.7), .white.opacity(0.15)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.5
+                    )
+            )
+            .shadow(color: Color.blue.opacity(0.2), radius: 12, x: 0, y: 6)
     }
 }
 
