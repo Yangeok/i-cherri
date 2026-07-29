@@ -9,7 +9,7 @@ struct DatabaseManagerBackupRunTests {
 
     @Test("Given a receiver snapshot with exact and fingerprint matches, when finalizing a backup run, then only truly missing assets remain")
     func finalizeBackupRunCountsCoveredAssets() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-backup-run-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
@@ -73,6 +73,7 @@ struct DatabaseManagerBackupRunTests {
 
         let result = try await manager.finalizeBackupRun(runID: "run-1", deviceID: device.deviceID)
 
+        #expect(result.status == "partial")
         #expect(result.totalAssetCount == 3)
         #expect(result.completedAssetCount == 2)
         #expect(result.missingAssetIDs == ["missing"])
@@ -80,7 +81,7 @@ struct DatabaseManagerBackupRunTests {
 
     @Test("Given the latest receiver snapshot when loading coverage summaries then the latest run reports current library coverage counts")
     func fetchLatestBackupCoverageSummariesUsesNewestRun() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-backup-run-coverage-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
@@ -131,13 +132,13 @@ struct DatabaseManagerBackupRunTests {
         )
 
         try await manager.replaceBackupRunSnapshot(
-            runID: "run-old",
+            runID: "run-1-old",
             device: device,
             librarySnapshot: CheckBatchLibrarySnapshot(totalAssetCount: 1, totalAssetBytes: 100),
             candidates: [asset(id: "old", fingerprint: "fp-old", bytes: 100)]
         )
         try await manager.replaceBackupRunSnapshot(
-            runID: "run-new",
+            runID: "run-2-new",
             device: device,
             librarySnapshot: CheckBatchLibrarySnapshot(totalAssetCount: 3, totalAssetBytes: 600),
             candidates: [
@@ -150,16 +151,16 @@ struct DatabaseManagerBackupRunTests {
         let summaries = try await manager.fetchLatestBackupCoverageSummaries()
         let summary = try #require(summaries.first(where: { $0.deviceId == device.deviceID }))
 
-        #expect(summary.runId == "run-new")
+        #expect(summary.runId == "run-2-new")
         #expect(summary.totalAssetCount == 3)
-        #expect(summary.completedAssetCount == 2)
-        #expect(summary.pendingAssetCount == 1)
+        #expect(summary.completedAssetCount == 1)
+        #expect(summary.pendingAssetCount == 2)
         #expect(summary.status == "snapshot_recorded")
     }
 
     @Test("Given an identical file already exists at the canonical destination when committing then the processor reuses it without creating a suffixed duplicate")
     func fileCommitReusesIdenticalExistingFile() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-file-commit-reuse-tests-\(UUID().uuidString)", isDirectory: true)
         let backupRoot = tempDirectory.appendingPathComponent("backup-root", isDirectory: true)
@@ -235,7 +236,7 @@ struct DatabaseManagerBackupRunTests {
 
     @Test("Given a conflicting filename with different bytes when committing then the processor still creates a suffixed file to avoid overwrite")
     func fileCommitKeepsSuffixForDifferentContentCollision() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-file-commit-collision-tests-\(UUID().uuidString)", isDirectory: true)
         let backupRoot = tempDirectory.appendingPathComponent("backup-root", isDirectory: true)
@@ -305,7 +306,7 @@ struct DatabaseManagerBackupRunTests {
 
     @Test("Given only an on-disk backup file remains when check-batch runs then disk fallback skips upload and rebuilds the asset index")
     func diskFallbackRehydratesDeletedIndexFromExistingFile() async throws {
-        let manager = DatabaseManager.shared
+        let manager = DatabaseManager()
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("icherri-disk-fallback-tests-\(UUID().uuidString)", isDirectory: true)
         let backupRoot = tempDirectory.appendingPathComponent("backup-root", isDirectory: true)
@@ -367,6 +368,167 @@ struct DatabaseManagerBackupRunTests {
         #expect(rehydrated.finalPath == "2026/06/IMG_9000.PNG")
         #expect(rehydrated.status == "completed")
         #expect(!rehydrated.contentSha256.isEmpty)
+    }
+
+    @Test("Given upload sessions share an asset but differ by auto backup context when fetching reusable sessions then the matching context wins")
+    func uploadSessionReusePrefersMatchingAutoBackupContext() async throws {
+        let manager = DatabaseManager()
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("icherri-upload-session-context-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        let databasePath = tempDirectory.appendingPathComponent("receiver.sqlite").path
+        try await manager.open(at: databasePath)
+
+        let now = Date()
+        let exactContext = UploadSessionRecord(
+            uploadId: "upload-context",
+            deviceId: "device-1",
+            assetLocalId: "asset-1",
+            backupRunId: "run-1",
+            clientSessionId: "session-1",
+            tempPath: tempDirectory.appendingPathComponent("context.tmp").path,
+            expectedByteSize: 100,
+            receivedBytes: 50,
+            chunkSize: 8,
+            status: "receiving",
+            createdAt: now,
+            updatedAt: now,
+            expiresAt: now.addingTimeInterval(3600),
+            metadataJson: "{}",
+            lastError: nil
+        )
+        let fallbackContext = UploadSessionRecord(
+            uploadId: "upload-fallback",
+            deviceId: "device-1",
+            assetLocalId: "asset-1",
+            backupRunId: nil,
+            clientSessionId: nil,
+            tempPath: tempDirectory.appendingPathComponent("fallback.tmp").path,
+            expectedByteSize: 100,
+            receivedBytes: 10,
+            chunkSize: 8,
+            status: "paused",
+            createdAt: now,
+            updatedAt: now.addingTimeInterval(-60),
+            expiresAt: now.addingTimeInterval(3600),
+            metadataJson: "{}",
+            lastError: nil
+        )
+
+        try await manager.insertUploadSession(exactContext)
+        try await manager.insertUploadSession(fallbackContext)
+
+        let exactMatch = try #require(
+            try await manager.fetchActiveUploadSession(
+                deviceId: "device-1",
+                assetLocalId: "asset-1",
+                expectedByteSize: 100,
+                backupRunId: "run-1",
+                clientSessionId: "session-1"
+            )
+        )
+        let fallbackMatch = try #require(
+            try await manager.fetchActiveUploadSession(
+                deviceId: "device-1",
+                assetLocalId: "asset-1",
+                expectedByteSize: 100
+            )
+        )
+
+        #expect(exactMatch.uploadId == "upload-context")
+        #expect(fallbackMatch.uploadId == "upload-context")
+        #expect(exactMatch.backupRunId == "run-1")
+        #expect(exactMatch.clientSessionId == "session-1")
+    }
+
+    @Test("Given an already persisted chunk when replaying the same chunk then the receiver treats it as idempotent and keeps progress unchanged")
+    func replayedChunkKeepsProgressUnchanged() async throws {
+        let manager = DatabaseManager()
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("icherri-upload-chunk-replay-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        let databasePath = tempDirectory.appendingPathComponent("receiver.sqlite").path
+        try await manager.open(at: databasePath)
+
+        let sessionManager = SessionManager(dbManager: manager)
+        let handler = UploadHandler(sessionManager: sessionManager, incomingDir: tempDirectory)
+        let uploadID = "upload-replay"
+        let tempPath = tempDirectory.appendingPathComponent("\(uploadID).tmp")
+        FileManager.default.createFile(atPath: tempPath.path, contents: Data(repeating: 0, count: 16))
+
+        try await sessionManager.createSession(
+            uploadID: uploadID,
+            deviceID: "device-1",
+            assetLocalID: "asset-1",
+            backupRunID: "run-1",
+            clientSessionID: "session-1",
+            tempPath: tempPath.path,
+            expectedByteSize: 16,
+            chunkSize: 8,
+            expiresAt: Date().addingTimeInterval(3600),
+            metadataJson: "{}"
+        )
+        try await sessionManager.updateProgress(uploadID: uploadID, receivedBytes: 8, status: "receiving")
+
+        let request = HTTPRequest(
+            method: "PUT",
+            path: "/uploads/\(uploadID)/chunks/0",
+            headers: [:],
+            body: Data(repeating: 0xAB, count: 8)
+        )
+        let response = await handler.handleChunk(request, uploadID: uploadID, chunkIndex: 0)
+        let payload = try JSONDecoder().decode(ChunkUploadResponse.self, from: response.body)
+        let session = try #require(try await sessionManager.fetchSession(uploadID: uploadID))
+
+        #expect(response.statusCode == 200)
+        #expect(payload.receivedBytes == 8)
+        #expect(session.receivedBytes == 8)
+    }
+
+    @Test("Given a chunk offset that skips unread bytes when uploading then the receiver rejects the gap with conflict")
+    func outOfOrderChunkReturnsConflict() async throws {
+        let manager = DatabaseManager()
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("icherri-upload-chunk-gap-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        let databasePath = tempDirectory.appendingPathComponent("receiver.sqlite").path
+        try await manager.open(at: databasePath)
+
+        let sessionManager = SessionManager(dbManager: manager)
+        let handler = UploadHandler(sessionManager: sessionManager, incomingDir: tempDirectory)
+        let uploadID = "upload-gap"
+        let tempPath = tempDirectory.appendingPathComponent("\(uploadID).tmp")
+        FileManager.default.createFile(atPath: tempPath.path, contents: Data(repeating: 0, count: 16))
+
+        try await sessionManager.createSession(
+            uploadID: uploadID,
+            deviceID: "device-1",
+            assetLocalID: "asset-1",
+            backupRunID: "run-1",
+            clientSessionID: "session-1",
+            tempPath: tempPath.path,
+            expectedByteSize: 16,
+            chunkSize: 8,
+            expiresAt: Date().addingTimeInterval(3600),
+            metadataJson: "{}"
+        )
+
+        let request = HTTPRequest(
+            method: "PUT",
+            path: "/uploads/\(uploadID)/chunks/1",
+            headers: [:],
+            body: Data(repeating: 0xCD, count: 8)
+        )
+        let response = await handler.handleChunk(request, uploadID: uploadID, chunkIndex: 1)
+        let body = String(data: response.body, encoding: .utf8) ?? ""
+        let session = try #require(try await sessionManager.fetchSession(uploadID: uploadID))
+
+        #expect(response.statusCode == 409)
+        #expect(body.contains("invalid_chunk_offset"))
+        #expect(session.receivedBytes == 0)
     }
 
     private func asset(id: String, fingerprint: String, bytes: Int64) -> AssetMetadata {

@@ -9,15 +9,27 @@ actor BackupRunProgressStore {
     struct Snapshot: Sendable {
         let totalBytes: Int64
         let completedBytes: Int64
+        let totalAssetCount: Int
+        let completedAssetCount: Int
 
         var fractionCompleted: Double {
             guard totalBytes > 0 else { return 0 }
             return min(max(Double(completedBytes) / Double(totalBytes), 0), 1)
         }
+
+        var assetFractionCompleted: Double {
+            guard totalAssetCount > 0 else { return 0 }
+            return min(max(Double(completedAssetCount) / Double(totalAssetCount), 0), 1)
+        }
+
+        var percentString: String {
+            String(format: "%.0f%%", assetFractionCompleted * 100)
+        }
     }
 
     private struct DeviceRunProgress: Sendable {
         var totalBytes: Int64
+        var totalAssetCount: Int
         var uploadedAssetIDs: Set<String>
         var candidateBytesByAssetID: [String: Int64]
     }
@@ -37,6 +49,7 @@ actor BackupRunProgressStore {
 
         runsByDeviceID[request.device.deviceID] = DeviceRunProgress(
             totalBytes: totalBytes,
+            totalAssetCount: supportedCandidates.count,
             uploadedAssetIDs: [],
             candidateBytesByAssetID: candidateBytesByAssetID
         )
@@ -55,15 +68,19 @@ actor BackupRunProgressStore {
 
         var totalBytes: Int64 = 0
         var completedBytes: Int64 = 0
+        var totalAssetCount: Int = 0
+        var completedAssetCount: Int = 0
 
         for deviceID in activeDeviceIDs {
             guard let run = runsByDeviceID[deviceID] else { continue }
 
             totalBytes += run.totalBytes
+            totalAssetCount += run.totalAssetCount
             completedBytes += max(coveredBytesByDeviceID[deviceID] ?? 0, 0)
             completedBytes += run.uploadedAssetIDs.reduce(Int64(0)) { partial, assetID in
                 partial + (run.candidateBytesByAssetID[assetID] ?? 0)
             }
+            completedAssetCount += run.uploadedAssetIDs.count
         }
 
         let activeSessionBytes = activeSessions.reduce(Int64(0)) { partial, session in
@@ -72,7 +89,12 @@ actor BackupRunProgressStore {
         completedBytes += activeSessionBytes
 
         guard totalBytes > 0 else { return nil }
-        return Snapshot(totalBytes: totalBytes, completedBytes: min(completedBytes, totalBytes))
+        return Snapshot(
+            totalBytes: totalBytes,
+            completedBytes: min(completedBytes, totalBytes),
+            totalAssetCount: totalAssetCount,
+            completedAssetCount: completedAssetCount
+        )
     }
 }
 
@@ -143,7 +165,13 @@ final class AppCoordinator: NSObject, ObservableObject {
             
             let dbPath = backupDir.appendingPathComponent(".i-cherri.sqlite3").path
             try await DatabaseManager.shared.open(at: dbPath)
-            
+
+            // 백그라운드: duration_seconds 가 NULL인 기존 영상 레코드 패치 (1회성)
+            let patchRoot = backupDir
+            Task.detached(priority: .utility) {
+                await DatabaseManager.shared.patchMissingDurations(backupRoot: patchRoot)
+            }
+
             let manager = SessionManager(dbManager: DatabaseManager.shared)
             self.sessionManager = manager
             
@@ -196,6 +224,14 @@ final class AppCoordinator: NSObject, ObservableObject {
             try await srv.start()
             self.server = srv
             print("[AppCoordinator] HTTP Server start requested on port \(port)")
+
+            // Bonjour Advertiser
+            let receiverName = Host.current().localizedName ?? "Mac Receiver"
+            let adv = BonjourAdvertiser(port: port, receiverName: receiverName)
+            try await adv.start()
+            self.advertiser = adv
+            print("[AppCoordinator] Bonjour Advertiser started as \(receiverName) on port \(port)")
+
             // Cleanup Scheduler
             let scheduler = CleanupScheduler(sessionManager: manager, incomingDir: tmpDir)
             await scheduler.start()
@@ -323,7 +359,10 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
     }
 
     func handle(_ request: HTTPRequest) async -> HTTPResponse {
-        let path = request.path
+        var path = request.path
+        while path.contains("//") {
+            path = path.replacingOccurrences(of: "//", with: "/")
+        }
         let method = request.method
 
         print("[ReceiverRouteService] HTTP Request: \(method) \(path)")
@@ -369,6 +408,10 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
             return await handlePairRequest(request)
         }
 
+        if method == "POST" && path == "/devices/ping" {
+            return await handleDevicePingRequest(request)
+        }
+
         return .notFound
     }
 
@@ -406,6 +449,36 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
         }
     }
 
+    private func handleDevicePingRequest(_ request: HTTPRequest) async -> HTTPResponse {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        struct DevicePingRequest: Codable {
+            let deviceID: String
+        }
+        
+        guard let body = try? decoder.decode(DevicePingRequest.self, from: request.body) else {
+            return .error(code: "invalid_body", message: "Failed to parse DevicePingRequest")
+        }
+        
+        do {
+            if var device = try await DatabaseManager.shared.fetchDevice(id: body.deviceID) {
+                device.lastSeenAt = Date()
+                try await DatabaseManager.shared.upsertDevice(device)
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .receiverDataDidChange, object: nil)
+                }
+                let response = ["status": "ok"]
+                return (try? HTTPResponse.json(response)) ?? .error(code: "encode_error", message: "Encode failed", status: 500)
+            }
+            print("[ReceiverRouteService] Ping rejected: device \(body.deviceID) not found in paired database")
+            return .error(code: "device_not_found", message: "Device not paired", status: 404)
+        } catch {
+            print("[ReceiverRouteService] Ping handler error: \(error)")
+            return .error(code: "ping_error", message: error.localizedDescription, status: 500)
+        }
+    }
+
     private func handleFinalizeBackupRunRequest(_ request: HTTPRequest) async -> HTTPResponse {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -420,7 +493,7 @@ private final class ReceiverRouteService: ReceiverRouteHandler, @unchecked Senda
                 deviceID: body.device.deviceID
             )
             let response = FinalizeBackupRunResponse(
-                status: snapshot.missingAssetIDs.isEmpty ? "complete" : "needs_uploads",
+                status: snapshot.status,
                 totalAssetCount: snapshot.totalAssetCount,
                 completedAssetCount: snapshot.completedAssetCount,
                 missingAssetIDs: snapshot.missingAssetIDs

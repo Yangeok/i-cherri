@@ -29,41 +29,156 @@ public final class PhotoLibraryScanner {
     }
 
     // Scans all media assets and returns AssetMetadata array. Targets >1000 assets/sec.
-    public func scanAllAssets(deviceID: String) async -> [AssetMetadata] {
+    public func scanAllAssets(
+        deviceID: String,
+        cachedAssets: [String: AssetMetadata] = [:],
+        progressHandler: ((Int, Int) -> Bool)? = nil
+    ) async -> [AssetMetadata] {
         let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
 
         let result = PHAsset.fetchAssets(with: options)
-        var assets: [AssetMetadata] = []
-        assets.reserveCapacity(result.count)
+        let count = result.count
+        guard count > 0 else { return [] }
 
-        result.enumerateObjects { asset, _, _ in
-            autoreleasepool {
-                guard let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) else { return }
-                assets.append(metadata)
+        // DispatchQueue.concurrentPerform blocks its calling thread until every iteration
+        // finishes. Calling it directly from this async function would block a thread out of
+        // Swift Concurrency's small cooperative pool for the entire scan, starving the
+        // Task { @MainActor in ... } progress-callback hops fired from inside the loop below —
+        // that's what made the progress bar appear to stall. Run it on a plain background
+        // queue instead so it never competes with the cooperative pool.
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var assets = [AssetMetadata?](repeating: nil, count: count)
+                let lock = NSLock()
+                let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions to prevent assetsd IPC bottleneck
+
+                var completed = 0
+                let cancellationLock = NSLock()
+                var isCancelled = false
+
+                // Run metadata extraction concurrently across available CPU cores with semaphore limiting
+                DispatchQueue.concurrentPerform(iterations: count) { index in
+                    cancellationLock.lock()
+                    if isCancelled {
+                        cancellationLock.unlock()
+                        return
+                    }
+                    cancellationLock.unlock()
+
+                    semaphore.wait()
+                    defer { semaphore.signal() }
+
+                    cancellationLock.lock()
+                    if isCancelled {
+                        cancellationLock.unlock()
+                        return
+                    }
+                    cancellationLock.unlock()
+
+                    autoreleasepool {
+                        let asset = result.object(at: index)
+                        let cached = cachedAssets[asset.localIdentifier]
+                        if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID, cachedAsset: cached) {
+                            lock.lock()
+                            assets[index] = metadata
+                            lock.unlock()
+                        }
+
+                        lock.lock()
+                        completed += 1
+                        let currentCompleted = completed
+                        lock.unlock()
+
+                        if currentCompleted % 50 == 0 || currentCompleted == count {
+                            if let shouldContinue = progressHandler?(currentCompleted, count), !shouldContinue {
+                                cancellationLock.lock()
+                                isCancelled = true
+                                cancellationLock.unlock()
+                            }
+                        }
+                    }
+                }
+
+                continuation.resume(returning: assets.compactMap { $0 })
             }
         }
-
-        return assets
     }
 
-    public func scanAssets(localIdentifiers: [String], deviceID: String) async -> [AssetMetadata] {
+    public func scanAssets(
+        localIdentifiers: [String], 
+        deviceID: String, 
+        cachedAssets: [String: AssetMetadata] = [:],
+        progressHandler: ((Int, Int) -> Bool)? = nil
+    ) async -> [AssetMetadata] {
         guard !localIdentifiers.isEmpty else { return [] }
 
-        let result = PHAsset.fetchAssets(withLocalIdentifiers: localIdentifiers, options: nil)
-        var assets: [AssetMetadata] = []
-        assets.reserveCapacity(result.count)
+        let options = PHFetchOptions()
+        options.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: localIdentifiers, options: options)
+        let count = result.count
+        guard count > 0 else { return [] }
 
-        result.enumerateObjects { asset, _, _ in
-            autoreleasepool {
-                guard let metadata = Self.extractMetadata(from: asset, deviceID: deviceID) else { return }
-                assets.append(metadata)
+        // See scanAllAssets — concurrentPerform blocks its calling thread, so it must run off
+        // Swift Concurrency's cooperative pool or it starves the progress-callback Task hops.
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var assets = [AssetMetadata?](repeating: nil, count: count)
+                let lock = NSLock()
+                let semaphore = DispatchSemaphore(value: 8) // Limit to 8 concurrent metadata extractions
+
+                var completed = 0
+                let cancellationLock = NSLock()
+                var isCancelled = false
+
+                DispatchQueue.concurrentPerform(iterations: count) { index in
+                    cancellationLock.lock()
+                    if isCancelled {
+                        cancellationLock.unlock()
+                        return
+                    }
+                    cancellationLock.unlock()
+
+                    semaphore.wait()
+                    defer { semaphore.signal() }
+
+                    cancellationLock.lock()
+                    if isCancelled {
+                        cancellationLock.unlock()
+                        return
+                    }
+                    cancellationLock.unlock()
+
+                    autoreleasepool {
+                        let asset = result.object(at: index)
+                        let cached = cachedAssets[asset.localIdentifier]
+                        if let metadata = Self.extractMetadata(from: asset, deviceID: deviceID, cachedAsset: cached) {
+                            lock.lock()
+                            assets[index] = metadata
+                            lock.unlock()
+                        }
+
+                        lock.lock()
+                        completed += 1
+                        let currentCompleted = completed
+                        lock.unlock()
+
+                        if currentCompleted % 50 == 0 || currentCompleted == count {
+                            if let shouldContinue = progressHandler?(currentCompleted, count), !shouldContinue {
+                                cancellationLock.lock()
+                                isCancelled = true
+                                cancellationLock.unlock()
+                            }
+                        }
+                    }
+                }
+
+                let sorted = assets.compactMap { $0 }.sorted { lhs, rhs in
+                    lhs.creationDate > rhs.creationDate
+                }
+                continuation.resume(returning: sorted)
             }
-        }
-
-        return assets.sorted { lhs, rhs in
-            lhs.creationDate > rhs.creationDate
         }
     }
 
@@ -129,26 +244,55 @@ public final class PhotoLibraryScanner {
 
     // MARK: - Private
 
-    private static func extractMetadata(from asset: PHAsset, deviceID: String) -> AssetMetadata? {
-        guard let filename = (asset.value(forKey: "filename") as? String) ?? inferFilename(from: asset) else {
-            return nil
-        }
-        let mediaType = resolveMediaType(asset)
+    private static func extractMetadata(from asset: PHAsset, deviceID: String, cachedAsset: AssetMetadata?) -> AssetMetadata? {
         let creation = asset.creationDate ?? Date()
         let modification = asset.modificationDate ?? creation
-        let byteSize = resolveByteSize(for: asset)
+
+        // If we have a valid cached asset with matching modification date, reuse it directly!
+        if let cached = cachedAsset, cached.modificationDate == modification {
+            return cached
+        }
+
+        let mediaType = resolveMediaType(asset)
+
+        // Single-pass: fetch asset resources only once to avoid I/O bottlenecks
+        let resources = PHAssetResource.assetResources(for: asset)
+        let preferred = preferredResource(from: resources, mediaType: asset.mediaType) ?? resources.first
+
+        // Extract filename
+        var rawFilename = (asset.value(forKey: "filename") as? String)
+            ?? preferred?.originalFilename
+            ?? "\(asset.localIdentifier).jpg"
+
+        // Strip any path components if the framework returned a full file URL path (common in simulators)
+        if rawFilename.contains("/") {
+            rawFilename = (rawFilename as NSString).lastPathComponent
+        }
+        let finalFilename = rawFilename
+
+        // Extract byte size
+        var byteSize: Int64 = 0
+        if let resource = preferred {
+            if let size = resource.value(forKey: "fileSize") as? Int64 {
+                byteSize = size
+            } else if let size = resource.value(forKey: "fileSize") as? NSNumber {
+                byteSize = size.int64Value
+            }
+        }
+
         let fingerprint = FingerprintBuilder.build(
             creationDate: creation,
             modificationDate: modification,
             byteSize: byteSize,
             pixelWidth: asset.pixelWidth,
-            pixelHeight: asset.pixelHeight
+            pixelHeight: asset.pixelHeight,
+            durationSeconds: asset.duration > 0 ? asset.duration : nil
         )
 
         return AssetMetadata(
             deviceID: deviceID,
             assetLocalID: asset.localIdentifier,
-            originalFilename: filename,
+            originalFilename: finalFilename,
             mediaType: mediaType,
             creationDate: creation,
             modificationDate: modification,
@@ -169,25 +313,6 @@ public final class PhotoLibraryScanner {
         default:
             return .unknown
         }
-    }
-
-    private static func inferFilename(from asset: PHAsset) -> String? {
-        let resources = PHAssetResource.assetResources(for: asset)
-        return resources.first?.originalFilename
-    }
-
-    private static func resolveByteSize(for asset: PHAsset) -> Int64 {
-        let resources = PHAssetResource.assetResources(for: asset)
-        let resource = preferredResource(from: resources, mediaType: asset.mediaType) ?? resources.first
-        guard let resource else { return 0 }
-
-        if let size = resource.value(forKey: "fileSize") as? Int64 {
-            return size
-        }
-        if let size = resource.value(forKey: "fileSize") as? NSNumber {
-            return size.int64Value
-        }
-        return 0
     }
 
     private static func preferredResource(from resources: [PHAssetResource], mediaType: PHAssetMediaType) -> PHAssetResource? {

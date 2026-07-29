@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import GRDB
 import ICherriCore
 import ICherriProtocol
@@ -108,6 +109,8 @@ struct UploadSessionRecord: Codable, FetchableRecord, PersistableRecord {
     var uploadId: String
     var deviceId: String
     var assetLocalId: String
+    var backupRunId: String?
+    var clientSessionId: String?
     var tempPath: String
     var expectedByteSize: Int64
     var receivedBytes: Int64
@@ -121,7 +124,8 @@ struct UploadSessionRecord: Codable, FetchableRecord, PersistableRecord {
 
     enum Columns: String, ColumnExpression {
         case uploadId = "upload_id", deviceId = "device_id"
-        case assetLocalId = "asset_local_id", tempPath = "temp_path"
+        case assetLocalId = "asset_local_id", backupRunId = "backup_run_id", clientSessionId = "client_session_id"
+        case tempPath = "temp_path"
         case expectedByteSize = "expected_byte_size", receivedBytes = "received_bytes"
         case chunkSize = "chunk_size", status, createdAt = "created_at"
         case updatedAt = "updated_at", expiresAt = "expires_at", metadataJson = "metadata_json", lastError = "last_error"
@@ -131,6 +135,8 @@ struct UploadSessionRecord: Codable, FetchableRecord, PersistableRecord {
         case uploadId = "upload_id"
         case deviceId = "device_id"
         case assetLocalId = "asset_local_id"
+        case backupRunId = "backup_run_id"
+        case clientSessionId = "client_session_id"
         case tempPath = "temp_path"
         case expectedByteSize = "expected_byte_size"
         case receivedBytes = "received_bytes"
@@ -231,6 +237,7 @@ struct BackupRunAssetRecord: Codable, FetchableRecord, PersistableRecord {
 }
 
 struct BackupRunReconcileSnapshot: Sendable {
+    let status: String
     let totalAssetCount: Int
     let completedAssetCount: Int
     let missingAssetIDs: [String]
@@ -241,6 +248,7 @@ struct BackupRunCoverageSummary: Sendable {
     let deviceId: String
     let totalAssetCount: Int
     let completedAssetCount: Int
+    let totalAssetBytes: Int64
     let status: String
     let createdAt: Date
     let updatedAt: Date
@@ -257,12 +265,20 @@ actor DatabaseManager {
     static let shared = DatabaseManager()
 
     private var dbQueue: DatabaseQueue?
+    private var pendingInserts: [BackupAssetRecord] = []
+    private var insertWaiters: [CheckedContinuation<Void, any Error>] = []
+    private var isFlushing = false
 
+    #if DEBUG
+    init() {}
+    #else
     private init() {}
+    #endif
 
     func open(at path: String) throws {
         var config = Configuration()
         config.label = "iCherri-DB"
+        config.journalMode = .wal // Enable Write-Ahead Logging
         let queue = try DatabaseQueue(path: path, configuration: config)
         try migrate(queue)
         dbQueue = queue
@@ -333,6 +349,19 @@ actor DatabaseManager {
                 t.column("metadata_json", .text).notNull()
                 t.column("last_error", .text)
             }
+        }
+
+        migrator.registerMigration("v4_upload_session_context") { db in
+            try db.alter(table: "upload_sessions") { t in
+                t.add(column: "backup_run_id", .text)
+                t.add(column: "client_session_id", .text)
+            }
+
+            try db.create(
+                index: "idx_upload_sessions_context",
+                on: "upload_sessions",
+                columns: ["device_id", "asset_local_id", "backup_run_id", "client_session_id"]
+            )
         }
 
         migrator.registerMigration("v2_upload_failure_logs") { db in
@@ -428,14 +457,51 @@ actor DatabaseManager {
 
     // MARK: - Backup Assets
 
-    func insertBackupAsset(_ record: BackupAssetRecord) throws {
-        try queue.write { db in
-            try record.insert(db)
+    func insertBackupAsset(_ record: BackupAssetRecord) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            pendingInserts.append(record)
+            insertWaiters.append(continuation)
+
+            if pendingInserts.count >= 50 {
+                flushInserts()
+            } else if !isFlushing {
+                isFlushing = true
+                Task {
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+                    await self.flushInserts()
+                }
+            }
+        }
+    }
+
+    private func flushInserts() {
+        guard !pendingInserts.isEmpty else { return }
+        let records = pendingInserts
+        let waiters = insertWaiters
+        pendingInserts.removeAll()
+        insertWaiters.removeAll()
+        isFlushing = false
+
+        do {
+            let q = try queue
+            try q.write { db in
+                for record in records {
+                    try record.insert(db)
+                }
+            }
+            for waiter in waiters {
+                waiter.resume()
+            }
+        } catch {
+            for waiter in waiters {
+                waiter.resume(throwing: error)
+            }
         }
     }
 
     func fetchAsset(deviceId: String, assetLocalId: String) throws -> BackupAssetRecord? {
-        try queue.read { db in
+        flushInserts()
+        return try queue.read { db in
             try BackupAssetRecord
                 .filter(Column("device_id") == deviceId && Column("asset_local_id") == assetLocalId)
                 .fetchOne(db)
@@ -443,7 +509,8 @@ actor DatabaseManager {
     }
 
     func fetchAsset(fingerprint: String) throws -> BackupAssetRecord? {
-        try queue.read { db in
+        flushInserts()
+        return try queue.read { db in
             try BackupAssetRecord
                 .filter(Column("quick_fingerprint") == fingerprint && Column("status") == "completed")
                 .fetchOne(db)
@@ -451,7 +518,8 @@ actor DatabaseManager {
     }
 
     func fetchAsset(sha256: String) throws -> BackupAssetRecord? {
-        try queue.read { db in
+        flushInserts()
+        return try queue.read { db in
             try BackupAssetRecord
                 .filter(Column("content_sha256") == sha256 && Column("status") == "completed")
                 .fetchOne(db)
@@ -513,6 +581,24 @@ actor DatabaseManager {
     }
 
     // MARK: - Backup Runs
+
+    /// Mac DB 기준 특정 디바이스의 완료+중복 파일 총 수 반환 — iOS SSOT 동기화에 사용
+    func fetchCompletedAssetCount(deviceID: String) throws -> Int {
+        flushInserts()
+        return try queue.read { db in
+            let count = try Int.fetchOne(
+                db,
+                sql: """
+                SELECT COUNT(*)
+                FROM backup_assets
+                WHERE device_id = ?
+                  AND status IN ('completed', 'duplicate')
+                """,
+                arguments: [deviceID]
+            )
+            return count ?? 0
+        }
+    }
 
     func replaceBackupRunSnapshot(
         runID: String,
@@ -581,7 +667,8 @@ actor DatabaseManager {
     }
 
     func finalizeBackupRun(runID: String, deviceID: String) throws -> BackupRunReconcileSnapshot {
-        try queue.write { db in
+        flushInserts()
+        return try queue.write { db in
             let missingAssetIDs = try String.fetchAll(
                 db,
                 sql: """
@@ -614,6 +701,14 @@ actor DatabaseManager {
             ) ?? 0
 
             let completedAssetCount = max(totalAssetCount - missingAssetIDs.count, 0)
+            let status: String
+            if missingAssetIDs.isEmpty {
+                status = "complete"
+            } else if completedAssetCount > 0 {
+                status = "partial"
+            } else {
+                status = "needs_uploads"
+            }
             try db.execute(
                 sql: """
                 UPDATE backup_runs
@@ -621,7 +716,7 @@ actor DatabaseManager {
                 WHERE run_id = ? AND device_id = ?
                 """,
                 arguments: [
-                    missingAssetIDs.isEmpty ? "complete" : "needs_uploads",
+                    status,
                     Date(),
                     Date(),
                     runID,
@@ -630,6 +725,7 @@ actor DatabaseManager {
             )
 
             return BackupRunReconcileSnapshot(
+                status: status,
                 totalAssetCount: totalAssetCount,
                 completedAssetCount: completedAssetCount,
                 missingAssetIDs: missingAssetIDs
@@ -638,7 +734,8 @@ actor DatabaseManager {
     }
 
     func fetchLatestBackupCoverageSummaries() throws -> [BackupRunCoverageSummary] {
-        try queue.read { db in
+        flushInserts()
+        return try queue.read { db in
             let rows = try Row.fetchAll(
                 db,
                 sql: """
@@ -646,29 +743,18 @@ actor DatabaseManager {
                     r.run_id,
                     r.device_id,
                     r.total_asset_count,
+                    r.total_asset_bytes,
                     r.status,
                     r.created_at,
                     r.updated_at,
                     r.finalized_at,
-                    SUM(
-                        CASE
-                            WHEN EXISTS (
-                                SELECT 1
-                                FROM backup_assets AS b
-                                WHERE b.status IN ('completed', 'duplicate')
-                                  AND (
-                                      (b.device_id = s.device_id AND b.asset_local_id = s.asset_local_id)
-                                      OR b.quick_fingerprint = s.quick_fingerprint
-                                  )
-                            )
-                            THEN 1
-                            ELSE 0
-                        END
+                    (
+                        SELECT COUNT(*)
+                        FROM backup_assets AS b
+                        WHERE b.device_id = r.device_id
+                          AND b.status IN ('completed', 'duplicate')
                     ) AS completed_asset_count
                 FROM backup_runs AS r
-                LEFT JOIN backup_run_assets AS s
-                  ON s.run_id = r.run_id
-                 AND s.device_id = r.device_id
                 WHERE r.run_id = (
                     SELECT r2.run_id
                     FROM backup_runs AS r2
@@ -676,14 +762,6 @@ actor DatabaseManager {
                     ORDER BY r2.created_at DESC, r2.updated_at DESC, r2.run_id DESC
                     LIMIT 1
                 )
-                GROUP BY
-                    r.run_id,
-                    r.device_id,
-                    r.total_asset_count,
-                    r.status,
-                    r.created_at,
-                    r.updated_at,
-                    r.finalized_at
                 """
             )
 
@@ -693,6 +771,7 @@ actor DatabaseManager {
                     deviceId: row["device_id"],
                     totalAssetCount: row["total_asset_count"],
                     completedAssetCount: row["completed_asset_count"] ?? 0,
+                    totalAssetBytes: row["total_asset_bytes"] ?? 0,
                     status: row["status"],
                     createdAt: row["created_at"],
                     updatedAt: row["updated_at"],
@@ -716,9 +795,15 @@ actor DatabaseManager {
         }
     }
 
-    func fetchActiveUploadSession(deviceId: String, assetLocalId: String, expectedByteSize: Int64) throws -> UploadSessionRecord? {
+    func fetchActiveUploadSession(
+        deviceId: String,
+        assetLocalId: String,
+        expectedByteSize: Int64,
+        backupRunId: String? = nil,
+        clientSessionId: String? = nil
+    ) throws -> UploadSessionRecord? {
         try queue.read { db in
-            try UploadSessionRecord
+            var request = UploadSessionRecord
                 .filter(Column("device_id") == deviceId)
                 .filter(Column("asset_local_id") == assetLocalId)
                 .filter(Column("expected_byte_size") == expectedByteSize)
@@ -726,6 +811,16 @@ actor DatabaseManager {
                     sql: "status IN (?, ?, ?)",
                     arguments: ["initialized", "receiving", "paused"]
                 )
+
+            if let backupRunId {
+                request = request.filter(Column("backup_run_id") == backupRunId)
+            }
+
+            if let clientSessionId {
+                request = request.filter(Column("client_session_id") == clientSessionId)
+            }
+
+            return try request
                 .order(Column("updated_at").desc)
                 .fetchOne(db)
         }
@@ -853,6 +948,51 @@ actor DatabaseManager {
         }
     }
 
+    struct DeviceBackupStats: Codable {
+        let completedCount: Int
+        let duplicateCount: Int
+        let failedCount: Int
+        let lastBackupDate: Date?
+        /// Total bytes physically stored on disk (completed assets only; duplicates share the original file).
+        let totalByteSize: Int64
+    }
+
+    func fetchBackupStatsByDevice() throws -> [String: DeviceBackupStats] {
+        try queue.read { db in
+            var result: [String: DeviceBackupStats] = [:]
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT
+                    device_id,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
+                    SUM(CASE WHEN status = 'duplicate' THEN 1 ELSE 0 END) as duplicate_count,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count,
+                    MAX(completed_at) as last_backup,
+                    SUM(CASE WHEN status = 'completed' THEN byte_size ELSE 0 END) as total_byte_size
+                FROM backup_assets
+                GROUP BY device_id
+            """)
+
+            for row in rows {
+                let deviceID: String = row["device_id"]
+                let completed: Int = row["completed_count"] ?? 0
+                let duplicate: Int = row["duplicate_count"] ?? 0
+                let failed: Int = row["failed_count"] ?? 0
+                let lastBackup: Date? = row["last_backup"]
+                let totalByteSize: Int64 = row["total_byte_size"] ?? 0
+
+                result[deviceID] = DeviceBackupStats(
+                    completedCount: completed,
+                    duplicateCount: duplicate,
+                    failedCount: failed,
+                    lastBackupDate: lastBackup,
+                    totalByteSize: totalByteSize
+                )
+            }
+            return result
+        }
+    }
+
+
     func deletePairedDevice(deviceId: String) throws -> [String] {
         try queue.write { db in
             let tempPaths = try String.fetchAll(
@@ -902,5 +1042,106 @@ extension DatabaseManager: BackupIndexQuerying {
             return BackupIndexEntry(backupID: record.backupId, status: record.status, contentSHA256: record.contentSha256)
         }
         return nil
+    }
+
+    public func fetchBatchEntries(candidates: [AssetMetadata]) async throws -> (exactMatches: [String: BackupIndexEntry], fingerprintMatches: [String: BackupIndexEntry]) {
+        guard !candidates.isEmpty else { return ([:], [:]) }
+        
+        return try await queue.read { db in
+            var exactMatches: [String: BackupIndexEntry] = [:]
+            var fingerprintMatches: [String: BackupIndexEntry] = [:]
+            
+            // Chunk to avoid SQLite parameters limit
+            let chunkSize = 500
+            for i in stride(from: 0, to: candidates.count, by: chunkSize) {
+                let end = min(i + chunkSize, candidates.count)
+                let chunk = Array(candidates[i..<end])
+                
+                let deviceIDs = chunk.map { $0.deviceID }
+                let assetLocalIDs = chunk.map { $0.assetLocalID }
+                
+                let exactRecords = try BackupAssetRecord
+                    .filter(deviceIDs.contains(Column("device_id")) && assetLocalIDs.contains(Column("asset_local_id")))
+                    .fetchAll(db)
+                
+                for r in exactRecords {
+                    exactMatches["\(r.deviceId):\(r.assetLocalId)"] = BackupIndexEntry(backupID: r.backupId, status: r.status, contentSHA256: r.contentSha256)
+                }
+                
+                let fingerprints = chunk.map { $0.quickFingerprint }
+                let fingerprintRecords = try BackupAssetRecord
+                    .filter(fingerprints.contains(Column("quick_fingerprint")) && Column("status") == "completed")
+                    .fetchAll(db)
+                
+                for r in fingerprintRecords {
+                    let fp = r.quickFingerprint
+                    fingerprintMatches[fp] = BackupIndexEntry(backupID: r.backupId, status: r.status, contentSHA256: r.contentSha256)
+                }
+            }
+            
+            return (exactMatches, fingerprintMatches)
+        }
+    }
+
+    public func registerDuplicate(candidate: AssetMetadata, duplicateOfBackupID: String) async throws {
+        if let _ = try fetchAsset(deviceId: candidate.deviceID, assetLocalId: candidate.assetLocalID) {
+            return
+        }
+        try insertDuplicateAsset(
+            deviceId: candidate.deviceID,
+            assetLocalId: candidate.assetLocalID,
+            originalFilename: candidate.originalFilename,
+            mediaType: candidate.mediaType.rawValue,
+            creationDate: candidate.creationDate,
+            modificationDate: candidate.modificationDate,
+            byteSize: candidate.byteSize,
+            pixelWidth: candidate.pixelWidth,
+            pixelHeight: candidate.pixelHeight,
+            quickFingerprint: candidate.quickFingerprint,
+            duplicateOfBackupId: duplicateOfBackupID
+        )
+    }
+
+    // MARK: - Duration Patch
+
+    /// duration_seconds 가 NULL인 video 레코드를 찾아 파일에서 읽어 DB 업데이트.
+    /// 앱 시작 시 백그라운드로 한 번 실행.
+    func patchMissingDurations(backupRoot: URL) async {
+        // Fetch NULL-duration video records using GRDB async read
+        let records: [BackupAssetRecord]
+        do {
+            records = try await queue.read { db in
+                try BackupAssetRecord
+                    .filter(Column("media_type") == "video")
+                    .filter(Column("duration_seconds") == nil)
+                    .filter(Column("status") == "completed")
+                    .fetchAll(db)
+            }
+        } catch {
+            return
+        }
+        guard !records.isEmpty else { return }
+
+        for record in records {
+            let fileURL: URL
+            if (record.finalPath as NSString).isAbsolutePath {
+                fileURL = URL(fileURLWithPath: record.finalPath)
+            } else {
+                fileURL = backupRoot.appendingPathComponent(record.finalPath)
+            }
+            guard FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+
+            let avAsset = AVURLAsset(url: fileURL)
+            guard let duration = try? await avAsset.load(.duration) else { continue }
+            let seconds = duration.seconds
+            guard seconds.isFinite, seconds > 0 else { continue }
+
+            _ = try? await queue.write { db in
+                try db.execute(
+                    sql: "UPDATE backup_assets SET duration_seconds = ? WHERE backup_id = ?",
+                    arguments: [seconds, record.backupId]
+                )
+            }
+        }
     }
 }

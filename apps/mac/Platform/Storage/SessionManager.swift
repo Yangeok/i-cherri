@@ -12,6 +12,8 @@ actor SessionManager {
         let uploadID: String
         let deviceID: String
         let assetLocalID: String
+        let backupRunID: String?
+        let clientSessionID: String?
         let tempPath: String
         let expectedByteSize: Int64
         let receivedBytes: Int64
@@ -25,6 +27,8 @@ actor SessionManager {
         uploadID: String,
         deviceID: String,
         assetLocalID: String,
+        backupRunID: String?,
+        clientSessionID: String?,
         tempPath: String,
         expectedByteSize: Int64,
         chunkSize: Int,
@@ -36,6 +40,8 @@ actor SessionManager {
             uploadId: uploadID,
             deviceId: deviceID,
             assetLocalId: assetLocalID,
+            backupRunId: backupRunID,
+            clientSessionId: clientSessionID,
             tempPath: tempPath,
             expectedByteSize: expectedByteSize,
             receivedBytes: 0,
@@ -56,6 +62,8 @@ actor SessionManager {
             uploadID: record.uploadId,
             deviceID: record.deviceId,
             assetLocalID: record.assetLocalId,
+            backupRunID: record.backupRunId,
+            clientSessionID: record.clientSessionId,
             tempPath: record.tempPath,
             expectedByteSize: record.expectedByteSize,
             receivedBytes: record.receivedBytes,
@@ -66,7 +74,36 @@ actor SessionManager {
         )
     }
 
-    func fetchReusableSession(deviceID: String, assetLocalID: String, expectedByteSize: Int64) async throws -> SessionInfo? {
+    func fetchReusableSession(
+        deviceID: String,
+        assetLocalID: String,
+        expectedByteSize: Int64,
+        backupRunID: String?,
+        clientSessionID: String?
+    ) async throws -> SessionInfo? {
+        if let record = try await dbManager.fetchActiveUploadSession(
+            deviceId: deviceID,
+            assetLocalId: assetLocalID,
+            expectedByteSize: expectedByteSize,
+            backupRunId: backupRunID,
+            clientSessionId: clientSessionID
+        ) {
+            return SessionInfo(
+                uploadID: record.uploadId,
+                deviceID: record.deviceId,
+                assetLocalID: record.assetLocalId,
+                backupRunID: record.backupRunId,
+                clientSessionID: record.clientSessionId,
+                tempPath: record.tempPath,
+                expectedByteSize: record.expectedByteSize,
+                receivedBytes: record.receivedBytes,
+                chunkSize: record.chunkSize,
+                status: record.status,
+                expiresAt: record.expiresAt,
+                metadataJson: record.metadataJson
+            )
+        }
+
         guard let record = try await dbManager.fetchActiveUploadSession(
             deviceId: deviceID,
             assetLocalId: assetLocalID,
@@ -79,6 +116,8 @@ actor SessionManager {
             uploadID: record.uploadId,
             deviceID: record.deviceId,
             assetLocalID: record.assetLocalId,
+            backupRunID: record.backupRunId,
+            clientSessionID: record.clientSessionId,
             tempPath: record.tempPath,
             expectedByteSize: record.expectedByteSize,
             receivedBytes: record.receivedBytes,
@@ -129,6 +168,8 @@ actor SessionManager {
                 uploadID: r.uploadId,
                 deviceID: r.deviceId,
                 assetLocalID: r.assetLocalId,
+                backupRunID: r.backupRunId,
+                clientSessionID: r.clientSessionId,
                 tempPath: r.tempPath,
                 expectedByteSize: r.expectedByteSize,
                 receivedBytes: r.receivedBytes,

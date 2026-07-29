@@ -10,12 +10,28 @@ public actor BackupClient {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
+    private var cleanedBaseURLString: String {
+        let str = receiverBaseURL.absoluteString
+        if str.hasSuffix("/") {
+            return String(str.dropLast())
+        }
+        return str
+    }
+
     public init(receiverBaseURL: URL, device: DeviceInfo, trustToken: String? = nil) {
         self.receiverBaseURL = receiverBaseURL
         self.device = device
         self.trustToken = trustToken
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
+        // waitsForConnectivity suspends the request instead of failing it while the network is
+        // unreachable, and timeoutIntervalForRequest doesn't count that waiting time — without an
+        // explicit resource-level ceiling it defaults to 7 days, so a dropped connection to the
+        // receiver silently hangs forever instead of throwing and letting the retry/recovery
+        // logic upstream (ResumableUploadManager) ever run.
+        config.timeoutIntervalForResource = 90
+        config.shouldUseExtendedBackgroundIdleMode = true
+        config.waitsForConnectivity = true
         self.session = URLSession(configuration: config)
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
@@ -49,7 +65,9 @@ public actor BackupClient {
 
     // Fetches receiver info (no auth required).
     public func fetchReceiverInfo() async throws -> ReceiverInfo {
-        let url = receiverBaseURL.appendingPathComponent("/receiver/info")
+        guard let url = URL(string: "\(cleanedBaseURLString)/receiver/info") else {
+            throw URLError(.badURL)
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         let (data, _) = try await session.data(for: req)
@@ -57,24 +75,45 @@ public actor BackupClient {
     }
 
     // Initiates an upload session.
-    public func initUpload(asset: AssetMetadata, filename: String) async throws -> UploadInitResponse {
-        let request = UploadInitRequest(device: device, asset: asset, filename: filename)
+    public func initUpload(
+        backupRunContext: AutoBackupRunContext? = nil,
+        asset: AssetMetadata,
+        filename: String
+    ) async throws -> UploadInitResponse {
+        let request = UploadInitRequest(
+            backupRunContext: backupRunContext,
+            device: device,
+            asset: asset,
+            filename: filename
+        )
         return try await post(path: "/uploads/init", body: request)
     }
 
     // Queries upload session status for resumption.
     public func uploadStatus(uploadID: String) async throws -> UploadStatusResponse {
-        let url = receiverBaseURL.appendingPathComponent("/uploads/\(uploadID)/status")
+        guard let url = URL(string: "\(cleanedBaseURLString)/uploads/\(uploadID)/status") else {
+            throw URLError(.badURL)
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         attachAuthHeaders(&req)
-        let (data, _) = try await session.data(for: req)
+        let (data, response) = try await session.data(for: req)
+        if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+            throw BackupClientError.httpError(http.statusCode, data)
+        }
         return try decoder.decode(UploadStatusResponse.self, from: data)
     }
 
     // Commits an upload session.
-    public func commitUpload(uploadID: String, assetLocalID: String, finalByteSize: Int64, finalContentHash: String) async throws -> CommitUploadResponse {
+    public func commitUpload(
+        backupRunContext: AutoBackupRunContext? = nil,
+        uploadID: String,
+        assetLocalID: String,
+        finalByteSize: Int64,
+        finalContentHash: String
+    ) async throws -> CommitUploadResponse {
         let request = CommitUploadRequest(
+            backupRunContext: backupRunContext,
             uploadID: uploadID,
             assetLocalID: assetLocalID,
             finalByteSize: finalByteSize,
@@ -86,7 +125,10 @@ public actor BackupClient {
     // MARK: - Helpers
 
     private func post<Req: Encodable, Res: Decodable>(path: String, body: Req) async throws -> Res {
-        let url = receiverBaseURL.appendingPathComponent(path)
+        let sanitizedPath = path.hasPrefix("/") ? path : "/\(path)"
+        guard let url = URL(string: "\(cleanedBaseURLString)\(sanitizedPath)") else {
+            throw URLError(.badURL)
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

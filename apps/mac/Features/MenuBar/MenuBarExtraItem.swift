@@ -86,10 +86,6 @@ struct MenuBarPopoverContent: View {
                 statusRow(icon: "iphone", text: deviceSummary)
             }
 
-            if let uploadSummary = state.uploadSummary {
-                statusRow(icon: "arrow.up.circle", text: uploadSummary)
-            }
-
             if let progressSummary = state.backupProgressSummary {
                 statusRow(icon: "chart.bar.xaxis", text: progressSummary)
             }
@@ -119,6 +115,9 @@ struct MenuBarPopoverContent: View {
             }
             MenuBarActionButton(title: "Reveal Backup Folder", icon: "folder") {
                 state.revealBackupFolder()
+            }
+            MenuBarActionButton(title: "Settings...", icon: "gearshape") {
+                state.openSettings()
             }
             Divider()
             MenuBarActionButton(title: "Quit iCherri", icon: "power", role: .destructive) {
@@ -257,24 +256,19 @@ final class MenuBarState: ObservableObject {
     }
 
     var deviceSummary: String? {
-        if isReceiving {
-            if activeDeviceCount > 1 {
-                return "\(activeDeviceCount) devices connected"
-            }
-            return "Connected: \(connectedDeviceName ?? "iPhone")"
-        }
-
-        guard AppCoordinator.shared.isServerRunning else { return nil }
-        return "Receiver on port \(AppCoordinator.shared.port)"
-    }
-
-    var uploadSummary: String? {
         guard isReceiving else { return nil }
-        return activeUploadCount == 1 ? "1 active upload" : "\(activeUploadCount) active uploads"
+        if activeDeviceCount > 1 {
+            return "\(activeDeviceCount) devices connected"
+        }
+        return "Connected: \(connectedDeviceName ?? "iPhone")"
     }
 
     func openDashboard() {
         NotificationCenter.default.post(name: .openDashboard, object: nil)
+    }
+
+    func openSettings() {
+        WindowManager.shared.showSettings()
     }
 
     func revealBackupFolder() {
@@ -293,25 +287,47 @@ final class MenuBarState: ObservableObject {
             let totalExpected = sessions.reduce(Int64(0)) { $0 + max($1.expectedByteSize, 0) }
             let totalReceived = sessions.reduce(Int64(0)) { $0 + max($1.receivedBytes, 0) }
             let coveredBytesByDevice = (try? await DatabaseManager.shared.fetchCoveredBytesByDevice(deviceIDs: activeDeviceIDs)) ?? [:]
+            
             let coverageSnapshot = await AppCoordinator.shared.backupRunProgressStore.snapshot(
                 activeSessions: sessions,
                 coveredBytesByDeviceID: coveredBytesByDevice
             )
+
+            let coverageSummaries = (try? await DatabaseManager.shared.fetchLatestBackupCoverageSummaries()) ?? []
+
+            var totalAssetCount = 0
+            var completedAssetCount = 0
+            var hasActiveCoverage = false
+
+            for deviceID in activeDeviceIDs {
+                if let summary = coverageSummaries.first(where: { $0.deviceId == deviceID }), summary.totalAssetCount > 0 {
+                    totalAssetCount += summary.totalAssetCount
+                    completedAssetCount += summary.completedAssetCount
+                    hasActiveCoverage = true
+                }
+            }
+
+            let overallProgress: Double
+            let summaryText: String?
+
+            if hasActiveCoverage && totalAssetCount > 0 {
+                overallProgress = min(max(Double(completedAssetCount) / Double(totalAssetCount), 0), 1)
+                summaryText = "\(completedAssetCount) / \(totalAssetCount) files backed up"
+            } else if let snapshot = coverageSnapshot {
+                overallProgress = snapshot.assetFractionCompleted
+                summaryText = "\(snapshot.completedAssetCount) / \(snapshot.totalAssetCount) files backed up"
+            } else {
+                overallProgress = totalExpected > 0 ? min(max(Double(totalReceived) / Double(totalExpected), 0), 1) : 0
+                summaryText = nil
+            }
 
             await MainActor.run {
                 self.activeUploadCount = sessions.count
                 self.activeDeviceCount = activeDeviceIDs.count
                 self.connectedDeviceName = activeDeviceIDs.count == 1 ? deviceNames[activeDeviceIDs[0]] : nil
                 self.isReceiving = !sessions.isEmpty
-
-                if let snapshot = coverageSnapshot {
-                    self.overallBackupProgress = snapshot.fractionCompleted
-                    self.backupProgressSummary = "\(Self.formatBytes(snapshot.completedBytes)) / \(Self.formatBytes(snapshot.totalBytes)) backed up"
-                } else {
-                    let fallbackProgress = totalExpected > 0 ? min(max(Double(totalReceived) / Double(totalExpected), 0), 1) : 0
-                    self.overallBackupProgress = fallbackProgress
-                    self.backupProgressSummary = nil
-                }
+                self.overallBackupProgress = overallProgress
+                self.backupProgressSummary = summaryText
 
                 if self.isReceiving {
                     self.status = .receiving

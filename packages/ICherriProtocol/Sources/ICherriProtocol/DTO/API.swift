@@ -92,7 +92,7 @@ public struct UploadRequirement: Codable, Sendable {
     public let uploadMode: String
     public let preferredChunkSize: Int
 
-    public static let defaultChunkSize = 5 * 1024 * 1024  // 5 MB
+    public static let defaultChunkSize = 20 * 1024 * 1024  // 20 MB
 
     public init(assetLocalID: String, uploadReason: UploadReason, preferredChunkSize: Int = defaultChunkSize) {
         self.assetLocalID = assetLocalID
@@ -107,17 +107,21 @@ public struct CheckBatchResponse: Codable, Sendable {
     public let alreadyBackedUp: [String]
     public let duplicates: [String]
     public let unsupported: [String]
+    /// Mac DB 기준 이미 완료된 파일 수 — iOS 로컬 추정값 대신 이 값을 SSOT로 사용
+    public let completedAssetCount: Int
 
     public init(
         requiredUploads: [UploadRequirement],
         alreadyBackedUp: [String] = [],
         duplicates: [String] = [],
-        unsupported: [String] = []
+        unsupported: [String] = [],
+        completedAssetCount: Int = 0
     ) {
         self.requiredUploads = requiredUploads
         self.alreadyBackedUp = alreadyBackedUp
         self.duplicates = duplicates
         self.unsupported = unsupported
+        self.completedAssetCount = completedAssetCount
     }
 }
 
@@ -163,14 +167,22 @@ public struct UploadAssetRef: Codable, Sendable {
 
 public struct UploadInitRequest: Codable, Sendable {
     public let protocolVersion: ProtocolVersion
+    public let backupRunContext: AutoBackupRunContext?
     public let device: DeviceInfo
     public let asset: AssetMetadata
     public let filename: String
     public let expectedByteSize: Int64
     public let requestedChunkSize: Int
 
-    public init(device: DeviceInfo, asset: AssetMetadata, filename: String, requestedChunkSize: Int = UploadRequirement.defaultChunkSize) {
+    public init(
+        backupRunContext: AutoBackupRunContext? = nil,
+        device: DeviceInfo,
+        asset: AssetMetadata,
+        filename: String,
+        requestedChunkSize: Int = UploadRequirement.defaultChunkSize
+    ) {
         self.protocolVersion = .current
+        self.backupRunContext = backupRunContext
         self.device = device
         self.asset = asset
         self.filename = filename
@@ -231,14 +243,22 @@ public struct UploadStatusResponse: Codable, Sendable {
 
 public struct CommitUploadRequest: Codable, Sendable {
     public let protocolVersion: ProtocolVersion
+    public let backupRunContext: AutoBackupRunContext?
     public let uploadID: String
     public let assetLocalID: String
     public let finalByteSize: Int64
     public let finalContentHash: String
     public let clientFinishedAt: Date
 
-    public init(uploadID: String, assetLocalID: String, finalByteSize: Int64, finalContentHash: String) {
+    public init(
+        backupRunContext: AutoBackupRunContext? = nil,
+        uploadID: String,
+        assetLocalID: String,
+        finalByteSize: Int64,
+        finalContentHash: String
+    ) {
         self.protocolVersion = .current
+        self.backupRunContext = backupRunContext
         self.uploadID = uploadID
         self.assetLocalID = assetLocalID
         self.finalByteSize = finalByteSize

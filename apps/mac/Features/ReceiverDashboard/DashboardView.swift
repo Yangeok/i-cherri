@@ -3,13 +3,17 @@ import AppKit
 import QuickLook
 import QuickLookThumbnailing
 import AVFoundation
+import AVKit
 import CryptoKit
 import ImageIO
 import UniformTypeIdentifiers
 import Darwin
+import CoreLocation
+import MapKit
 import ICherriDesignSystem
 import ICherriProtocol
 import Inject
+import Factory
 
 // macOS receiver dashboard showing paired devices, active sessions, and backup history.
 struct DashboardView: View {
@@ -23,7 +27,18 @@ struct DashboardView: View {
     @State private var hoveredMediaFilter: AssetHistoryMediaFilter?
     @State private var scrubberActiveSectionID: String?
     @State private var scrubberActiveSectionTitle: String?
+    @State private var scrubberHoverSectionTitle: String?
     @State private var scrubberCommitTask: Task<Void, Never>?
+    @State private var selectedDetailAsset: BackupAssetRecord? = nil
+    @State private var magnificationScale: CGFloat = 1.0
+    @State private var isPinching = false
+    @State private var detailScale: CGFloat = 1.0
+    @State private var detailOffset: CGSize = .zero
+    @State private var detailLastOffset: CGSize = .zero
+    @State private var detailShowInfo = false
+    @State private var detailGPSLocation: String? = nil
+    @State private var detailCoordinate: CLLocationCoordinate2D? = nil
+    @State private var isLivePhotoVideoHovering = false
 
     var body: some View {
         NavigationSplitView {
@@ -31,18 +46,18 @@ struct DashboardView: View {
         } detail: {
             detailContent
         }
-        .navigationTitle("iCherri Receiver")
+        .navigationTitle(selectedDetailAsset == nil ? "iCherri Receiver" : "")
         .enableInjection()
         .toolbar { toolbarContent }
-        .task { await viewModel.load() }
+        .task {
+            await viewModel.load()
+            viewModel.startObservation()
+        }
+        .onDisappear {
+            viewModel.stopObservation()
+        }
         .onChange(of: viewModel.selectedDevice) { _, _ in
             Task { await viewModel.loadSelectedDeviceAssets(reset: true) }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .changeBackupFolder)) { _ in
-            viewModel.selectBackupFolder()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .receiverDataDidChange)) { _ in
-            Task { await viewModel.load() }
         }
         .quickLookPreview($previewURL)
         .alert(
@@ -120,11 +135,31 @@ struct DashboardView: View {
     // MARK: - Detail
 
     private var detailContent: some View {
-        Group {
+        ZStack {
+            // Always keep the browser mounted to preserve scroll position
             if let device = viewModel.selectedDeviceInfo {
                 deviceDetailView(device)
             } else {
                 placeholderView
+            }
+
+            // Detail viewer overlays within the detail pane (toolbar stays native)
+            if let asset = selectedDetailAsset {
+                AssetHistoryDetailViewer(
+                    asset: asset,
+                    gpsLocation: $detailGPSLocation,
+                    gpsCoordinate: $detailCoordinate,
+                    onClose: {
+                        closeDetailViewer(from: asset)
+                    },
+                    onPrevious: viewModel.neighborAsset(of: asset, offset: -1).map { previousAsset in
+                        { showDetailAsset(previousAsset) }
+                    },
+                    onNext: viewModel.neighborAsset(of: asset, offset: 1).map { nextAsset in
+                        { showDetailAsset(nextAsset) }
+                    }
+                )
+                .transition(.opacity)
             }
         }
     }
@@ -153,8 +188,6 @@ struct DashboardView: View {
     private func deviceDetailView(_ device: PairedDeviceRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             deviceHeader(device)
-            historySearchBar
-            historyMediaFilterBar
             historyBrowser
         }
         .padding(24)
@@ -163,7 +196,7 @@ struct DashboardView: View {
 
     private func deviceHeader(_ device: PairedDeviceRecord) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.deviceName)
                         .font(.title2.weight(.semibold))
@@ -177,14 +210,33 @@ struct DashboardView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                
                 Spacer()
-                statusPill(device.pairingStatus)
+                
+                // 1) Search bar pushed up
+                historySearchBar
+                    .frame(width: 220)
+                
+                // 2) media filters (All, Photos, Videos) in place of paired badge
+                historyMediaFilterBar
             }
 
             Text(historySummary(for: device))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Text(mediaCountSummary(for: device))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+    }
+
+    private func mediaCountSummary(for device: PairedDeviceRecord) -> String {
+        let usedBytes = viewModel.totalByteSize(for: device.deviceId)
+        let libraryBytes = viewModel.latestCoverageSummary(for: device.deviceId)?.totalAssetBytes ?? 0
+        let usedFormatted = ByteCountFormatter.string(fromByteCount: usedBytes, countStyle: .file)
+        let libraryFormatted = ByteCountFormatter.string(fromByteCount: libraryBytes, countStyle: .file)
+        return "\(usedFormatted) / \(libraryFormatted) in library"
     }
 
     private var historySearchBar: some View {
@@ -196,7 +248,7 @@ struct DashboardView: View {
                     .textFieldStyle(.plain)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .padding(.vertical, 6)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .onChange(of: viewModel.assetSearchQuery) { _, _ in
@@ -205,11 +257,10 @@ struct DashboardView: View {
     }
 
     private var historyMediaFilterBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             ForEach(AssetHistoryMediaFilter.allCases) { filter in
                 mediaFilterChip(filter)
             }
-            Spacer()
         }
     }
 
@@ -225,29 +276,73 @@ struct DashboardView: View {
         }
     }
 
+    private static let minimumGridItemSize: CGFloat = 60
+    private static let gridItemSpacing: CGFloat = 8
+
     private func historyBrowserContent(height: CGFloat, width: CGFloat) -> some View {
         let contentWidth = max(width, 1)
-        let columnCount = viewModel.gridColumnCount
-        let gridColumns = Array(
-            repeating: GridItem(.flexible(), spacing: 8, alignment: .top),
-            count: columnCount
-        )
-        let gridItemSize = (contentWidth - CGFloat(max(columnCount - 1, 0)) * 8) / CGFloat(columnCount)
+        // Don't let a column count picked at full window width (e.g. via pinch-zoom, up to 15)
+        // keep shrinking thumbnails as the window narrows — reduce the effective column count
+        // instead so tiles stay at a usable minimum size. viewModel.gridColumnCount itself is
+        // left untouched, so widening the window again restores the original column count.
+        let maxColumnsForWidth = max(1, Int((contentWidth + Self.gridItemSpacing) / (Self.minimumGridItemSize + Self.gridItemSpacing)))
+        let columnCount = min(viewModel.gridColumnCount, maxColumnsForWidth)
+        let baseGridItemSize = (contentWidth - CGFloat(max(columnCount - 1, 0)) * Self.gridItemSpacing) / CGFloat(columnCount)
+        let gridItemSize = baseGridItemSize * magnificationScale
 
         return ScrollViewReader { scrollProxy in
             ZStack(alignment: .bottom) {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        ForEach(viewModel.visibleAssetSections, id: \.id) { section in
-                            historySectionView(section, gridColumns: gridColumns, gridItemSize: gridItemSize)
+                if viewModel.assetHistoryViewMode == .grid {
+                    ZStack(alignment: .bottom) {
+                        AssetHistoryCollectionView(
+                            sections: viewModel.visibleAssetSections,
+                            gridItemSize: gridItemSize,
+                            onPreview: { asset in previewAsset(asset) },
+                            onOpen: { asset in openAsset(asset) },
+                            onReveal: { asset in revealAsset(asset) },
+                            onLoadMore: { index in
+                                Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
+                            },
+                            isPinching: isPinching,
+                            viewModel: viewModel
+                        )
+                        .gesture(historyGridMagnificationGesture)
+
+                        if viewModel.isLoadingAssetPage {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Loading…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
+                            .padding(.bottom, 110)
+                        }
+                    }
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8, pinnedViews: [.sectionHeaders]) {
+                            ForEach(viewModel.visibleAssetSections, id: \.id) { section in
+                                Section(header: sectionHeaderView(section.title)) {
+                                    ForEach(section.entries) { entry in
+                                        assetHistoryListItem(entry.asset, index: entry.index)
+                                    }
+                                }
+                                .id(section.id)
+                            }
                         }
 
                         historyPaginationFooter
+                            .padding(.vertical, 16)
+                            .padding(.bottom, 96)
                     }
-                    .padding(.bottom, 96)
+                    .scrollContentBackground(.hidden)
+                    .scrollPosition(id: $viewModel.listTopVisibleAssetID, anchor: .top)
                 }
-                .scrollContentBackground(.hidden)
-                .gesture(historyGridMagnificationGesture)
 
                 historyFloatingControls
                     .padding(.bottom, 16)
@@ -262,34 +357,27 @@ struct DashboardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .onChange(of: viewModel.scrollToAssetID) { _, targetID in
+                // Grid mode scrolls itself inside AssetHistoryCollectionView's updateNSView.
+                guard let targetID, viewModel.assetHistoryViewMode != .grid else { return }
+                withAnimation(.easeOut(duration: 0.12)) {
+                    scrollProxy.scrollTo(targetID, anchor: .center)
+                }
+                viewModel.scrollToAssetID = nil
+            }
         }
     }
 
-    private func historySectionView(
-        _ section: AssetHistorySection,
-        gridColumns: [GridItem],
-        gridItemSize: CGFloat
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(section.title)
+    private func sectionHeaderView(_ title: String) -> some View {
+        HStack {
+            Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-
-            if viewModel.assetHistoryViewMode == .grid {
-                LazyVGrid(columns: gridColumns, spacing: 8) {
-                    ForEach(section.entries) { entry in
-                        assetHistoryGridItem(entry.asset, index: entry.index, itemSize: gridItemSize)
-                    }
-                }
-            } else {
-                LazyVStack(spacing: 8) {
-                    ForEach(section.entries) { entry in
-                        assetHistoryListItem(entry.asset, index: entry.index)
-                    }
-                }
-            }
+                .padding(.vertical, 6)
+            Spacer()
         }
-        .id(section.id)
+        .padding(.horizontal, 4)
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
     private var historyPaginationFooter: some View {
@@ -317,19 +405,22 @@ struct DashboardView: View {
         MagnificationGesture()
             .onChanged { value in
                 guard viewModel.assetHistoryViewMode == .grid else { return }
+                isPinching = true
                 let start = gridPinchStartColumns ?? viewModel.gridColumnCount
                 if gridPinchStartColumns == nil {
                     gridPinchStartColumns = start
                 }
-                if let proposed = proposedGridColumnCount(start: start, magnificationValue: value) {
-                    viewModel.gridColumnCount = proposed
-                }
+                magnificationScale = max(0.5, min(value, 2.0))
             }
             .onEnded { value in
                 guard viewModel.assetHistoryViewMode == .grid else { return }
+                isPinching = false
                 let start = gridPinchStartColumns ?? viewModel.gridColumnCount
-                if let proposed = proposedGridColumnCount(start: start, magnificationValue: value) {
+                let proposed = proposedGridColumnCount(start: start, magnificationValue: value) ?? start
+                
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                     viewModel.gridColumnCount = proposed
+                    magnificationScale = 1.0
                 }
                 gridPinchStartColumns = nil
             }
@@ -342,7 +433,7 @@ struct DashboardView: View {
         let proposed = Double(start) / safeValue
         guard proposed.isFinite, !proposed.isNaN else { return nil }
 
-        return min(max(Int(proposed.rounded()), 2), 6)
+        return min(max(Int(proposed.rounded()), 2), 15)
     }
 
     private var historyFloatingControls: some View {
@@ -351,20 +442,22 @@ struct DashboardView: View {
                 historyControlButton(
                     id: "view-list",
                     isSelected: viewModel.assetHistoryViewMode == .list,
-                    action: { viewModel.assetHistoryViewMode = .list }
+                    action: { switchViewMode(to: .list) }
                 ) {
                     Image(systemName: "list.bullet")
                         .frame(width: 30, height: 30)
                 }
+                .keyboardShortcut("1", modifiers: .command)
 
                 historyControlButton(
                     id: "view-grid",
                     isSelected: viewModel.assetHistoryViewMode == .grid,
-                    action: { viewModel.assetHistoryViewMode = .grid }
+                    action: { switchViewMode(to: .grid) }
                 ) {
                     Image(systemName: "square.grid.2x2")
                         .frame(width: 30, height: 30)
                 }
+                .keyboardShortcut("2", modifiers: .command)
             }
 
             Rectangle()
@@ -438,8 +531,8 @@ struct DashboardView: View {
         return Group {
             if sections.count > 1 {
                 HStack(spacing: 10) {
-                    if let scrubberActiveSectionTitle {
-                        Text(scrubberActiveSectionTitle)
+                    if let displayedTitle = scrubberActiveSectionTitle ?? scrubberHoverSectionTitle {
+                        Text(displayedTitle)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.primary)
                             .padding(.horizontal, 10)
@@ -488,12 +581,37 @@ struct DashboardView: View {
                                     }
                                 }
                         )
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let location):
+                                scrubberHoverSectionTitle = scrubberSection(
+                                    forY: location.y,
+                                    trackHeight: scrubberSize.height,
+                                    sections: sections
+                                )?.title
+                            case .ended:
+                                scrubberHoverSectionTitle = nil
+                            }
+                        }
                     }
                     .frame(width: 18, height: scrubberHeight)
                 }
                 .animation(.easeOut(duration: 0.16), value: scrubberActiveSectionTitle)
+                .animation(.easeOut(duration: 0.12), value: scrubberHoverSectionTitle)
             }
         }
+    }
+
+    private func scrubberSection(
+        forY locationY: CGFloat,
+        trackHeight: CGFloat,
+        sections: [AssetHistorySection]
+    ) -> AssetHistorySection? {
+        guard !sections.isEmpty else { return nil }
+        let clampedY = min(max(locationY, 0), max(trackHeight, 1))
+        let progress = clampedY / max(trackHeight, 1)
+        let rawIndex = Int((progress * CGFloat(max(sections.count - 1, 0))).rounded())
+        return sections[min(max(rawIndex, 0), sections.count - 1)]
     }
 
     private func updateScrubberSelection(
@@ -501,12 +619,7 @@ struct DashboardView: View {
         trackHeight: CGFloat,
         sections: [AssetHistorySection]
     ) {
-        guard !sections.isEmpty else { return }
-        let clampedY = min(max(locationY, 0), max(trackHeight, 1))
-        let progress = clampedY / max(trackHeight, 1)
-        let rawIndex = Int((progress * CGFloat(max(sections.count - 1, 0))).rounded())
-        let section = sections[min(max(rawIndex, 0), sections.count - 1)]
-
+        guard let section = scrubberSection(forY: locationY, trackHeight: trackHeight, sections: sections) else { return }
         guard scrubberActiveSectionID != section.id else { return }
 
         scrubberActiveSectionID = section.id
@@ -522,12 +635,20 @@ struct DashboardView: View {
 
         scrubberCommitTask?.cancel()
         scrubberCommitTask = Task {
+            await MainActor.run {
+                if viewModel.assetHistoryViewMode == .grid {
+                    viewModel.scrollToSectionID = targetSectionID
+                }
+            }
+
             await viewModel.ensureSectionVisible(targetSectionID)
             guard !Task.isCancelled else { return }
 
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.12)) {
-                    scrollProxy.scrollTo(targetSectionID, anchor: .top)
+            if viewModel.assetHistoryViewMode != .grid {
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        scrollProxy.scrollTo(targetSectionID, anchor: .top)
+                    }
                 }
             }
         }
@@ -548,14 +669,44 @@ struct DashboardView: View {
 
     private var toolbarContent: some ToolbarContent {
         Group {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: viewModel.selectBackupFolder) {
-                    Label("Change Folder", systemImage: "folder.badge.gear")
+            if let asset = selectedDetailAsset {
+                ToolbarItem(placement: .navigation) {
+                    Button(action: {
+                        closeDetailViewer(from: asset)
+                    }) {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                    .keyboardShortcut(.escape, modifiers: [])
                 }
-            }
-            ToolbarItem {
-                Button(action: { Task { await viewModel.load() } }) {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(asset.creationDate.formatted(date: .abbreviated, time: .shortened))
+                                .font(.headline)
+                            if let gps = detailGPSLocation {
+                                Text("•").font(.headline)
+                                Image(systemName: "mappin.and.ellipse")
+                                    .font(.subheadline)
+                                Text(gps)
+                                    .font(.headline)
+                            }
+                        }
+                        Text(asset.originalFilename)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: viewModel.selectBackupFolder) {
+                        Label("Change Folder", systemImage: "folder.badge.gear")
+                    }
+                }
+                ToolbarItem {
+                    Button(action: { Task { await viewModel.load() } }) {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
                 }
             }
         }
@@ -564,21 +715,48 @@ struct DashboardView: View {
     // MARK: - Helpers
 
     private func deviceRow(_ device: PairedDeviceRecord) -> some View {
-        HStack {
+        let isOnline = Date().timeIntervalSince(device.lastSeenAt) < 30.0
+        let isUploading = viewModel.activeUploads.contains(where: { $0.deviceID == device.deviceId })
+        let summary = viewModel.latestCoverageSummary(for: device.deviceId)
+        
+        let showProgress = isUploading && (summary?.totalAssetCount ?? 0) > 0
+        let completedCount = summary?.completedAssetCount ?? 0
+        let totalCount = summary?.totalAssetCount ?? 1
+        let pct = Int(Double(completedCount) / Double(totalCount) * 100)
+        let statusText = showProgress ? "Uploading... \(completedCount)/\(totalCount) (\(pct)%)" : (isOnline ? "Online" : "Offline")
+        let statusColor: Color = showProgress ? .accentColor : .secondary
+        let circleColor: Color = isOnline ? .green : .gray
+        let iconColor: Color = isOnline ? .green : .secondary
+        let isSelected = viewModel.selectedDevice == device.deviceId
+
+        return HStack {
             Image(systemName: "iphone")
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(device.deviceName)
-                    .font(.subheadline)
-                Text(device.pairingStatus.capitalized)
+                .foregroundStyle(iconColor)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(device.deviceName)
+                        .font(.subheadline)
+                    Circle()
+                        .fill(circleColor)
+                        .frame(width: 6, height: 6)
+                }
+                
+                Text(statusText)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(statusColor)
+                
+                if showProgress {
+                    ProgressView(value: Double(completedCount), total: Double(totalCount))
+                        .progressViewStyle(.linear)
+                        .frame(width: 120)
+                        .tint(.accentColor)
+                }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
         .listRowBackground(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(viewModel.selectedDevice == device.deviceId ? Color.accentColor.opacity(0.14) : .clear)
+                .fill(isSelected ? Color.accentColor.opacity(0.14) : .clear)
         )
     }
 
@@ -645,6 +823,7 @@ struct DashboardView: View {
     private func assetHistoryRow(_ asset: BackupAssetRecord) -> some View {
         HStack(alignment: .top, spacing: 12) {
             AssetHistoryThumbnailView(asset: asset, size: 48)
+                .id(asset.backupId)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top) {
@@ -661,7 +840,18 @@ struct DashboardView: View {
                 }
 
                 HStack(spacing: 14) {
-                    Label(asset.mediaType.capitalized, systemImage: "photo")
+                    if asset.mediaType.lowercased() == "video" {
+                        if let duration = asset.durationSeconds, duration > 0 {
+                            let minutes = Int(duration) / 60
+                            let seconds = Int(duration) % 60
+                            let durationStr = String(format: "%d:%02d", minutes, seconds)
+                            Label("Video (\(durationStr))", systemImage: "video")
+                        } else {
+                            Label("Video", systemImage: "video")
+                        }
+                    } else {
+                        Label(asset.mediaType.capitalized, systemImage: "photo")
+                    }
                     Label(ByteCountFormatter.string(fromByteCount: asset.byteSize, countStyle: .file), systemImage: "externaldrive")
                     Label(asset.creationDate.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
                 }
@@ -695,7 +885,6 @@ struct DashboardView: View {
             ))
             .onAppear {
                 Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
-                Task { await viewModel.prefetchVisibleAssetNeighborhood(around: index, size: 48) }
             }
     }
 
@@ -709,7 +898,6 @@ struct DashboardView: View {
             ))
             .onAppear {
                 Task { await viewModel.loadMoreIfNeeded(currentIndex: index) }
-                Task { await viewModel.prefetchVisibleAssetNeighborhood(around: index, size: itemSize) }
             }
     }
 
@@ -724,7 +912,19 @@ struct DashboardView: View {
 
     private func historySummary(for device: PairedDeviceRecord) -> String {
         if let coverageSummary = viewModel.latestCoverageSummary(for: device.deviceId) {
-            return "\(coverageSummary.completedAssetCount.formatted()) / \(coverageSummary.totalAssetCount.formatted()) in library • \(coverageSummary.pendingAssetCount.formatted()) pending"
+            // completedAssetCount is an all-time cumulative count for this device (it never
+            // shrinks, even if the source photo is later deleted from the phone), while
+            // totalAssetCount is just a snapshot of the library size as of the last backup run —
+            // these are answering different questions and can legitimately diverge either way,
+            // so show them as separate facts instead of an "X / Y" ratio that implies a cap.
+            var parts = [
+                "\(coverageSummary.completedAssetCount.formatted())개 백업됨",
+                "라이브러리 현재 \(coverageSummary.totalAssetCount.formatted())개"
+            ]
+            if coverageSummary.pendingAssetCount > 0 {
+                parts.append("\(coverageSummary.pendingAssetCount.formatted())개 대기 중")
+            }
+            return parts.joined(separator: " • ")
         }
         let backedUp = viewModel.assetCount(for: device.deviceId)
         let duplicates = viewModel.duplicateCount(for: device.deviceId)
@@ -761,11 +961,48 @@ struct DashboardView: View {
     }
 
     private func openAsset(_ asset: BackupAssetRecord) {
-        guard let url = assetFileURL(asset) else {
+        guard assetFileURL(asset) != nil else {
             assetActionError = missingFileMessage(for: asset)
             return
         }
-        NSWorkspace.shared.open(url)
+        showDetailAsset(asset)
+    }
+
+    private func showDetailAsset(_ asset: BackupAssetRecord) {
+        detailGPSLocation = nil
+        detailCoordinate = nil
+        selectedDetailAsset = asset
+    }
+
+    private func closeDetailViewer(from asset: BackupAssetRecord) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            selectedDetailAsset = nil
+            detailGPSLocation = nil
+            detailCoordinate = nil
+        }
+        // Scroll the browser to wherever prev/next navigation left off, rather than
+        // leaving it at the scroll position from before the detail viewer was opened.
+        Task {
+            await viewModel.ensureAssetVisible(asset.backupId)
+            viewModel.scrollToAssetID = asset.backupId
+        }
+    }
+
+    private func switchViewMode(to mode: AssetHistoryViewMode) {
+        guard viewModel.assetHistoryViewMode != mode else { return }
+        let topID = viewModel.topmostVisibleAssetID()
+        viewModel.assetHistoryViewMode = mode
+        guard let topID else { return }
+
+        Task {
+            // .scrollPosition(id:) in list mode can report a pinned section header's id
+            // instead of an individual asset's — fall back to a section-level jump if so.
+            if await viewModel.ensureAssetVisible(topID) {
+                viewModel.scrollToAssetID = topID
+            } else {
+                viewModel.scrollToSectionID = topID
+            }
+        }
     }
 
     private func revealAsset(_ asset: BackupAssetRecord) {
@@ -800,7 +1037,7 @@ private struct AssetHistoryInteractionModifier: ViewModifier {
         content
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .onTapGesture(count: 2) {
-                onPreview()
+                onOpen()
             }
             .contextMenu {
                 Button("Preview") {
@@ -824,9 +1061,15 @@ final class DashboardViewModel: ObservableObject {
     private static let retainedPageRadius = 2
     private static let assetPageLoadThreshold = 30
 
+    @Injected(\.databaseManager) private var databaseManager
+    @Injected(\.appCoordinator) private var appCoordinator
+
+    private var observationTask: Task<Void, Never>?
+    private var timerTask: Task<Void, Never>?
+
     @Published var pairedDevices: [PairedDeviceRecord] = []
     @Published var activeUploads: [DashboardActiveUpload] = []
-    @Published var allAssets: [BackupAssetRecord] = []
+    @Published var deviceStats: [String: DatabaseManager.DeviceBackupStats] = [:]
     @Published var visibleAssets: [BackupAssetRecord] = []
     @Published fileprivate var visibleAssetSections: [AssetHistorySection] = []
     @Published fileprivate var scrubberSections: [AssetHistorySection] = []
@@ -836,6 +1079,8 @@ final class DashboardViewModel: ObservableObject {
     @Published var backupFolderPath: String?
     @Published var assetSearchQuery = ""
     @Published var assetHistoryViewMode: AssetHistoryViewMode = .list
+    @Published fileprivate var listTopVisibleAssetID: String? = nil
+    fileprivate weak var activeGridCollectionView: NSCollectionView?
     @Published var assetHistoryTimeGroupingMode: AssetHistoryTimeGroupingMode = .month {
         didSet {
             rebuildVisibleAssetSections()
@@ -844,6 +1089,8 @@ final class DashboardViewModel: ObservableObject {
     }
     @Published var assetHistoryMediaFilter: AssetHistoryMediaFilter = .all
     @Published var gridColumnCount: Int = 4
+    @Published var scrollToSectionID: String? = nil
+    @Published var scrollToAssetID: String? = nil
 
     private var filteredAssets: [BackupAssetRecord] = []
     private var visibleAssetWindowRange: Range<Int> = 0..<0
@@ -854,18 +1101,27 @@ final class DashboardViewModel: ObservableObject {
         pairedDevices.first { $0.deviceId == selectedDevice }
     }
 
+    func refreshDeviceStatus() async {
+        do {
+            let devices = try await databaseManager.fetchAllDevices()
+            self.pairedDevices = devices
+        } catch {
+            print("Failed to refresh device status: \(error)")
+        }
+    }
+
     func load() async {
         do {
             let previousSelection = selectedDevice
-            self.backupFolderPath = AppCoordinator.shared.backupFolder.path
+            self.backupFolderPath = appCoordinator.backupFolder.path
             
-            let devices = try await DatabaseManager.shared.fetchAllDevices()
-            let assets = try await DatabaseManager.shared.fetchAllAssets()
-            let sessions = try await DatabaseManager.shared.fetchAllSessions()
-            let coverageSummaries = try await DatabaseManager.shared.fetchLatestBackupCoverageSummaries()
+            let devices = try await databaseManager.fetchAllDevices()
+            let stats = try await databaseManager.fetchBackupStatsByDevice()
+            let sessions = try await databaseManager.fetchAllSessions()
+            let coverageSummaries = try await databaseManager.fetchLatestBackupCoverageSummaries()
             
             self.pairedDevices = devices
-            self.allAssets = assets
+            self.deviceStats = stats
             self.latestCoverageSummariesByDevice = Dictionary(
                 uniqueKeysWithValues: coverageSummaries.map { ($0.deviceId, $0) }
             )
@@ -879,14 +1135,19 @@ final class DashboardViewModel: ObservableObject {
                     assetCreatedAt = metadata.creationDate
                 }
 
+                let summary = coverageSummaries.first { $0.deviceId == r.deviceId }
+
                 return DashboardActiveUpload(
                     uploadID: r.uploadId,
+                    deviceID: r.deviceId,
                     filename: filename,
                     deviceName: deviceNames[r.deviceId] ?? r.deviceId,
                     assetCreatedAt: assetCreatedAt,
                     expectedByteSize: r.expectedByteSize,
                     receivedBytes: r.receivedBytes,
-                    status: r.status
+                    status: r.status,
+                    totalAssetCount: summary?.totalAssetCount,
+                    completedAssetCount: summary?.completedAssetCount
                 )
             }
 
@@ -896,11 +1157,13 @@ final class DashboardViewModel: ObservableObject {
                 self.selectedDevice = devices.first?.deviceId
             }
 
-            await loadSelectedDeviceAssets(reset: true)
+            let hasChangedDevice = previousSelection != selectedDevice
+            await loadSelectedDeviceAssets(reset: hasChangedDevice)
         } catch {
             print("[DashboardViewModel] Load failed: \(error)")
         }
     }
+
 
     func loadSelectedDeviceAssets(reset: Bool) async {
         guard let deviceId = selectedDevice else {
@@ -914,17 +1177,34 @@ final class DashboardViewModel: ObservableObject {
             return
         }
 
-        isLoadingAssetPage = true
-        defer { isLoadingAssetPage = false }
+        if reset {
+            isLoadingAssetPage = true
+        }
+        defer {
+            if reset {
+                isLoadingAssetPage = false
+            }
+        }
 
         if reset {
-            filteredAssets = matchingAssetsForSelectedDevice()
+            filteredAssets = await matchingAssetsForSelectedDevice()
             visibleAssetWindowRange = 0..<0
             rebuildScrubberSections()
             scheduleThumbnailBackfillIfNeeded(for: deviceId)
-        }
+            updateVisibleAssetWindow(anchorIndex: 0)
+        } else {
+            filteredAssets = await matchingAssetsForSelectedDevice()
+            rebuildScrubberSections()
 
-        updateVisibleAssetWindow(anchorIndex: reset ? 0 : visibleAssetWindowRange.lowerBound)
+            // Preserve the currently loaded range of assets
+            let currentRange = visibleAssetWindowRange
+            let clampedUpperBound = min(filteredAssets.count, currentRange.upperBound)
+            let newRange = 0..<clampedUpperBound
+            visibleAssetWindowRange = newRange
+            visibleAssets = Array(filteredAssets[newRange])
+            rebuildVisibleAssetSections()
+            hasMoreVisibleAssets = clampedUpperBound < filteredAssets.count
+        }
     }
 
     func loadMoreIfNeeded(currentIndex: Int) async {
@@ -959,26 +1239,51 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func assets(for deviceId: String) -> [BackupAssetRecord] {
-        allAssets.filter { $0.deviceId == deviceId && $0.status == "completed" }
+        []
+    }
+
+    func neighborAsset(of asset: BackupAssetRecord, offset: Int) -> BackupAssetRecord? {
+        guard let currentIndex = filteredAssets.firstIndex(where: { $0.backupId == asset.backupId }) else { return nil }
+        let targetIndex = currentIndex + offset
+        guard filteredAssets.indices.contains(targetIndex) else { return nil }
+        return filteredAssets[targetIndex]
+    }
+
+    /// The asset currently at/near the top of whichever browser (grid or list) is active,
+    /// used to carry scroll position across a list<->grid view mode switch.
+    fileprivate func topmostVisibleAssetID() -> String? {
+        switch assetHistoryViewMode {
+        case .grid:
+            guard let collectionView = activeGridCollectionView,
+                  let indexPath = collectionView.indexPathsForVisibleItems().sorted().first,
+                  indexPath.section < visibleAssetSections.count,
+                  indexPath.item < visibleAssetSections[indexPath.section].entries.count else {
+                return nil
+            }
+            return visibleAssetSections[indexPath.section].entries[indexPath.item].id
+        case .list:
+            return listTopVisibleAssetID
+        }
     }
 
     func assetCount(for deviceId: String) -> Int {
-        allAssets.filter { $0.deviceId == deviceId && $0.status == "completed" }.count
+        deviceStats[deviceId]?.completedCount ?? 0
     }
 
     func duplicateCount(for deviceId: String) -> Int {
-        allAssets.filter { $0.deviceId == deviceId && $0.status == "duplicate" }.count
+        deviceStats[deviceId]?.duplicateCount ?? 0
     }
 
     func failedCount(for deviceId: String) -> Int {
-        allAssets.filter { $0.deviceId == deviceId && $0.status == "failed" }.count
+        deviceStats[deviceId]?.failedCount ?? 0
     }
 
     func lastBackupDate(for deviceId: String) -> Date? {
-        allAssets
-            .filter { $0.deviceId == deviceId && ($0.status == "completed" || $0.status == "duplicate") }
-            .compactMap(\.completedAt)
-            .max()
+        deviceStats[deviceId]?.lastBackupDate
+    }
+
+    func totalByteSize(for deviceId: String) -> Int64 {
+        deviceStats[deviceId]?.totalByteSize ?? 0
     }
 
     func latestCoverageSummary(for deviceId: String) -> BackupRunCoverageSummary? {
@@ -986,7 +1291,7 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func selectBackupFolder() {
-        AppCoordinator.shared.selectBackupFolder()
+        appCoordinator.selectBackupFolder()
         Task {
             await load()
         }
@@ -1026,30 +1331,21 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    private func matchingAssetsForSelectedDevice() -> [BackupAssetRecord] {
+    private func matchingAssetsForSelectedDevice() async -> [BackupAssetRecord] {
         guard let deviceId = selectedDevice else { return [] }
 
-        return allAssets.filter { asset in
-            guard asset.deviceId == deviceId else { return false }
-
-            if let mediaType = assetHistoryMediaFilter.databaseValue,
-               asset.mediaType.caseInsensitiveCompare(mediaType) != .orderedSame {
-                return false
-            }
-
-            let trimmedQuery = assetSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedQuery.isEmpty,
-               asset.originalFilename.range(of: trimmedQuery, options: [.caseInsensitive, .diacriticInsensitive]) == nil {
-                return false
-            }
-
-            return true
-        }
-        .sorted { lhs, rhs in
-            if lhs.creationDate == rhs.creationDate {
-                return lhs.backupId > rhs.backupId
-            }
-            return lhs.creationDate > rhs.creationDate
+        do {
+            return try await databaseManager.fetchAssets(
+                deviceId: deviceId,
+                searchQuery: assetSearchQuery,
+                status: nil, // fetch all statuses (completed, duplicate, failed)
+                mediaType: assetHistoryMediaFilter.databaseValue,
+                limit: 100000, // a high limit to get all matching assets for the scrubber
+                offset: 0
+            )
+        } catch {
+            print("Failed to fetch matching assets: \(error)")
+            return []
         }
     }
 
@@ -1060,6 +1356,16 @@ final class DashboardViewModel: ObservableObject {
         }
 
         updateVisibleAssetWindow(anchorIndex: targetIndex)
+    }
+
+    /// Prev/next navigation in the detail viewer walks the full `filteredAssets` list, which can
+    /// land on an asset outside the currently paginated `visibleAssets` window. Bring that window
+    /// back into range before scrolling to it.
+    @discardableResult
+    func ensureAssetVisible(_ assetID: String) async -> Bool {
+        guard let targetIndex = filteredAssets.firstIndex(where: { $0.backupId == assetID }) else { return false }
+        updateVisibleAssetWindow(anchorIndex: targetIndex)
+        return true
     }
 
     private func updateVisibleAssetWindow(anchorIndex: Int) {
@@ -1079,7 +1385,7 @@ final class DashboardViewModel: ObservableObject {
             lastPage: lastPage,
             radius: Self.retainedPageRadius
         )
-        let lowerBound = pageRange.lowerBound * Self.assetPageSize
+        let lowerBound = 0
         let upperBound = min(filteredAssets.count, (pageRange.upperBound + 1) * Self.assetPageSize)
         let nextRange = lowerBound..<upperBound
 
@@ -1092,6 +1398,17 @@ final class DashboardViewModel: ObservableObject {
         visibleAssets = Array(filteredAssets[nextRange])
         rebuildVisibleAssetSections()
         hasMoreVisibleAssets = upperBound < filteredAssets.count
+
+        // Prefetch thumbnails only for the neighborhood around the anchorIndex (80 items)
+        let lowerBoundPrefetch = max(0, anchorIndex - 20)
+        let upperBoundPrefetch = min(filteredAssets.count - 1, anchorIndex + 60)
+        let assetsToWarm = Array(filteredAssets[lowerBoundPrefetch...upperBoundPrefetch])
+        let columns = gridColumnCount
+        let width: CGFloat = 800
+        let itemSize = columns > 0 ? (width / CGFloat(columns)) : 48
+        Task {
+            await AssetHistoryThumbnailPrefetcher.prefetch(assets: assetsToWarm, size: itemSize)
+        }
     }
 
     private static func buildSections(
@@ -1144,7 +1461,7 @@ final class DashboardViewModel: ObservableObject {
 
     func confirmDeleteDevice(_ device: PairedDeviceRecord) async {
         do {
-            let tempPaths = try await DatabaseManager.shared.deletePairedDevice(deviceId: device.deviceId)
+            let tempPaths = try await databaseManager.deletePairedDevice(deviceId: device.deviceId)
             let keychain = MacKeychainStore()
             try? keychain.deleteTrustToken(for: device.deviceId)
             for path in tempPaths {
@@ -1157,8 +1474,60 @@ final class DashboardViewModel: ObservableObject {
 
             await load()
         } catch {
-            print("[DashboardViewModel] Delete device failed: \(error)")
+            print("Failed to delete device: \(error)")
         }
+    }
+
+    func startObservation() {
+        observationTask?.cancel()
+        observationTask = Task { [weak self] in
+            guard let self else { return }
+            
+            let folderChangeStream = NotificationCenter.default.notifications(named: .changeBackupFolder)
+            let dataChangeStream = NotificationCenter.default.notifications(named: .receiverDataDidChange)
+            
+            Task { [weak self] in
+                for await _ in folderChangeStream {
+                    await self?.selectBackupFolder()
+                }
+            }
+            
+            Task { [weak self] in
+                // .receiverDataDidChange fires on every upload chunk, not just on commit —
+                // during an active backup this can arrive dozens of times per second. Reloading
+                // the full asset grid on every single one caused visible flicker, so coalesce
+                // bursts into at most one reload per ~400ms.
+                var reloadScheduled = false
+                for await _ in dataChangeStream {
+                    guard !reloadScheduled else { continue }
+                    reloadScheduled = true
+                    Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        await self?.load()
+                        reloadScheduled = false
+                    }
+                }
+            }
+        }
+        
+        timerTask?.cancel()
+        timerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds
+                    await self?.refreshDeviceStatus()
+                } catch {
+                    break
+                }
+            }
+        }
+    }
+
+    func stopObservation() {
+        observationTask?.cancel()
+        observationTask = nil
+        timerTask?.cancel()
+        timerTask = nil
     }
 }
 
@@ -1178,7 +1547,12 @@ private struct AssetHistoryThumbnailView: View {
                 .appendingPathComponent(asset.finalPath)
                 .path
         }
-        _loader = StateObject(wrappedValue: AssetHistoryThumbnailLoader(path: resolvedPath, mediaType: asset.mediaType, size: size))
+        _loader = StateObject(wrappedValue: AssetHistoryThumbnailLoader(
+            path: resolvedPath,
+            relativePath: asset.finalPath,
+            mediaType: asset.mediaType,
+            size: size
+        ))
     }
 
     var body: some View {
@@ -1201,12 +1575,12 @@ private struct AssetHistoryThumbnailView: View {
         .overlay(alignment: .bottomTrailing) {
             if let durationLabel {
                 Text(durationLabel)
-                    .font(.caption2.weight(.semibold))
+                    .font(.system(size: size < 60 ? 8 : 10, weight: .bold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(.black.opacity(0.72), in: Capsule())
-                    .padding(6)
+                    .padding(.horizontal, size < 60 ? 3 : 6)
+                    .padding(.vertical, size < 60 ? 1.5 : 3)
+                    .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
+                    .padding(size < 60 ? 2 : 6)
             }
         }
         .task {
@@ -1254,18 +1628,32 @@ private struct AssetHistoryThumbnailView: View {
     }
 }
 
+extension Notification.Name {
+    static let thumbnailDidCache = Notification.Name("thumbnailDidCache")
+}
+
+@MainActor
 private final class AssetHistoryThumbnailLoader: ObservableObject {
     @Published var image: NSImage?
 
     private let path: String
+    private let relativePath: String
     private let mediaType: String
     private let size: CGFloat
     private var hasLoaded = false
+    private var notificationObserver: AnyObject?
 
-    init(path: String, mediaType: String, size: CGFloat) {
+    init(path: String, relativePath: String, mediaType: String, size: CGFloat) {
         self.path = path
+        self.relativePath = relativePath
         self.mediaType = mediaType
         self.size = size
+    }
+
+    deinit {
+        if let observer = notificationObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func loadIfNeeded() async {
@@ -1273,29 +1661,84 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         hasLoaded = true
         guard !path.isEmpty else { return }
 
-        let fileURL = URL(fileURLWithPath: path)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        let backupFolder = AppCoordinator.shared.backupFolder
+        let fileURL = backupFolder.appendingPathComponent(relativePath)
         let displayScale = NSScreen.main?.backingScaleFactor ?? 2
 
-        if let thumbnailData = await AssetHistoryThumbnailCache.shared.thumbnailData(
+        if let nsImage = await AssetHistoryThumbnailCache.shared.thumbnailImage(
             for: fileURL,
             mediaType: mediaType,
             size: size,
-            scale: displayScale
+            scale: displayScale,
+            generateIfAbsent: false
         ) {
-            await MainActor.run {
-                if image == nil {
-                    image = NSImage(data: thumbnailData)
+            self.image = nsImage
+        } else {
+            setupNotificationObserver()
+
+            let relativePath = self.relativePath
+            let mediaType = self.mediaType
+            let size = self.size
+            Task {
+                await AssetHistoryThumbnailPrefetchCoordinator.shared.enqueue(
+                    relativePath: relativePath,
+                    mediaType: mediaType,
+                    workload: .neighborhoodPrefetch,
+                    sizes: [size]
+                )
+            }
+        }
+    }
+
+    private func setupNotificationObserver() {
+        guard notificationObserver == nil else { return }
+
+        notificationObserver = NotificationCenter.default.addObserver(
+            forName: .thumbnailDidCache,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            guard let path = notification.userInfo?["path"] as? String,
+                  let size = notification.userInfo?["size"] as? CGFloat else { return }
+
+            if path == self.path && abs(size - self.size) < 1.0 {
+                if let observer = self.notificationObserver {
+                    NotificationCenter.default.removeObserver(observer)
+                    self.notificationObserver = nil
+                }
+
+                self.hasLoaded = false
+                Task {
+                    await self.loadIfNeeded()
                 }
             }
         }
     }
 
     static func generateThumbnailData(fileURL: URL, mediaType: String, size: CGFloat, scale: CGFloat) async -> Data? {
+        NSLog("iCherri-Thumbnail: generateThumbnailData START for \(fileURL.lastPathComponent) size \(size)")
+        let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
+        let access = backupFolder.startAccessingSecurityScopedResource()
+        defer {
+            if access {
+                backupFolder.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let reachable = (try? fileURL.checkResourceIsReachable()) == true
+        NSLog("iCherri-Thumbnail: checkResourceIsReachable for \(fileURL.lastPathComponent): \(reachable)")
+        guard reachable else {
+            NSLog("iCherri-Thumbnail: File NOT reachable: \(fileURL.path)")
+            return nil
+        }
+
         if let directImage = loadDirectThumbnail(fileURL: fileURL, mediaType: mediaType, size: size) {
+            NSLog("iCherri-Thumbnail: loadDirectThumbnail SUCCESS for \(fileURL.lastPathComponent)")
             return jpegData(from: directImage)
         }
 
+        NSLog("iCherri-Thumbnail: loadDirectThumbnail returned nil, falling back to QLThumbnailGenerator for \(fileURL.lastPathComponent)")
         let request = QLThumbnailGenerator.Request(
             fileAt: fileURL,
             size: CGSize(width: size * 2, height: size * 2),
@@ -1306,39 +1749,45 @@ private final class AssetHistoryThumbnailLoader: ObservableObject {
         do {
             let thumbnail = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
             guard let croppedImage = squareCroppedImage(from: thumbnail.nsImage, size: size) else {
+                NSLog("iCherri-Thumbnail: QL squareCroppedImage returned nil for \(fileURL.lastPathComponent)")
                 return nil
             }
+            NSLog("iCherri-Thumbnail: QL SUCCESS for \(fileURL.lastPathComponent)")
             return jpegData(from: croppedImage)
         } catch {
+            NSLog("iCherri-Thumbnail: QL FAILURE for \(fileURL.lastPathComponent): \(error.localizedDescription)")
             return nil
         }
     }
 
     private static func loadDirectThumbnail(fileURL: URL, mediaType: String, size: CGFloat) -> CGImage? {
         if mediaType.lowercased() == "video" {
-            let asset = AVURLAsset(url: fileURL)
-            let generator = AVAssetImageGenerator(asset: asset)
-            generator.appliesPreferredTrackTransform = true
-            let workloadProfile = AssetHistoryThumbnailWorkloadProfile.current()
-            let targetSize = min(size, workloadProfile.maxVideoPixelSize)
-            generator.maximumSize = CGSize(width: targetSize * 2, height: targetSize * 2)
-
-            do {
-                let frame = try generator.copyCGImage(at: .zero, actualTime: nil)
-                return squareCroppedImage(from: frame, size: size)
-            } catch {
-                return nil
-            }
+            // Let QLThumbnailGenerator handle videos asynchronously out-of-process.
+            return nil
         }
 
         guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
+        
+        // 1. Try to load using ONLY the embedded EXIF thumbnail (fast path!)
+        let fastOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: false,
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: false,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(size * 2)
+        ]
+        
+        if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, fastOptions as CFDictionary) {
+            return squareCroppedImage(from: cgImage, size: size)
+        }
+        
+        // 2. Fallback to full image decode if no embedded thumbnail is present (slow path)
+        let slowOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: Int(size * 2)
         ]
 
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, slowOptions as CFDictionary) else {
             return nil
         }
 
@@ -1437,8 +1886,8 @@ private struct AssetHistoryThumbnailWorkloadProfile {
         if lowSpecHardware || constrainedPower || constrainedThermals {
             return AssetHistoryThumbnailWorkloadProfile(
                 allowsBackgroundBackfill: false,
-                maxConcurrentPhotoPrefetches: 1,
-                maxConcurrentVideoPrefetches: 1,
+                maxConcurrentPhotoPrefetches: 4,
+                maxConcurrentVideoPrefetches: 2,
                 maxVideoPixelSize: 96,
                 committedPhotoSizes: [48, 96, 160],
                 committedVideoSizes: [48, 96],
@@ -1449,8 +1898,8 @@ private struct AssetHistoryThumbnailWorkloadProfile {
 
         return AssetHistoryThumbnailWorkloadProfile(
             allowsBackgroundBackfill: true,
-            maxConcurrentPhotoPrefetches: 2,
-            maxConcurrentVideoPrefetches: 1,
+            maxConcurrentPhotoPrefetches: 12,
+            maxConcurrentVideoPrefetches: 4,
             maxVideoPixelSize: 160,
             committedPhotoSizes: [48, 96, 160, 240],
             committedVideoSizes: [48, 96, 160],
@@ -1513,10 +1962,11 @@ actor AssetHistoryThumbnailCache {
 
     private static let cacheVersion = "v2"
 
-    private let memoryCache = NSCache<NSString, NSData>()
+    private let memoryCache = NSCache<NSString, NSImage>()
     private let fileManager = FileManager.default
     private let diskCacheURL: URL
-    private var inFlightTasks: [String: Task<Data?, Never>] = [:]
+    private var inFlightTasks: [String: (task: Task<(data: Data, isNew: Bool)?, Never>, generateIfAbsent: Bool, id: UInt64)] = [:]
+    private var taskCounter: UInt64 = 0
 
     init() {
         memoryCache.countLimit = 512
@@ -1529,63 +1979,100 @@ actor AssetHistoryThumbnailCache {
         try? fileManager.createDirectory(at: diskCacheURL, withIntermediateDirectories: true, attributes: nil)
     }
 
-    func cachedImageData(for fileURL: URL, size: CGFloat) -> Data? {
+    func cachedImage(for fileURL: URL, size: CGFloat) -> NSImage? {
         guard let cacheKey = cacheKey(for: fileURL, size: size) else { return nil }
         let nsCacheKey = cacheKey as NSString
 
-        if let imageData = memoryCache.object(forKey: nsCacheKey) {
-            return imageData as Data
+        return memoryCache.object(forKey: nsCacheKey)
+    }
+
+    func thumbnailImage(
+        for fileURL: URL,
+        mediaType: String,
+        size: CGFloat,
+        scale: CGFloat,
+        generateIfAbsent: Bool = true
+    ) async -> NSImage? {
+        guard let cacheKey = cacheKey(for: fileURL, size: size) else { return nil }
+        let nsCacheKey = cacheKey as NSString
+
+        if let cached = cachedImage(for: fileURL, size: size) {
+            return cached
         }
 
-        let cachedFileURL = diskCacheURL.appendingPathComponent(cacheKey).appendingPathExtension("jpg")
-        guard let data = try? Data(contentsOf: cachedFileURL, options: [.mappedIfSafe]) else {
+        if let existing = inFlightTasks[cacheKey] {
+            if !generateIfAbsent || existing.generateIfAbsent {
+                if let result = await existing.task.value {
+                    if let image = NSImage(data: result.data) {
+                        memoryCache.setObject(image, forKey: nsCacheKey, cost: estimatedCost(for: size))
+                        return image
+                    }
+                }
+                return nil
+            }
+        }
+
+        let taskId = taskCounter
+        taskCounter += 1
+
+        let diskCacheURL = self.diskCacheURL
+        let task = Task.detached(priority: .utility) { [diskCacheURL] () -> (data: Data, isNew: Bool)? in
+            let cachedFileURL = diskCacheURL.appendingPathComponent(cacheKey).appendingPathExtension("jpg")
+
+            // 1. Try reading from disk cache asynchronously
+            if FileManager.default.fileExists(atPath: cachedFileURL.path) {
+                if let data = try? Data(contentsOf: cachedFileURL, options: [.mappedIfSafe]) {
+                    return (data: data, isNew: false)
+                }
+            }
+
+            // 2. Generate if requested
+            if generateIfAbsent {
+                let generatedData = await AssetHistoryThumbnailLoader.generateThumbnailData(
+                    fileURL: fileURL,
+                    mediaType: mediaType,
+                    size: size,
+                    scale: scale
+                )
+                if let generatedData {
+                    // Store to disk cache asynchronously
+                    try? generatedData.write(to: cachedFileURL, options: .atomic)
+                    return (data: generatedData, isNew: true)
+                }
+            }
             return nil
         }
 
-        memoryCache.setObject(data as NSData, forKey: nsCacheKey, cost: estimatedCost(for: size))
-        return data
-    }
+        inFlightTasks[cacheKey] = (task: task, generateIfAbsent: generateIfAbsent, id: taskId)
 
-    func store(_ data: Data, for fileURL: URL, size: CGFloat) {
-        guard let cacheKey = cacheKey(for: fileURL, size: size) else { return }
-        store(data, cacheKey: cacheKey, size: size)
-    }
+        let result = await task.value
 
-    func thumbnailData(for fileURL: URL, mediaType: String, size: CGFloat, scale: CGFloat) async -> Data? {
-        guard let cacheKey = cacheKey(for: fileURL, size: size) else { return nil }
-
-        if let cachedData = cachedImageData(for: fileURL, size: size) {
-            return cachedData
+        if inFlightTasks[cacheKey]?.id == taskId {
+            inFlightTasks[cacheKey] = nil
         }
 
-        if let existingTask = inFlightTasks[cacheKey] {
-            return await existingTask.value
+        if let result, let image = NSImage(data: result.data) {
+            memoryCache.setObject(image, forKey: nsCacheKey, cost: estimatedCost(for: size))
+
+            if result.isNew {
+                let path = fileURL.path
+                NSLog("iCherri-Thumbnail: Posting thumbnailDidCache for \(fileURL.lastPathComponent) size \(size)")
+                NotificationCenter.default.post(
+                    name: .thumbnailDidCache,
+                    object: nil,
+                    userInfo: ["path": path, "size": size]
+                )
+            }
+            return image
         }
 
-        let task = Task.detached(priority: .utility) {
-            await AssetHistoryThumbnailLoader.generateThumbnailData(
-                fileURL: fileURL,
-                mediaType: mediaType,
-                size: size,
-                scale: scale
-            )
-        }
-        inFlightTasks[cacheKey] = task
-
-        let generatedData = await task.value
-        inFlightTasks[cacheKey] = nil
-
-        if let generatedData {
-            store(generatedData, cacheKey: cacheKey, size: size)
-        }
-
-        return generatedData
+        return nil
     }
 
     private func cacheKey(for fileURL: URL, size: CGFloat) -> String? {
-        let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path)
-        let modificationDate = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let rawKey = "\(Self.cacheVersion)|\(fileURL.path)|\(Int(size.rounded()))|\(modificationDate)"
+        // Backup files are immutable, so path and size are sufficient for the cache key.
+        // This avoids blocking fileManager.attributesOfItem disk calls during scrolling.
+        let rawKey = "\(Self.cacheVersion)|\(fileURL.path)|\(Int(size.rounded()))"
         let digest = SHA256.hash(data: Data(rawKey.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
@@ -1593,56 +2080,49 @@ actor AssetHistoryThumbnailCache {
     private func estimatedCost(for size: CGFloat) -> Int {
         Int(size * size * 4)
     }
-
-    private func store(_ data: Data, cacheKey: String, size: CGFloat) {
-        let nsCacheKey = cacheKey as NSString
-        memoryCache.setObject(data as NSData, forKey: nsCacheKey, cost: estimatedCost(for: size))
-
-        let cachedFileURL = diskCacheURL.appendingPathComponent(cacheKey).appendingPathExtension("jpg")
-        try? data.write(to: cachedFileURL, options: .atomic)
-    }
 }
 
 actor AssetHistoryThumbnailPrefetchCoordinator {
     static let shared = AssetHistoryThumbnailPrefetchCoordinator()
 
     private struct Request: Hashable {
-        let path: String
+        let relativePath: String
         let mediaType: String
         let size: Int
         let workload: AssetHistoryThumbnailWorkloadKind
     }
 
-    private var queuedRequests: [Request] = []
+    private var queuedPhotoRequests: [Request] = []
+    private var queuedVideoRequests: [Request] = []
     private var queuedRequestSet: Set<Request> = []
     private var activePhotoWorkerCount = 0
     private var activeVideoWorkerCount = 0
 
     fileprivate func enqueue(relativePath: String, mediaType: String, workload: AssetHistoryThumbnailWorkloadKind, sizes: [CGFloat]) async {
-        guard let fileURL = await AssetHistoryThumbnailPrefetcher.resolvedFileURL(for: relativePath) else { return }
-        enqueue(fileURL: fileURL, mediaType: mediaType, workload: workload, sizes: sizes)
+        let profile = AssetHistoryThumbnailWorkloadProfile.current()
+        let requests = profile.sizes(for: mediaType, workload: workload, requestedSizes: sizes).map {
+            Request(
+                relativePath: relativePath,
+                mediaType: mediaType,
+                size: max(Int($0.rounded()), 1),
+                workload: workload
+            )
+        }
+        enqueue(requests)
     }
 
     fileprivate func enqueue(assets: [BackupAssetRecord], workload: AssetHistoryThumbnailWorkloadKind, sizes: [CGFloat]) async {
         guard !assets.isEmpty else { return }
 
-        let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
         let profile = AssetHistoryThumbnailWorkloadProfile.current()
         var requests: [Request] = []
         requests.reserveCapacity(assets.count * sizes.count)
 
         for asset in assets {
-            guard let resolvedPath = AssetHistoryThumbnailPrefetcher.resolvedPath(
-                for: asset.finalPath,
-                backupFolder: backupFolder
-            ) else {
-                continue
-            }
-
             for size in profile.sizes(for: asset.mediaType, workload: workload, requestedSizes: sizes) {
                 requests.append(
                     Request(
-                        path: resolvedPath,
+                        relativePath: asset.finalPath,
                         mediaType: asset.mediaType,
                         size: max(Int(size.rounded()), 1),
                         workload: workload
@@ -1654,25 +2134,41 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
         enqueue(requests)
     }
 
-    private func enqueue(fileURL: URL, mediaType: String, workload: AssetHistoryThumbnailWorkloadKind, sizes: [CGFloat]) {
-        let profile = AssetHistoryThumbnailWorkloadProfile.current()
-        let requests = profile.sizes(for: mediaType, workload: workload, requestedSizes: sizes).map {
-            Request(
-                path: fileURL.path,
-                mediaType: mediaType,
-                size: max(Int($0.rounded()), 1),
-                workload: workload
-            )
-        }
-        enqueue(requests)
-    }
-
     private func enqueue(_ requests: [Request]) {
         guard !requests.isEmpty else { return }
 
-        for request in requests where !queuedRequestSet.contains(request) {
-            queuedRequests.append(request)
-            queuedRequestSet.insert(request)
+        for request in requests {
+            let isVideo = request.mediaType.caseInsensitiveCompare("video") == .orderedSame
+            if queuedRequestSet.contains(request) {
+                if request.workload != .backgroundBackfill {
+                    if isVideo {
+                        if let existingIndex = queuedVideoRequests.firstIndex(of: request) {
+                            queuedVideoRequests.remove(at: existingIndex)
+                            queuedVideoRequests.insert(request, at: 0)
+                        }
+                    } else {
+                        if let existingIndex = queuedPhotoRequests.firstIndex(of: request) {
+                            queuedPhotoRequests.remove(at: existingIndex)
+                            queuedPhotoRequests.insert(request, at: 0)
+                        }
+                    }
+                }
+            } else {
+                queuedRequestSet.insert(request)
+                if isVideo {
+                    if request.workload == .backgroundBackfill {
+                        queuedVideoRequests.append(request)
+                    } else {
+                        queuedVideoRequests.insert(request, at: 0)
+                    }
+                } else {
+                    if request.workload == .backgroundBackfill {
+                        queuedPhotoRequests.append(request)
+                    } else {
+                        queuedPhotoRequests.insert(request, at: 0)
+                    }
+                }
+            }
         }
 
         spawnWorkersIfNeeded()
@@ -1681,8 +2177,11 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
     private func spawnWorkersIfNeeded() {
         while let request = reserveNextRequest() {
             Task.detached(priority: .utility) {
+                let backupFolder = await MainActor.run { AppCoordinator.shared.backupFolder }
+                let fileURL = backupFolder.appendingPathComponent(request.relativePath)
+
                 await AssetHistoryThumbnailPrefetcher.prefetch(
-                    fileURL: URL(fileURLWithPath: request.path),
+                    fileURL: fileURL,
                     mediaType: request.mediaType,
                     size: CGFloat(request.size)
                 )
@@ -1692,22 +2191,19 @@ actor AssetHistoryThumbnailPrefetchCoordinator {
     }
 
     private func reserveNextRequest() -> Request? {
-        guard !queuedRequests.isEmpty else { return nil }
-
         let profile = AssetHistoryThumbnailWorkloadProfile.current()
 
-        for (index, request) in queuedRequests.enumerated() {
-            let isVideo = request.mediaType.caseInsensitiveCompare("video") == .orderedSame
-            if isVideo {
-                guard activeVideoWorkerCount < profile.maxConcurrentVideoPrefetches else { continue }
-                activeVideoWorkerCount += 1
-            } else {
-                guard activePhotoWorkerCount < profile.maxConcurrentPhotoPrefetches else { continue }
-                activePhotoWorkerCount += 1
-            }
-
-            queuedRequests.remove(at: index)
+        if activeVideoWorkerCount < profile.maxConcurrentVideoPrefetches, !queuedVideoRequests.isEmpty {
+            let request = queuedVideoRequests.removeFirst()
             queuedRequestSet.remove(request)
+            activeVideoWorkerCount += 1
+            return request
+        }
+
+        if activePhotoWorkerCount < profile.maxConcurrentPhotoPrefetches, !queuedPhotoRequests.isEmpty {
+            let request = queuedPhotoRequests.removeFirst()
+            queuedRequestSet.remove(request)
+            activePhotoWorkerCount += 1
             return request
         }
 
@@ -1760,7 +2256,7 @@ enum AssetHistoryThumbnailPrefetcher {
 
     static func prefetch(fileURL: URL, mediaType: String, size: CGFloat) async {
         let displayScale = NSScreen.main?.backingScaleFactor ?? 2
-        _ = await AssetHistoryThumbnailCache.shared.thumbnailData(
+        _ = await AssetHistoryThumbnailCache.shared.thumbnailImage(
             for: fileURL,
             mediaType: mediaType,
             size: size,
@@ -1860,10 +2356,14 @@ private struct AssetHistoryEntry: Identifiable {
     var id: String { asset.backupId }
 }
 
-private struct AssetHistorySection: Identifiable {
+private struct AssetHistorySection: Identifiable, Equatable {
     let id: String
     let title: String
     var entries: [AssetHistoryEntry]
+
+    static func == (lhs: AssetHistorySection, rhs: AssetHistorySection) -> Bool {
+        lhs.id == rhs.id && lhs.title == rhs.title && lhs.entries.map(\.id) == rhs.entries.map(\.id)
+    }
 }
 
 private struct AssetHistorySectionKey: Hashable {
@@ -1894,12 +2394,15 @@ struct AssetHistoryWindowPlanner {
 
 struct DashboardActiveUpload: Identifiable {
     let uploadID: String
+    let deviceID: String
     let filename: String
     let deviceName: String
     let assetCreatedAt: Date?
     let expectedByteSize: Int64
     let receivedBytes: Int64
     let status: String
+    let totalAssetCount: Int?
+    let completedAssetCount: Int?
 
     var id: String { uploadID }
 
@@ -1907,10 +2410,1058 @@ struct DashboardActiveUpload: Identifiable {
         let createdLabel = assetCreatedAt?.formatted(date: .abbreviated, time: .omitted) ?? "Unknown date"
         let receivedLabel = ByteCountFormatter.string(fromByteCount: receivedBytes, countStyle: .file)
         let totalLabel = ByteCountFormatter.string(fromByteCount: expectedByteSize, countStyle: .file)
-        return "\(createdLabel) · \(deviceName) · \(receivedLabel) / \(totalLabel) · sess \(shortUploadID)"
+        
+        var progressLabel = ""
+        if let completed = completedAssetCount, let total = totalAssetCount, total > 0 {
+            let pct = Int(Double(completed) / Double(total) * 100)
+            progressLabel = " · \(completed)/\(total) (\(pct)%)"
+        }
+        
+        return "\(createdLabel) · \(deviceName)\(progressLabel) · \(receivedLabel) / \(totalLabel) · sess \(shortUploadID)"
     }
 
     private var shortUploadID: String {
         String(uploadID.prefix(6)).uppercased()
+    }
+}
+
+// MARK: - AppKit Collection View Wrapper
+fileprivate struct AssetHistoryCollectionView: NSViewRepresentable {
+    fileprivate let sections: [AssetHistorySection]
+    let gridItemSize: CGFloat
+    let onPreview: (BackupAssetRecord) -> Void
+    let onOpen: (BackupAssetRecord) -> Void
+    let onReveal: (BackupAssetRecord) -> Void
+    let onLoadMore: (Int) -> Void
+    let isPinching: Bool
+    @ObservedObject var viewModel: DashboardViewModel
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+
+        let layout = NSCollectionViewFlowLayout()
+        layout.minimumLineSpacing = 8
+        layout.minimumInteritemSpacing = 8
+        layout.sectionHeadersPinToVisibleBounds = true
+
+        let collectionView = NSCollectionView()
+        collectionView.collectionViewLayout = layout
+        collectionView.isSelectable = true
+        collectionView.backgroundColors = [.clear]
+        collectionView.dataSource = context.coordinator
+        collectionView.delegate = context.coordinator
+
+        // Register custom item and header
+        collectionView.register(
+            AssetHistoryCollectionViewItem.self,
+            forItemWithIdentifier: NSUserInterfaceItemIdentifier("AssetItem")
+        )
+        collectionView.register(
+            AssetHistoryCollectionViewHeader.self,
+            forSupplementaryViewOfKind: NSCollectionView.elementKindSectionHeader,
+            withIdentifier: NSUserInterfaceItemIdentifier("SectionHeader")
+        )
+
+        scrollView.documentView = collectionView
+        context.coordinator.collectionView = collectionView
+        viewModel.activeGridCollectionView = collectionView
+
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        context.coordinator.update(
+            sections: sections,
+            gridItemSize: gridItemSize,
+            onPreview: onPreview,
+            onOpen: onOpen,
+            onReveal: onReveal,
+            onLoadMore: onLoadMore,
+            isJumpingToSection: viewModel.scrollToSectionID != nil,
+            isPinching: isPinching
+        )
+
+        if let targetID = viewModel.scrollToSectionID {
+            context.coordinator.scrollToSection(id: targetID)
+            DispatchQueue.main.async {
+                viewModel.scrollToSectionID = nil
+            }
+        }
+
+        if let targetAssetID = viewModel.scrollToAssetID {
+            context.coordinator.scrollToAsset(id: targetAssetID)
+            DispatchQueue.main.async {
+                viewModel.scrollToAssetID = nil
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+    class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate, NSCollectionViewDelegateFlowLayout {
+        fileprivate var sections: [AssetHistorySection] = []
+        var gridItemSize: CGFloat = 180
+        var onPreview: ((BackupAssetRecord) -> Void)?
+        var onOpen: ((BackupAssetRecord) -> Void)?
+        var onReveal: ((BackupAssetRecord) -> Void)?
+        var onLoadMore: ((Int) -> Void)?
+        weak var collectionView: NSCollectionView?
+        
+        private var lockedAnchorIndexPath: IndexPath?
+        private var anchorResetWorkItem: DispatchWorkItem?
+
+        fileprivate func update(
+            sections: [AssetHistorySection],
+            gridItemSize: CGFloat,
+            onPreview: @escaping (BackupAssetRecord) -> Void,
+            onOpen: @escaping (BackupAssetRecord) -> Void,
+            onReveal: @escaping (BackupAssetRecord) -> Void,
+            onLoadMore: @escaping (Int) -> Void,
+            isJumpingToSection: Bool,
+            isPinching: Bool
+        ) {
+            let sectionsChanged = self.sections != sections
+            let sizeChanged = self.gridItemSize != gridItemSize
+
+            self.sections = sections
+            self.onPreview = onPreview
+            self.onOpen = onOpen
+            self.onReveal = onReveal
+            self.onLoadMore = onLoadMore
+            
+            if sectionsChanged {
+                let isSameDataset = !self.sections.isEmpty && !sections.isEmpty &&
+                                    self.sections[0].entries.first?.id == sections[0].entries.first?.id
+                let anchorPath = (isSameDataset && !isJumpingToSection) ? collectionView?.indexPathsForVisibleItems().sorted().first : nil
+
+                self.gridItemSize = gridItemSize
+                collectionView?.reloadData()
+
+                if let anchorPath = anchorPath,
+                   anchorPath.section < sections.count,
+                   anchorPath.item < sections[anchorPath.section].entries.count {
+                    collectionView?.layoutSubtreeIfNeeded()
+                    collectionView?.scrollToItems(at: [anchorPath], scrollPosition: .top)
+                }
+            } else if sizeChanged {
+                self.gridItemSize = gridItemSize
+                
+                // Track top-most visible item index path before reflow, lock it during continuous resize/pinch
+                if lockedAnchorIndexPath == nil {
+                    lockedAnchorIndexPath = collectionView?.indexPathsForVisibleItems().sorted().first
+                }
+                
+                if isPinching {
+                    // During a live pinch this runs on every gesture delta (many times per second).
+                    // Only mark the layout dirty here — AppKit coalesces the actual relayout with its
+                    // normal display cycle. Forcing layoutSubtreeIfNeeded()+scrollToItems synchronously
+                    // on every tick (as the settle path below does) was the main source of stutter,
+                    // since each one forces a full, immediate flow-layout pass off the display cycle.
+                    collectionView?.collectionViewLayout?.invalidateLayout()
+                } else {
+                    NSAnimationContext.runAnimationGroup { context in
+                        context.duration = 0.3
+                        context.allowsImplicitAnimation = true
+                        collectionView?.collectionViewLayout?.invalidateLayout()
+                    }
+
+                    if let anchorPath = lockedAnchorIndexPath {
+                        // Force immediate layout reflow so scrollToItems uses correct updated positions
+                        collectionView?.layoutSubtreeIfNeeded()
+                        collectionView?.scrollToItems(at: [anchorPath], scrollPosition: .top)
+                    }
+                }
+
+                // Debounce resetting the locked anchor (e.g. 0.3 seconds after resizing/pinching stops)
+                anchorResetWorkItem?.cancel()
+                let workItem = DispatchWorkItem { [weak self] in
+                    self?.lockedAnchorIndexPath = nil
+                }
+                anchorResetWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
+            }
+        }
+
+        fileprivate func scrollToSection(id: String) {
+            guard let collectionView = collectionView,
+                  let sectionIndex = sections.firstIndex(where: { $0.id == id }) else { return }
+            
+            let itemCount = sections[sectionIndex].entries.count
+            guard itemCount > 0 else { return }
+            let indexPath = IndexPath(item: 0, section: sectionIndex)
+            
+            collectionView.layoutSubtreeIfNeeded()
+            
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                context.allowsImplicitAnimation = true
+                collectionView.animator().scrollToItems(at: [indexPath], scrollPosition: .top)
+            }
+        }
+
+        fileprivate func scrollToAsset(id: String) {
+            guard let collectionView = collectionView else { return }
+            for (sectionIndex, section) in sections.enumerated() {
+                guard let itemIndex = section.entries.firstIndex(where: { $0.id == id }) else { continue }
+                let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+
+                collectionView.layoutSubtreeIfNeeded()
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.2
+                    context.allowsImplicitAnimation = true
+                    collectionView.animator().scrollToItems(at: [indexPath], scrollPosition: .centeredVertically)
+                }
+                return
+            }
+        }
+
+        func numberOfSections(in collectionView: NSCollectionView) -> Int {
+            sections.count
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
+            sections[section].entries.count
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            itemForRepresentedObjectAt indexPath: IndexPath
+        ) -> NSCollectionViewItem {
+            let item = collectionView.makeItem(
+                withIdentifier: NSUserInterfaceItemIdentifier("AssetItem"),
+                for: indexPath
+            ) as! AssetHistoryCollectionViewItem
+
+            let entry = sections[indexPath.section].entries[indexPath.item]
+            
+            item.configure(
+                asset: entry.asset,
+                size: gridItemSize,
+                onPreview: onPreview,
+                onOpen: onOpen,
+                onReveal: onReveal
+            )
+
+            // Trigger load more near the bottom
+            if let onLoadMore = onLoadMore {
+                var absIndex = 0
+                for s in 0..<indexPath.section {
+                    absIndex += sections[s].entries.count
+                }
+                absIndex += indexPath.item
+                onLoadMore(absIndex)
+            }
+
+            return item
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            viewForSupplementaryElementOfKind kind: String,
+            at indexPath: IndexPath
+        ) -> NSView {
+            if kind == NSCollectionView.elementKindSectionHeader {
+                let header = collectionView.makeSupplementaryView(
+                    ofKind: kind,
+                    withIdentifier: NSUserInterfaceItemIdentifier("SectionHeader"),
+                    for: indexPath
+                ) as! AssetHistoryCollectionViewHeader
+                
+                let title = sections[indexPath.section].title
+                header.configure(title: title)
+                return header
+            }
+            return NSView()
+        }
+
+        // Layout delegate
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            layout collectionViewLayout: NSCollectionViewLayout,
+            sizeForItemAt indexPath: IndexPath
+        ) -> NSSize {
+            NSSize(width: gridItemSize, height: gridItemSize)
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            layout collectionViewLayout: NSCollectionViewLayout,
+            referenceSizeForHeaderInSection section: Int
+        ) -> NSSize {
+            NSSize(width: 0, height: 32)
+        }
+    }
+}
+
+// Custom CollectionView Cell Item
+class AssetHistoryCollectionViewItem: NSCollectionViewItem {
+    private var hostingView: NSHostingView<AssetHistoryCollectionViewCellWrapper>?
+    private var currentAsset: BackupAssetRecord?
+    private var imageLoadTask: Task<Void, Never>?
+
+    override func loadView() {
+        self.view = NSView()
+        self.view.wantsLayer = true
+    }
+
+    deinit {
+        cleanup()
+    }
+
+    private func cleanup() {
+        imageLoadTask?.cancel()
+        imageLoadTask = nil
+    }
+
+    static func bucketedSize(for size: CGFloat) -> CGFloat {
+        if size <= 80 {
+            return 80
+        } else if size <= 160 {
+            return 160
+        } else if size <= 240 {
+            return 240
+        } else if size <= 320 {
+            return 320
+        } else {
+            return (size / 80.0).rounded(.up) * 80.0
+        }
+    }
+
+    func configure(
+        asset: BackupAssetRecord,
+        size: CGFloat,
+        onPreview: ((BackupAssetRecord) -> Void)?,
+        onOpen: ((BackupAssetRecord) -> Void)?,
+        onReveal: ((BackupAssetRecord) -> Void)?
+    ) {
+        if currentAsset?.backupId == asset.backupId {
+            return
+        }
+
+        cleanup()
+        self.currentAsset = asset
+
+        // 1. Show placeholder initially
+        updateContent(image: nil, size: size, onPreview: onPreview, onOpen: onOpen, onReveal: onReveal)
+
+        // 2. Resolve paths
+        let resolvedPath: String
+        if (asset.finalPath as NSString).isAbsolutePath {
+            resolvedPath = asset.finalPath
+        } else {
+            resolvedPath = AppCoordinator.shared.backupFolder
+                .appendingPathComponent(asset.finalPath)
+                .path
+        }
+        let fileURL = URL(fileURLWithPath: resolvedPath)
+        let mediaType = asset.mediaType
+        let displayScale = self.view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let bucketed = Self.bucketedSize(for: size)
+
+        // 3. Load/Generate thumbnail immediately in real-time!
+        imageLoadTask = Task { @MainActor in
+            if let nsImage = await AssetHistoryThumbnailCache.shared.thumbnailImage(
+                for: fileURL,
+                mediaType: mediaType,
+                size: bucketed,
+                scale: displayScale,
+                generateIfAbsent: true // <-- Generate immediately in background!
+            ) {
+                guard self.currentAsset?.backupId == asset.backupId else { return }
+                self.updateContent(image: nsImage, size: size, onPreview: onPreview, onOpen: onOpen, onReveal: onReveal)
+            }
+        }
+    }
+
+    private func updateContent(
+        image: NSImage?,
+        size: CGFloat,
+        onPreview: ((BackupAssetRecord) -> Void)?,
+        onOpen: ((BackupAssetRecord) -> Void)?,
+        onReveal: ((BackupAssetRecord) -> Void)?
+    ) {
+        guard let asset = currentAsset else { return }
+        
+        let cellView = AssetHistoryCollectionViewCellContent(
+            asset: asset,
+            image: image,
+            size: size
+        )
+        
+        let cellWrapper = AssetHistoryCollectionViewCellWrapper(
+            content: cellView,
+            asset: asset,
+            onPreview: onPreview,
+            onOpen: onOpen,
+            onReveal: onReveal
+        )
+
+        if let hosting = hostingView {
+            hosting.rootView = cellWrapper
+        } else {
+            let hosting = NSHostingView(rootView: cellWrapper)
+            hosting.translatesAutoresizingMaskIntoConstraints = false
+            self.view.addSubview(hosting)
+            
+            NSLayoutConstraint.activate([
+                hosting.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
+                hosting.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
+                hosting.topAnchor.constraint(equalTo: self.view.topAnchor),
+                hosting.bottomAnchor.constraint(equalTo: self.view.bottomAnchor)
+            ])
+            self.hostingView = hosting
+        }
+    }
+}
+
+// Custom CollectionView Section Header
+class AssetHistoryCollectionViewHeader: NSView {
+    private var hostingView: NSHostingView<AnyView>?
+
+    func configure(title: String) {
+        let headerView = HStack {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 6)
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .background(Color(NSColor.windowBackgroundColor))
+        
+        let anyView = AnyView(headerView)
+
+        if let hosting = hostingView {
+            hosting.rootView = anyView
+        } else {
+            let hosting = NSHostingView(rootView: anyView)
+            hosting.translatesAutoresizingMaskIntoConstraints = false
+            self.addSubview(hosting)
+            
+            NSLayoutConstraint.activate([
+                hosting.leadingAnchor.constraint(equalTo: self.leadingAnchor),
+                hosting.trailingAnchor.constraint(equalTo: self.trailingAnchor),
+                hosting.topAnchor.constraint(equalTo: self.topAnchor),
+                hosting.bottomAnchor.constraint(equalTo: self.bottomAnchor)
+            ])
+            self.hostingView = hosting
+        }
+    }
+    
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        self.wantsLayer = true
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        self.wantsLayer = true
+    }
+}
+
+// Cell Wrapper View
+struct AssetHistoryCollectionViewCellWrapper: View {
+    let content: AssetHistoryCollectionViewCellContent
+    let asset: BackupAssetRecord
+    let onPreview: ((BackupAssetRecord) -> Void)?
+    let onOpen: ((BackupAssetRecord) -> Void)?
+    let onReveal: ((BackupAssetRecord) -> Void)?
+
+    var body: some View {
+        content
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .onTapGesture(count: 2) {
+                onOpen?(asset)
+            }
+            .contextMenu {
+                Button("Preview") {
+                    onPreview?(asset)
+                }
+                Button("Open") {
+                    onOpen?(asset)
+                }
+                Button("Reveal in Finder") {
+                    onReveal?(asset)
+                }
+            }
+    }
+}
+
+struct AssetHistoryCollectionViewCellContent: View {
+    let asset: BackupAssetRecord
+    let image: NSImage?
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let image = image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(color.opacity(0.12))
+                    Image(systemName: iconName)
+                        .foregroundStyle(color)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(alignment: .bottomTrailing) {
+            if let durationLabel {
+                Text(durationLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.black.opacity(0.72), in: Capsule())
+                    .padding(6)
+            }
+        }
+    }
+
+    private var iconName: String {
+        switch asset.mediaType.lowercased() {
+        case "video":
+            return "video.fill"
+        default:
+            return "photo.fill"
+        }
+    }
+
+    private var color: Color {
+        switch asset.status {
+        case "completed":
+            return .green
+        case "duplicate":
+            return .orange
+        case "failed":
+            return .red
+        default:
+            return .blue
+        }
+    }
+
+    private var durationLabel: String? {
+        guard let duration = asset.durationSeconds, duration > 0 else { return nil }
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+fileprivate struct AssetHistoryDetailViewer: View {
+    let asset: BackupAssetRecord
+    @Binding var gpsLocation: String?
+    @Binding var gpsCoordinate: CLLocationCoordinate2D?
+    let onClose: () -> Void
+    let onPrevious: (() -> Void)?
+    let onNext: (() -> Void)?
+
+    @State private var scale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+    @State private var showInfo = false
+    @State private var isLivePhotoVideoHovering = false
+    @State private var loadedImage: NSImage?
+    @State private var imageLoadFailed = false
+    @GestureState private var pinchScale: CGFloat = 1.0
+    @FocusState private var isFocused: Bool
+
+    private var fileURL: URL? {
+        guard !asset.finalPath.isEmpty else { return nil }
+        if (asset.finalPath as NSString).isAbsolutePath {
+            return URL(fileURLWithPath: asset.finalPath)
+        } else {
+            return AppCoordinator.shared.backupFolder.appendingPathComponent(asset.finalPath)
+        }
+    }
+
+    private var isVideo: Bool {
+        asset.mediaType.lowercased() == "video"
+    }
+
+    // AVPlayerView paints its own opaque black matte over any letterbox area, which hides the
+    // shared dimmed background no matter what we set the view's own layer color to. Sizing the
+    // player to the asset's real aspect ratio (same as the photo path's .scaledToFit()) removes
+    // the letterbox area entirely instead of fighting AVKit's internal chrome for it.
+    private var videoAspectRatio: CGFloat? {
+        guard asset.pixelWidth > 0, asset.pixelHeight > 0 else { return nil }
+        return CGFloat(asset.pixelWidth) / CGFloat(asset.pixelHeight)
+    }
+
+    private var livePhotoVideoURL: URL? {
+        guard !isVideo, let fileURL = fileURL else { return nil }
+        let videoURL = fileURL.deletingPathExtension().appendingPathExtension("mov")
+        if FileManager.default.fileExists(atPath: videoURL.path) {
+            return videoURL
+        }
+        let mp4URL = fileURL.deletingPathExtension().appendingPathExtension("mp4")
+        if FileManager.default.fileExists(atPath: mp4URL.path) {
+            return mp4URL
+        }
+        return nil
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // Dimmed background — tap to go back
+                Color.black.opacity(0.85)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        onClose()
+                    }
+
+                // Content area
+                if let fileURL = fileURL {
+                    ZStack {
+                        if isVideo {
+                            NativeVideoPlayerView(url: fileURL, autoPlay: true, showControls: true)
+                                .aspectRatio(videoAspectRatio, contentMode: .fit)
+                                .transition(.identity)
+                        } else if let liveVideoURL = livePhotoVideoURL, isLivePhotoVideoHovering {
+                            NativeVideoPlayerView(url: liveVideoURL, autoPlay: true, showControls: false)
+                                .aspectRatio(videoAspectRatio, contentMode: .fit)
+                                .transition(.identity)
+                        } else {
+                            // .identity avoids a cross-fade with the video branch above — without it,
+                            // switching between a video and a photo could momentarily render both the
+                            // outgoing AVPlayerView (with its own translucent controls scrim) and the
+                            // incoming content on top of the shared 0.85-opacity dimmed background,
+                            // making the dimming look like it's stacking/darkening on every switch.
+                            Group {
+                            if let nsImage = loadedImage {
+                                Image(nsImage: nsImage)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .scaleEffect(scale * pinchScale)
+                                    .offset(offset)
+                                    // pinchScale is a live @GestureState value that already tracks the
+                                    // trackpad 1:1 every frame — layering a spring .animation(value:) on
+                                    // top of it made the scale continuously chase a moving target instead
+                                    // of tracking it directly, which read as laggy/delayed zooming.
+                                    .gesture(
+                                        MagnificationGesture()
+                                            .updating($pinchScale) { value, state, _ in
+                                                state = value
+                                            }
+                                            .onEnded { value in
+                                                let newScale = min(max(scale * value, 1.0), 4.0)
+                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                                    scale = newScale
+                                                    if scale == 1.0 { offset = .zero; lastOffset = .zero }
+                                                }
+                                            }
+                                    )
+                                    .simultaneousGesture(
+                                        DragGesture()
+                                            .onChanged { value in
+                                                if scale > 1.0 {
+                                                    offset = CGSize(
+                                                        width: lastOffset.width + value.translation.width,
+                                                        height: lastOffset.height + value.translation.height
+                                                    )
+                                                }
+                                            }
+                                            .onEnded { _ in
+                                                lastOffset = offset
+                                            }
+                                    )
+                            } else if imageLoadFailed {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .font(.largeTitle)
+                                        .foregroundStyle(.red)
+                                    Text("Failed to load image")
+                                        .font(.headline)
+                                        .foregroundStyle(.white)
+                                }
+                            } else {
+                                ProgressView()
+                                    .controlSize(.large)
+                            }
+                            }
+                            .transition(.identity)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .allowsHitTesting(true)
+                    .onHover { hovering in
+                        if livePhotoVideoURL != nil {
+                            isLivePhotoVideoHovering = hovering
+                        }
+                    }
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "questionmark.folder")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text("File not found")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                    }
+                }
+
+                // Previous / Next navigation chevrons
+                HStack {
+                    navigationChevron(systemName: "chevron.left", action: onPrevious)
+                        .padding(.leading, 20)
+                    Spacer()
+                    navigationChevron(systemName: "chevron.right", action: onNext)
+                        .padding(.trailing, 20)
+                }
+
+                // Info Panel Overlay (trailing slide-in)
+                if showInfo {
+                    HStack {
+                        Spacer()
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Text("Asset Info")
+                                    .font(.title3.bold())
+                                Spacer()
+                                Button(action: {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                        showInfo = false
+                                    }
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.title3)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+
+                            Divider()
+
+                            // Map (GPS가 있을 때만)
+                            if let coord = gpsCoordinate {
+                                MapPinView(coordinate: coord)
+                                    .frame(height: 160)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+
+                            Group {
+                                InfoRow(label: "Filename", value: asset.originalFilename)
+                                InfoRow(label: "Size", value: ByteCountFormatter.string(fromByteCount: asset.byteSize, countStyle: .file))
+                                InfoRow(label: "Dimensions", value: "\(asset.pixelWidth) x \(asset.pixelHeight)")
+                                InfoRow(label: "Created", value: asset.creationDate.formatted(date: .long, time: .standard))
+                                if let gps = gpsLocation {
+                                    InfoRow(label: "Location", value: gps)
+                                }
+                                InfoRow(label: "Media Type", value: asset.mediaType.uppercased())
+                                InfoRow(label: "Status", value: asset.status.capitalized)
+                                InfoRow(label: "Local ID", value: asset.assetLocalId)
+                                InfoRow(label: "Device ID", value: asset.deviceId)
+                            }
+
+                            Spacer()
+                        }
+                        .padding(20)
+                        .frame(width: 320)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .shadow(color: .black.opacity(0.4), radius: 15, y: 5)
+                        .transition(.move(edge: .trailing))
+                        .padding(12)
+                    }
+                }
+            }
+        }
+        .toolbar {
+            if !isVideo {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: {
+                        scale = max(1.0, scale - 0.25)
+                        if scale == 1.0 { offset = .zero; lastOffset = .zero }
+                    }) {
+                        Image(systemName: "magnifyingglass.minus")
+                    }
+                    .disabled(scale <= 1.0)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: { scale = min(4.0, scale + 0.25) }) {
+                        Image(systemName: "magnifyingglass.plus")
+                    }
+                    .disabled(scale >= 4.0)
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        showInfo.toggle()
+                    }
+                }) {
+                    Image(systemName: showInfo ? "info.circle.fill" : "info.circle")
+                }
+            }
+        }
+        .task(id: asset.backupId) {
+            // Reset per-asset transient state without tearing down the view (would drop keyboard focus)
+            scale = 1.0
+            offset = .zero
+            lastOffset = .zero
+            isLivePhotoVideoHovering = false
+            loadedImage = nil
+            imageLoadFailed = false
+            gpsLocation = nil
+            gpsCoordinate = nil
+
+            guard let fileURL else { return }
+
+            if !isVideo {
+                let image = await Task.detached(priority: .userInitiated) {
+                    NSImage(contentsOf: fileURL)
+                }.value
+                if Task.isCancelled { return }
+                if let image {
+                    loadedImage = image
+                } else {
+                    imageLoadFailed = true
+                }
+            }
+
+            let location = await extractLocation(from: fileURL, isVideo: isVideo)
+            if Task.isCancelled { return }
+            self.gpsLocation = location
+        }
+        .onAppear {
+            isFocused = true
+        }
+        .focusable()
+        .focused($isFocused)
+        .onKeyPress(.leftArrow) {
+            guard let onPrevious else { return .ignored }
+            onPrevious()
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            guard let onNext else { return .ignored }
+            onNext()
+            return .handled
+        }
+    }
+
+    @ViewBuilder
+    private func navigationChevron(systemName: String, action: (() -> Void)?) -> some View {
+        Button(action: { action?() }) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.35), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .opacity(action == nil ? 0 : 1)
+        .disabled(action == nil)
+    }
+
+    private func extractLocation(from url: URL, isVideo: Bool) async -> String? {
+        // Step 1: Extract raw GPS coordinates
+        var finalCoordinate: CLLocationCoordinate2D? = nil
+
+        if isVideo {
+            let avAsset = AVAsset(url: url)
+            if let metadata = try? await avAsset.load(.metadata) {
+                for item in metadata where item.commonKey == .commonKeyLocation {
+                    if let str = try? await item.load(.stringValue) {
+                        // ISO 6709: ±DD.DDDD±DDD.DDDD/
+                        let scanner = Scanner(string: str)
+                        if let lat = scanner.scanDouble(), let lon = scanner.scanDouble() {
+                            finalCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                        }
+                    }
+                }
+            }
+        } else {
+            finalCoordinate = await Task.detached(priority: .userInitiated) {
+                guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
+                      let props = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any],
+                      let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+                      let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
+                      let latRef = gps[kCGImagePropertyGPSLatitudeRef] as? String,
+                      let lon = gps[kCGImagePropertyGPSLongitude] as? Double,
+                      let lonRef = gps[kCGImagePropertyGPSLongitudeRef] as? String
+                else { return nil }
+                let signedLat = latRef == "S" ? -lat : lat
+                let signedLon = lonRef == "W" ? -lon : lon
+                return CLLocationCoordinate2D(latitude: signedLat, longitude: signedLon)
+            }.value
+        }
+
+        guard let coord = finalCoordinate, CLLocationCoordinate2DIsValid(coord) else { return nil }
+
+        // coordinate를 부모에게 올려줌 (맵 표시용)
+        await MainActor.run { gpsCoordinate = coord }
+
+        // Step 2: Reverse geocode to human-readable address (shared, cached, and serialized —
+        // avoids firing one concurrent CLGeocoder request per photo while arrow-key browsing,
+        // which was hitting Apple's rate limit and silently falling back to raw coordinates)
+        return await ReverseGeocodeCache.shared.resolve(coord)
+    }
+}
+
+/// Serializes and caches reverse-geocode lookups by rounded coordinate. CLGeocoder only
+/// supports one in-flight request per instance and is rate-limited; rapid asset navigation
+/// used to fire a fresh CLGeocoder() per photo, which frequently failed and fell back to
+/// showing raw coordinates. Routing every lookup through this actor keeps requests to one
+/// at a time and reuses results for nearby photos taken at the same place.
+actor ReverseGeocodeCache {
+    static let shared = ReverseGeocodeCache()
+
+    private let geocoder = CLGeocoder()
+    private var cache: [String: String?] = [:]
+
+    private func cacheKey(for coordinate: CLLocationCoordinate2D) -> String {
+        String(format: "%.3f,%.3f", coordinate.latitude, coordinate.longitude)
+    }
+
+    func resolve(_ coordinate: CLLocationCoordinate2D) async -> String? {
+        let key = cacheKey(for: coordinate)
+        if let cached = cache[key] {
+            return cached
+        }
+
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let resolved: String? = await withCheckedContinuation { continuation in
+            geocoder.reverseGeocodeLocation(location, preferredLocale: Locale(identifier: "ko_KR")) { placemarks, error in
+                if let error {
+                    NSLog("iCherri-Geocode: reverseGeocode failed for \(key): \(error.localizedDescription)")
+                }
+                guard let p = placemarks?.first else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                // 가장 구체적인 필드 하나 + "근처"
+                // subLocality(동) > locality(시) > subAdministrativeArea(구) > administrativeArea(도/시)
+                let specific = p.subLocality
+                    ?? p.locality
+                    ?? p.subAdministrativeArea
+                    ?? p.administrativeArea
+                if let s = specific, !s.isEmpty {
+                    continuation.resume(returning: "\(s) 근처")
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+
+        cache[key] = resolved
+        return resolved
+    }
+}
+
+
+fileprivate struct InfoRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+fileprivate struct NativeVideoPlayerView: NSViewRepresentable {
+    let url: URL
+    let autoPlay: Bool
+    let showControls: Bool
+
+    final class Coordinator {
+        var loadedURL: URL?
+        var endTimeObserver: NSObjectProtocol?
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let playerView = AVPlayerView()
+        playerView.controlsStyle = showControls ? .floating : .none
+        playerView.videoGravity = .resizeAspect
+        // AVPlayerView otherwise letterboxes with an opaque black matte, which fully hides the
+        // shared dimmed background (Color.black.opacity(0.85)) that photos let show through.
+        playerView.wantsLayer = true
+        playerView.layer?.backgroundColor = .clear
+        loadPlayer(into: playerView, context: context)
+        return playerView
+    }
+
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        // AVPlayerView isn't recreated when navigating between assets (the SwiftUI view identity
+        // stays the same so keyboard focus survives) — only the `url` input changes, so swap the
+        // player here or prev/next navigation would keep playing the previous video.
+        guard context.coordinator.loadedURL != url else { return }
+        loadPlayer(into: nsView, context: context)
+    }
+
+    private func loadPlayer(into playerView: AVPlayerView, context: Context) {
+        if let observer = context.coordinator.endTimeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            context.coordinator.endTimeObserver = nil
+        }
+
+        let player = AVPlayer(url: url)
+        playerView.player = player
+        context.coordinator.loadedURL = url
+
+        // Loop video for live photos (when controls are hidden)
+        if !showControls {
+            context.coordinator.endTimeObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: player.currentItem,
+                queue: .main
+            ) { [weak player] _ in
+                player?.seek(to: .zero)
+                player?.play()
+            }
+        }
+
+        if autoPlay {
+            player.play()
+        }
+    }
+}
+
+fileprivate struct MapPinView: NSViewRepresentable {
+    let coordinate: CLLocationCoordinate2D
+
+    func makeNSView(context: Context) -> MKMapView {
+        let mapView = MKMapView()
+        mapView.isZoomEnabled = false
+        mapView.isScrollEnabled = false
+        mapView.isPitchEnabled = false
+        mapView.isRotateEnabled = false
+        mapView.showsCompass = false
+        mapView.showsZoomControls = false
+        return mapView
+    }
+
+    func updateNSView(_ mapView: MKMapView, context: Context) {
+        mapView.removeAnnotations(mapView.annotations)
+        let region = MKCoordinateRegion(
+            center: coordinate,
+            latitudinalMeters: 800,
+            longitudinalMeters: 800
+        )
+        mapView.setRegion(region, animated: false)
+        let pin = MKPointAnnotation()
+        pin.coordinate = coordinate
+        mapView.addAnnotation(pin)
     }
 }
